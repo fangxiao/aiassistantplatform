@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+out/
+.npm
+.pnpm-store/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# ECC managed install (reproducible; see CLAUDE.md)
+# 只入库 .claude/settings.json(命令白名单),其余 ECC 托管文件(agents/commands/
+# skills/rules/hooks/ecc/scripts/mcp-configs 等)本地生成、不入库。
+.claude/*
+!.claude/settings.json
