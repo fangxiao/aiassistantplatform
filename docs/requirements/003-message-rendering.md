@@ -12,6 +12,7 @@
 - v1.0(2026-08-12):初稿。锁定 7 种展示类 renderer + 14 种交互控件最小集;明确消息信封协议与回传语义;定义容器型与嵌套规则;明确安全降级与 i18n 基线。
 - v1.0(2026-08-12 同日补):新增 §F-MR-9 UI 扩展性边界(只支持 renderer 挂件);F-MR-8.5 引用 ADR 0001 命名空间规则。
 - v1.0(2026-08-12 评审通过):定稿,无进一步修改。
+- v1.0.1(2026-08-12):新增 `mermaid` renderer(展示类 7→8,总数 21→22);F-MR-8 补 mermaid XSS 防护条目(securityLevel strict)。
 
 ---
 
@@ -20,7 +21,7 @@
 ### 1.1 背景
 001 §F3.2 承诺"插件可定义对话中的富交互组件(文本框、复选框、按钮)",但未定义协议细节。001 §8.2 明确把"组件 schema、渲染、回传"留待设计阶段。
 
-本文档填补该缺口:把"消息该怎么渲染"从 WebUI 硬编码中解耦,改为**由插件通过 `platform.sdk` 声明 renderer**。同时把 v1.2 中仅"3 种基础类型"的范围扩展为**21 种 renderer 的明确清单**,并对每种给出数据 schema 与回传语义。
+本文档填补该缺口:把"消息该怎么渲染"从 WebUI 硬编码中解耦,改为**由插件通过 `platform.sdk` 声明 renderer**。同时把 v1.2 中仅"3 种基础类型"的范围扩展为**22 种 renderer 的明确清单**,并对每种给出数据 schema 与回传语义。
 
 ### 1.2 目标
 - **解耦**:WebUI 端只维护 renderer registry 调度层,不实现具体渲染逻辑
@@ -84,7 +85,7 @@
 - F-MR-1.5 `meta.id` 用于交互回传时定位 block;`meta.group` 用于将多个 block 标记为同一逻辑单元
 - F-MR-1.6 兼容模式:旧消息仅有 `content: string` 时,前端按 `{type: "markdown", data: {text: content}}` 渲染(向后兼容,不留历史分支)
 
-### F-MR-2 展示类 Renderer(7 种,MVP 必交付)
+### F-MR-2 展示类 Renderer(8 种,MVP 必交付)
 
 | type | data schema | 关键交互 | 说明 |
 |------|-------------|----------|------|
@@ -95,6 +96,7 @@
 | `card` | `{title?: string, body_blocks?: ContentBlock[], actions?: ContentBlock[]}` | 容器 | 见 F-MR-5 容器型规则 |
 | `collapsible` | `{summary: string, content_blocks: ContentBlock[], default_open?: bool}` | 展开/折叠 | 容器,默认折叠 |
 | `table` | `{columns: [{key, label}], rows: Array<Record<key, any>>, page_size?: number}` | 排序(列点击)、分页(可选) | 简单表格,不做公式 |
+| `mermaid` | `{source: string, theme?: string, caption?: string}` | 渲染为图;可下载 / 复制源码 | XSS 防护见 F-MR-8.7 |
 
 > `text` 不单独作为 renderer;`markdown` 即其实现,空文本走 `markdown` 渲染空字符串。
 
@@ -177,6 +179,7 @@
 - F-MR-8.4 文件下载经后端鉴权 + mime 白名单(默认 `text/*` `image/*` `application/pdf` 可预览,其他仅下载)
 - F-MR-8.5 renderer 名称空间:平台内置无前缀,插件带 `<plugin_id>.<renderer_name>` 前缀(详见 [ADR 0001](../adr/0001-namespace.md))
 - F-MR-8.6 i18n 基线:`markdown` / `button` / 控件 label 字段支持 i18n key(`i18n:<key>`),未识别 key 原样展示;MVP 不强求所有插件走 i18n
+- F-MR-8.7 `mermaid` 渲染必须 `securityLevel: strict`(mermaid.js 有已知 XSS 风险),渲染前 `source` 经 sanitize;解析失败降级为源码 code 块,不报错
 
 ### F-MR-9 UI 扩展性边界(新增)
 
@@ -191,11 +194,11 @@
 
 ## 5. 非功能需求
 
-- **性能**:1000 条消息、混合 21 种 renderer、首屏 P95 < 2s(本地压测);单 block 渲染 < 16ms
+- **性能**:1000 条消息、混合 22 种 renderer、首屏 P95 < 2s(本地压测);单 block 渲染 < 16ms
 - **可观测**:每次交互回传记结构化日志 `{session_id, plugin_id, action, block_type, latency_ms, status}`;未知 renderer 走 warn 级
 - **可测试**:每个 renderer 必须有 1)schema 单元测试 2)渲染快照测试 3)交互回传端到端测试
 - **版本兼容**:renderer schema 演进走 semver;老 WebUI 遇到新 schema 字段不报错(忽略未知字段)
-- **前端体积**:21 种内置 renderer 打包后增量 < 200KB gzipped
+- **前端体积**:22 种内置 renderer 打包后增量 < 200KB gzipped
 
 ---
 
@@ -260,7 +263,7 @@ export const registry = new Map<string, Renderer>([
 
 ### 7.1 v1.3 范围
 - F-MR-1 至 F-MR-8 全部条目
-- 21 种 renderer 全部交付(包括内置实现 + 降级 + 安全)
+- 22 种 renderer 全部交付(包括内置实现 + 降级 + 安全)
 - 1 个参考插件(内置 `weather` demo)演示:markdown + table + button + form 组合
 - 文档:插件开发者"如何注册 renderer"教程;WebUI 维护者"如何新增内置 renderer"指南
 
@@ -282,7 +285,7 @@ export const registry = new Map<string, Renderer>([
 - ✅ 把"消息渲染"从 WebUI 硬编码解耦,改为插件可声明 renderer
 - ✅ 消息信封:统一 `Message = {role, blocks[]}`,role 沿用 OpenAI 风格
 - ✅ renderer 名称空间:反向 DNS 风格,平台内置无前缀,插件带 `<plugin_id>.` 前缀
-- ✅ 21 种 renderer 最小集(7 展示 + 14 交互;含 3 轻反馈)
+- ✅ 22 种 renderer 最小集(8 展示 + 14 交互;含 3 轻反馈)
 - ✅ 容器型(card / collapsible / form)纳入 003 v1.0;嵌套深度上限 3 层
 - ✅ 未知 / 错误 renderer 走降级(不崩溃、有告警)
 - ✅ 交互回传路径:WebUI → 后端 → 插件 handler → 续 block 列表

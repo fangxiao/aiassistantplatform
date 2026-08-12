@@ -10,12 +10,13 @@
 ## 变更记录
 - **v2.0(2026-08-12):基于需求 003 重写**。覆盖 21 种 renderer / 消息信封 `{role, blocks[]}` / 容器型与嵌套 / 未知 renderer 降级 / 交互回传路径 / 安全。**旧版"render_component 伪 tool"机制废弃**。
 - v0.1(2026-08-11):初版草案,仅覆盖 5 种组件 + 伪 tool_call 机制。
+- **v2.0.1(2026-08-12):新增 `mermaid` renderer(展示类 7→8,总数 21→22);§5 补 mermaid.js 选型;§10.5 补 mermaid XSS 安全。**
 
 ---
 
 ## 1. 设计目标
 
-把需求 003 锁定的 21 种 renderer 落到可实现的技术方案:
+把需求 003 锁定的 22 种 renderer 落到可实现的技术方案:
 
 1. **消息信封替代伪 tool**:`Message = {role, blocks[]}` 成为消息的天然结构,LLM 不再需要 `render_component` 伪 tool——平台后端在流式输出时,把内部事件流转换为 ContentBlock 列表
 2. **前端 registry 调度**:WebUI 维护内置 renderer registry,插件可动态注入自定义 renderer(对齐 ADR 0001 命名空间)
@@ -28,7 +29,7 @@
 | 需求条款 | 本设计章节 |
 |----------|------------|
 | F-MR-1 消息信封协议 | §3 消息信封 |
-| F-MR-2 展示类(7) | §5 展示类 renderer |
+| F-MR-2 展示类(8) | §5 展示类 renderer |
 | F-MR-3 交互控件(14) | §6 交互控件 |
 | F-MR-4 渲染规则 | §4 渲染调度 |
 | F-MR-5 容器型与嵌套 | §7 容器型 |
@@ -162,7 +163,7 @@ class RendererRegistry {
 }
 
 export const registry = new RendererRegistry();
-// 21 种内置 renderer 全部 register(见 §5 / §6)
+// 22 种内置 renderer 全部 register(见 §5 / §6)
 ```
 
 ### 4.2 块级渲染器(BlockRenderer)
@@ -207,7 +208,7 @@ function CardRenderer({ data, meta, onInteract }) {
 
 ---
 
-## 5. 展示类 Renderer(7 种,实现要点)
+## 5. 展示类 Renderer(8 种,实现要点)
 
 | type | 关键依赖 / 库 | props 要点 | 边界 |
 |------|---------------|-----------|------|
@@ -218,11 +219,13 @@ function CardRenderer({ data, meta, onInteract }) {
 | `card` | 自实现 + 递归 BlockRenderer | `data.title?`, `data.body_blocks[]`, `data.actions[]` | actions 只允许 action.* 与 input.confirm |
 | `collapsible` | 自实现 + 状态管理 | `data.summary`, `data.content_blocks[]`, `data.default_open?` | 不可含交互控件 |
 | `table` | 自实现 + 简单排序 | `data.columns[]`, `data.rows[]`, `data.page_size?` | 列点击排序;不分页可走 page_size 客户端 |
+| `mermaid` | `mermaid.js`(securityLevel strict)+ 自实现下载 | `data.source`, `data.theme?`, `data.caption?` | 解析失败降级显示源码 code 块(§10.5) |
 
 **库选型理由**:
 - `react-markdown`:React 原生,组件化,生态最大
 - `rehype-sanitize`:与 DOMPurify 等价的 markdown sanitization 库
 - `prismjs`:轻量,主题多,bundle 可控
+- `mermaid.js`:图渲染(flowchart / sequenceDiagram / gantt / pie / erDiagram 等);必须 `securityLevel: strict` 初始化(§10.5)
 - (备选)Shiki:VS Code 同款,质量更高但 bundle 大
 
 ---
@@ -485,6 +488,13 @@ Response(4xx):
 
 `markdown` / `button` label 字段支持 i18n key:`i18n:<key>` → 走前端 i18n 库;未识别 key 原样展示。MVP 不强求所有插件走 i18n。
 
+### 10.5 mermaid 安全
+
+- `mermaid.js` 有已知 XSS 风险(10.x 早期版本),必须 `securityLevel: 'strict'` 初始化
+- 渲染前 `data.source` 经 sanitize,不渲染用户原始 HTML 标签 / 脚本
+- 解析失败 / 非法图 → 降级为源码 code 块展示,不报错(对齐 §8 降级策略)
+- `mermaid` renderer 与 `code` renderer 的"复制源码"共用剪贴板逻辑
+
 ---
 
 ## 11. UI 扩展性边界
@@ -509,9 +519,9 @@ Response(4xx):
 | 指标 | 目标 | 测量方式 |
 |------|------|----------|
 | 单 block 渲染 | < 16ms | React Profiler |
-| 1000 条消息混合 21 种 renderer 首屏 | P95 < 2s | Lighthouse / 自定义 perf trace |
+| 1000 条消息混合 22 种 renderer 首屏 | P95 < 2s | Lighthouse / 自定义 perf trace |
 | 流式首字延迟 | 取决于 LLM 端点 | SSE `token` 事件时间 |
-| 21 种内置 renderer 增量 bundle | < 200KB gzipped | webpack-bundle-analyzer |
+| 22 种内置 renderer 增量 bundle | < 200KB gzipped | webpack-bundle-analyzer |
 
 ### 12.2 性能策略
 
@@ -627,7 +637,7 @@ ALTER TABLE messages ADD COLUMN blocks jsonb;  -- 新格式(优先)
 ### 15.1 已确认(本 v2.0 锁定)
 - ✅ 消息信封 `Message = {role, blocks[]}` 替代旧版 `content: string`
 - ✅ 旧版 `render_component` 伪 tool_call 机制**废弃**,由后端 `output_block` 拦截层取代
-- ✅ 21 种 renderer 最小集(7 展示 + 14 交互;含 3 轻反馈)
+- ✅ 22 种 renderer 最小集(8 展示 + 14 交互;含 3 轻反馈)
 - ✅ 命名空间:平台内置无前缀,插件带 `plugin_id.`,详见 ADR 0001
 - ✅ 容器型(card / collapsible / form)深度上限 3 层
 - ✅ 未知 / 错误 renderer 走降级,连续 3 次告警
