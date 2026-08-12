@@ -15,9 +15,9 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  前端 WebUI(Next.js)                                    │
-│  对话页 · 助手市场 · 开发者管理台 · 富交互组件渲染器        │
+│  对话页 · 助手市场 · 开发者管理台 · 消息渲染器(21 种)      │
 └────────────────────────┬────────────────────────────────┘
-                         │ HTTP / SSE
+                         │ SSE(消息流) / HTTP POST(交互回传)
 ┌────────────────────────▼────────────────────────────────┐
 │  API 层(FastAPI)                                         │
 │  认证 · 对话 · 助手 · 插件管理 · skill/tool 注册 · 会话历史  │
@@ -67,7 +67,7 @@
 | `platform/core/skill` | skill 执行器:加载 skill 行为、参数化执行(可能为子 agent) |
 | `platform/core/session` | 会话与上下文管理、历史持久化 |
 | `platform/core/auth` | 账号密码认证、JWT、角色授权 |
-| `platform/core/ui` | 富交互组件协议:组件 schema 定义、解析、回传 |
+| `platform/core/message` | 消息信封(ContentBlock)转换层、流式分块、嵌套校验、降级 |
 | `platform/sdk` | 插件开发 SDK(供独立仓库引用) |
 | `platform/cli` | 部署 CLI(init/validate/dev/deploy/logs) |
 
@@ -75,9 +75,10 @@
 | 模块 | 职责 |
 |------|------|
 | `web/app` | Next.js App Router 页面:对话、市场、管理台、登录 |
-| `web/components/chat` | 通用对话 UI、消息流、流式渲染 |
-| `web/components/interactive` | 富交互组件渲染器(按 schema 渲染) |
-| `web/lib/api` | API 客户端、SSE 处理 |
+| `web/components/chat` | 通用对话 UI、消息流、SSE 流式渲染 |
+| `web/components/renderers` | 21 种内置 renderer 组件 + 插件自定义 renderer 注入点 |
+| `web/lib/registry` | Renderer Registry、命名空间校验、降级组件 |
+| `web/lib/api` | API 客户端、SSE 处理、交互回传 |
 
 ### 2.3 插件仓库结构(示例,独立仓库)
 ```
@@ -94,7 +95,8 @@ my-assistant/
 | 决策 | 选择 | 状态 |
 |------|------|------|
 | skill/tool 模型 | 模型 C:function-calling 扩展,声明依赖 + agent 显式调用 | ✅ |
-| 富交互组件 | 声明 + 动态实例化 | ✅ |
+| 消息信封 | `Message = {role, blocks[]}`,ContentBlock 是渲染单元 | ✅(详见 003 v2.0) |
+| 富交互组件 | 21 种 renderer + 插件声明 + 块级挂件(ADR 0001 命名空间) | ✅ |
 | 多模型路由 | MVP 助手指定单一模型 | ✅ |
 | 数据库 | PostgreSQL + Redis | ✅ |
 | 部署 | docker-compose 单机起步 | ✅ |
@@ -114,8 +116,8 @@ my-assistant/
        - tool 调用 -> tool 执行器 -> 结果回填
        - skill 调用 -> skill 执行器(参数化执行/子 agent)-> 结果回填
      -> 再推理
-  -> 若 LLM 输出组件实例化 -> 前端渲染组件
-  -> 用户与组件交互 -> 回传 agent -> 继续对话
+  -> 若 LLM 输出 block 元信息(`output_block` tool_call) -> 后端拦截转 SSE `block_meta` -> 前端按 renderer registry 渲染
+  -> 用户与交互控件交互 -> POST /blocks/{bid}/interact -> 插件 handler -> 续 block 列表
 ```
 
 ### 4.2 插件部署流
@@ -144,7 +146,7 @@ my-assistant/
 
 ## 6. 后续子设计文档
 - `002-skill-tool-model.md` -- skill/tool 模型:注册表、依赖声明、显式调用协议、组合性、来源权限【第一特色核心】
-- `003-ui-components.md` -- 富交互组件协议:组件 schema、渲染、回传
+- `003-ui-components.md` -- 消息渲染设计(v2.0):消息信封、21 种 renderer、容器嵌套、降级、交互回传、安全(对应需求 003)
 - `004-data-model.md` -- 数据模型与 ER 设计
 - `005-api-design.md` -- API 接口设计
 - `006-plugin-spec.md` -- 插件规范:清单、SDK、CLI 协议

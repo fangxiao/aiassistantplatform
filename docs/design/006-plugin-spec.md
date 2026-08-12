@@ -13,7 +13,9 @@ my-assistant/
 ├── plugin.yaml          # 清单
 ├── skills/              # 自有 skill 定义(Python)
 ├── tools/               # 自有 tool 实现(Python)
-├── ui/                  # (可选)自定义前端组件
+├── renderers/           # (可选)自定义前端 renderer 包(构建产物)
+│   └── dist/            #   构建后的 JS bundle,被 WebUI 动态 import
+├── renderer-src/        # (可选)renderer 源码(React/TS),构建到 renderers/dist
 └── pyproject.toml       # 依赖:platform.sdk
 ```
 
@@ -32,11 +34,13 @@ skills:                             # 自有 skill
   - id: skill:prd_review
     file: ./skills/prd_review.py
 tools: []                           # 自有 tool
-ui_components:                      # 富交互组件声明(见 003)
-  - type: checkbox_group
-    schema: { options: [], label: "评审维度" }
-  - type: rating
-    schema: { max: 5 }
+renderers:                          # 自定义前端 renderer(对齐 003 v2.0 §3.2 / ADR 0001)
+  - name: my_plugin.review_card    # 必须带 <plugin_id>. 前缀
+    package: "my-plugin-renderer@1.0.0"   # npm 包名 + 版本,WebUI 动态 import
+    entry: "dist/index.js"         # 包入口
+  - name: my_plugin.approval_button
+    package: "my-plugin-renderer@1.0.0"
+    entry: "dist/button.js"
 ```
 
 ## 3. skill 定义(Python + SDK)
