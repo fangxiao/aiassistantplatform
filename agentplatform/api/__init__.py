@@ -6,8 +6,9 @@
 
 from fastapi import APIRouter
 
-from agentplatform.api import health, registry
+from agentplatform.api import admin_llm, health, registry
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(registry.router)
+api_router.include_router(admin_llm.router)

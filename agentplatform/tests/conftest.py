@@ -7,12 +7,16 @@ NullPool 避免 asyncpg 连接跨事件循环复用(循环绑定)。
 from collections.abc import AsyncIterator
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from agentplatform.core.db.base import Base
+from agentplatform.core.db.session import get_session
+from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401  表注册进 metadata
 from agentplatform.core.registry.model import SkillTool  # noqa: F401  表注册进 metadata
+from agentplatform.main import app
 
 ADMIN_URL = "postgresql+asyncpg://agentplatform:agentplatform@localhost:5432/agentplatform"
 TEST_URL = "postgresql+asyncpg://agentplatform:agentplatform@localhost:5432/agentplatform_test"
@@ -57,3 +61,13 @@ async def session(db_engine) -> AsyncIterator[AsyncSession]:
             await s.execute(table.delete())
         await s.commit()
         yield s
+
+
+@pytest.fixture
+async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """API 测试客户端:get_session 依赖覆盖为测试库会话。"""
+    app.dependency_overrides[get_session] = lambda: session
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()

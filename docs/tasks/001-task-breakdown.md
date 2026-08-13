@@ -67,6 +67,13 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T3.2 | OpenAI 兼容客户端(流式转发) | T3.1 |
 | T3.3 | 模型路由(助手指定单一模型) | T3.2 |
 
+> **M3 状态:已完成(2026-08-13)**。`llm_endpoints` 表与 004 一致;api_key 用 Fernet
+> 加密存储(密钥由 SECRET_KEY 派生,`core/llm/crypto.py`),明文不落库/不回传。
+> 客户端 `core/llm/client.py` 用 httpx 实现 chat/completions SSE 流式,支持 tools
+> (供 M5 显式调用);`core/llm/router.py` 按 model 精确匹配、`is_default` 兜底。
+> 测试 73 passed(ruff/mypy 全绿);已用 codingplan 端点(`deepseek-v4-flash`,
+> `ark.cn-beijing.volces.com/api/coding/v3`)真实冒烟通过。
+
 ### M4 · 插件管理(P0)
 | ID | 任务 | 依赖 |
 |----|------|------|
