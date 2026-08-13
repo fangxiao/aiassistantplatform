@@ -3,7 +3,7 @@
 - 状态:**Accepted**
 - 日期:2026-08-12
 - 决策者:用户(2026-08-12 技术方案 review 确认)
-- 适用:[001-architecture §2.1](../design/001-architecture.md) `platform/core/agent`
+- 适用:[001-architecture §2.1](../design/001-architecture.md) `agentplatform/core/agent`
 
 ## 背景
 
@@ -50,7 +50,7 @@
 
 ## 影响
 
-- `platform/core/agent` 自研实现
+- `agentplatform/core/agent` 自研实现
 - 会话状态枚举:`idle` / `thinking` / `awaiting_tool` / `awaiting_user` / `terminated`
 - LLM 网关重试默认 3 次,指数退避
 - 每轮 tool 调用上限 10 次

@@ -29,10 +29,12 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 ### M0 · 项目脚手架与基础设施(P0)
 | ID | 任务 | 依赖 |
 |----|------|------|
-| T0.1 | 后端 `platform/` 结构 + Python 环境(uv)+ 依赖(FastAPI/SQLAlchemy/Pydantic 等) | - |
+| T0.1 | 后端 `agentplatform/` 结构 + Python 环境(uv)+ 依赖(FastAPI/SQLAlchemy/Pydantic 等) | - |
 | T0.2 | 前端 `web/` 结构 + Next.js 14 + Tailwind + TypeScript | - |
 | T0.3 | `docker-compose`(pg/redis/api/web 四服务) | T0.1, T0.2 |
 | T0.4 | 数据库基础:SQLAlchemy base + Alembic 迁移框架 | T0.1 |
+
+> **M0 状态:已完成(2026-08-13)**。实现采用 uv 单项目(pyproject 在仓库根),后端包名定为 `agentplatform`(原 `platform` 与 Python stdlib `platform` 模块冲突,会破坏 SQLAlchemy 导入;已同步 001/006/003 等文档)。前端为手工脚手架(避免 create-next-app 版本漂移)。docker-compose 仅验证 `config`;`up` 运行时验证需 docker daemon。
 
 ### M1 · 认证与用户(P1)
 | ID | 任务 | 依赖 |
@@ -49,6 +51,14 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T2.2 | 注册表服务(查询/版本/依赖解析) | T2.1 |
 | T2.3 | 平台内置资源:PDF 解析 tool、摘要 skill、结构化输出 skill | T2.2 |
 | T2.4 | 注册表查询 API(`/registry/*`) | T2.2 |
+
+> **M2 状态:已完成(2026-08-13)**。`skill_tools` 表主键为 `(id, version)` 复合主键
+> (支持多版本,004 已同步);版本约束自研 semver 子集(`^`/`~`/精确/`>=`,不引入 packaging,
+> 因 packaging 不支持 npm caret)。内置资源自描述(`builtin/` 各模块 RESOURCE + 实现),
+> 数据迁移 `98efc5a8b1f9` 登记(单一来源)。`/api/registry/*` 只读三个接口,错误统一
+> `{error:{code,message}}`(005 §1,main.py 异常处理)。注册表服务测试用真实 PG 测试库
+> (`agentplatform_test`,conftest 共享,PG 不可达自动 skip)。`pdf_parse` 实现留 M5
+> 执行器接入时引入 pypdf。
 
 ### M3 · LLM 网关(P0)
 | ID | 任务 | 依赖 |
@@ -100,7 +110,7 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 ### M9 · 插件 SDK 与 CLI(P0,AI-native)
 | ID | 任务 | 依赖 |
 |----|------|------|
-| T9.1 | `platform.sdk` 包(`@skill`/`@tool` 装饰器、基类、schema 工具) | T2.2, T5.1 |
+| T9.1 | `agentplatform.sdk` 包(`@skill`/`@tool` 装饰器、基类、schema 工具) | T2.2, T5.1 |
 | T9.2 | CLI `init` / `validate`(结构化输出) | T9.1 |
 | T9.3 | CLI `dev`(本地运行调试,不依赖远程平台) | T9.1, T5.4 |
 | T9.4 | CLI `deploy`(部署协议,对接 `/plugins/deploy`) | T4.3, T9.1 |

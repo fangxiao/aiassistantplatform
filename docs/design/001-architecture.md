@@ -54,21 +54,21 @@ flowchart TB
 
 ## 2. 模块划分
 
-### 2.1 后端(`platform/`)
+### 2.1 后端(`agentplatform/`)
 | 模块 | 职责 |
 |------|------|
-| `platform/api` | FastAPI 路由、请求/响应模型、SSE 流式接口 |
-| `platform/core/agent` | agent 调度循环、上下文组装、**显式调用编排**(把 skill/tool 作为可调用单元交给 LLM) |
-| `platform/core/llm` | LLM 网关:OpenAI 兼容客户端、端点配置、流式转发 |
-| `platform/core/registry` | **skill/tool 注册表**:资源池、元信息、版本、来源、依赖解析 |
-| `platform/core/plugin` | 插件管理器:加载、清单校验、生命周期 |
-| `platform/core/tool` | tool 执行器:调用编程接口、危险操作限制 |
-| `platform/core/skill` | skill 执行器:加载 skill 行为、参数化执行(可能为子 agent) |
-| `platform/core/session` | 会话与上下文管理、历史持久化 |
-| `platform/core/auth` | 账号密码认证、JWT、角色授权 |
-| `platform/core/message` | 消息信封(ContentBlock)转换层、流式分块、嵌套校验、降级 |
-| `platform/sdk` | 插件开发 SDK(供独立仓库引用) |
-| `platform/cli` | 部署 CLI(init/validate/dev/deploy/logs) |
+| `agentplatform/api` | FastAPI 路由、请求/响应模型、SSE 流式接口 |
+| `agentplatform/core/agent` | agent 调度循环、上下文组装、**显式调用编排**(把 skill/tool 作为可调用单元交给 LLM) |
+| `agentplatform/core/llm` | LLM 网关:OpenAI 兼容客户端、端点配置、流式转发 |
+| `agentplatform/core/registry` | **skill/tool 注册表**:资源池、元信息、版本、来源、依赖解析 |
+| `agentplatform/core/plugin` | 插件管理器:加载、清单校验、生命周期 |
+| `agentplatform/core/tool` | tool 执行器:调用编程接口、危险操作限制 |
+| `agentplatform/core/skill` | skill 执行器:加载 skill 行为、参数化执行(可能为子 agent) |
+| `agentplatform/core/session` | 会话与上下文管理、历史持久化 |
+| `agentplatform/core/auth` | 账号密码认证、JWT、角色授权 |
+| `agentplatform/core/message` | 消息信封(ContentBlock)转换层、流式分块、嵌套校验、降级 |
+| `agentplatform/sdk` | 插件开发 SDK(供独立仓库引用) |
+| `agentplatform/cli` | 部署 CLI(init/validate/dev/deploy/logs) |
 
 ### 2.2 前端(`web/`)
 | 模块 | 职责 |
@@ -86,7 +86,7 @@ my-assistant/
 ├── skills/              # 自有 skill 定义
 ├── tools/               # 自有 tool 实现(Python)
 ├── ui/                  # (可选)自定义前端组件
-└── pyproject.toml       # 依赖(引用 platform.sdk)
+└── pyproject.toml       # 依赖(引用 agentplatform.sdk)
 ```
 
 ## 3. 关键技术决策(已对齐 vision)
@@ -122,7 +122,7 @@ my-assistant/
 
 ### 4.2 插件部署流
 ```
-开发者独立仓库(引用 platform.sdk)
+开发者独立仓库(引用 agentplatform.sdk)
   -> CLI: agentplatform deploy ./my-assistant --target <platform>
   -> CLI 打包插件 -> 传输到平台 -> 插件管理器加载(进程内)
   -> 校验清单、解析依赖的公共 skill/tool -> 注册表登记自有 skill/tool
@@ -142,7 +142,7 @@ my-assistant/
 | 样式 | Tailwind CSS |
 | 数据库 | PostgreSQL 15+ |
 | 缓存 | Redis 7+ |
-| 插件 SDK | 基于 platform/core 抽象的 Python 包,独立发布 |
+| 插件 SDK | 基于 agentplatform/core 抽象的 Python 包,独立发布 |
 
 ## 6. 后续子设计文档
 - `002-skill-tool-model.md` -- skill/tool 模型:注册表、依赖声明、显式调用协议、组合性、来源权限【第一特色核心】

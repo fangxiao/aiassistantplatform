@@ -45,14 +45,17 @@ llm_endpoints(独立)
 | deployed_at | timestamptz | |
 
 ### skill_tools(注册表)
+> M2 修订:`id` 为主键之一,实际主键为 `(id, version)` 复合主键——同一资源可登记多个
+> semver 版本(002 §8),`depends_on` 按 `^`/`~` 约束解析;`owner_id` 暂为 text,
+> M1 引入 users 表后改为 FK。
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | text pk | 如 `tool:pdf_parse` |
+| version | text pk | semver |
 | kind | enum | tool / skill |
 | name | text | |
-| version | text | semver |
 | source | enum | builtin / shared / private |
-| owner_id | fk users? | builtin 为 null |
+| owner_id | fk users? | builtin 为 null(M1 后改 FK) |
 | schema | jsonb | function 参数/返回 schema |
 | impl_path | text | 进程内加载路径 |
 | description | text | |

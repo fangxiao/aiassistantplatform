@@ -16,7 +16,7 @@ my-assistant/
 ├── renderers/           # (可选)自定义前端 renderer 包(构建产物)
 │   └── dist/            #   构建后的 JS bundle,被 WebUI 动态 import
 ├── renderer-src/        # (可选)renderer 源码(React/TS),构建到 renderers/dist
-└── pyproject.toml       # 依赖:platform.sdk
+└── pyproject.toml       # 依赖:agentplatform.sdk
 ```
 
 ## 2. plugin.yaml 清单
@@ -45,7 +45,7 @@ renderers:                          # 自定义前端 renderer(对齐 003 v2.0 �
 
 ## 3. skill 定义(Python + SDK)
 ```python
-from platform.sdk import Skill, skill
+from agentplatform.sdk import Skill, skill
 
 @skill(id="skill:prd_review", version="1.0.0")
 class PRDReview(Skill):
@@ -60,7 +60,7 @@ class PRDReview(Skill):
 
 ## 4. tool 定义
 ```python
-from platform.sdk import tool
+from agentplatform.sdk import tool
 
 @tool(id="tool:pdf_parse", version="1.0.0")
 def pdf_parse(file: str) -> str:
@@ -69,7 +69,7 @@ def pdf_parse(file: str) -> str:
     return text
 ```
 
-## 5. SDK(platform.sdk)
+## 5. SDK(agentplatform.sdk)
 - 装饰器 `@skill` / `@tool` 注册元信息
 - `Skill` / `Tool` 基类、`Context`、schema 工具
 - 内置本地 dev 运行时(供 `agentplatform dev` 调用,不依赖远程平台)

@@ -21,7 +21,7 @@
 ### 1.1 背景
 001 §F3.2 承诺"插件可定义对话中的富交互组件(文本框、复选框、按钮)",但未定义协议细节。001 §8.2 明确把"组件 schema、渲染、回传"留待设计阶段。
 
-本文档填补该缺口:把"消息该怎么渲染"从 WebUI 硬编码中解耦,改为**由插件通过 `platform.sdk` 声明 renderer**。同时把 v1.2 中仅"3 种基础类型"的范围扩展为**22 种 renderer 的明确清单**,并对每种给出数据 schema 与回传语义。
+本文档填补该缺口:把"消息该怎么渲染"从 WebUI 硬编码中解耦,改为**由插件通过 `agentplatform.sdk` 声明 renderer**。同时把 v1.2 中仅"3 种基础类型"的范围扩展为**22 种 renderer 的明确清单**,并对每种给出数据 schema 与回传语义。
 
 ### 1.2 目标
 - **解耦**:WebUI 端只维护 renderer registry 调度层,不实现具体渲染逻辑
@@ -43,7 +43,7 @@
 
 | 角色 | 与本文档相关的关切 |
 |------|-------------------|
-| 开发者(Developer) | 通过 `platform.sdk` 注册 renderer;提供数据 schema;实现交互回传 handler |
+| 开发者(Developer) | 通过 `agentplatform.sdk` 注册 renderer;提供数据 schema;实现交互回传 handler |
 | 使用者(End User) | 在对话中看到/操作富组件;操作结果影响对话 |
 | 平台开发者(WebUI 维护者) | 维护 registry 调度层、内置 renderer 实现、安全降级 |
 
@@ -211,9 +211,9 @@ POST /api/sessions/{id}/messages/stream   # 流式输出(SSE 或 WebSocket)
 POST /api/sessions/{id}/blocks/{bid}/interact  # 交互回传
 ```
 
-### 6.2 插件 SDK 注册接口(`platform.sdk`,Python)
+### 6.2 插件 SDK 注册接口(`agentplatform.sdk`,Python)
 ```python
-from platform.sdk import renderer
+from agentplatform.sdk import renderer
 
 @renderer.register(
     name="my_plugin.weather_card",
@@ -232,7 +232,7 @@ class WeatherCardRenderer:
 
 ### 6.3 插件交互 Handler 接口
 ```python
-from platform.sdk import handler
+from agentplatform.sdk import handler
 
 @handler.register(action="my_plugin.regenerate_weather")
 async def regenerate_weather(session_ctx, block_id: str, args: dict) -> list[dict]:

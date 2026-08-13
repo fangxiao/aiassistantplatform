@@ -359,7 +359,7 @@ export function FallbackRenderer({ block, reason }: { block: ContentBlock; reaso
 需求 003 §F-MR-6.4:同一 renderer 连续 3 次降级 → 后端告警。后端实现:
 
 ```python
-# platform/observability/alerts.py
+# agentplatform/observability/alerts.py
 fallback_counter: dict[str, int] = {}
 
 def record_fallback(renderer_name: str):
@@ -560,7 +560,7 @@ Response(4xx):
 ### 13.1 后端 Pydantic
 
 ```python
-# platform/schemas/message.py
+# agentplatform/schemas/message.py
 from pydantic import BaseModel, Field
 from typing import Literal, Any
 

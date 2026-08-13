@@ -6,13 +6,16 @@
 
 - AI 助手开发与分发平台,第一特色为「可复用 skill/tool + 显式调用」;定位与差异化见 [docs/vision.md](docs/vision.md)。
 - git 已初始化(`main` 分支),远程仓库 [fangxiao/aiassistantplatform](https://github.com/fangxiao/aiassistantplatform)。
-- 文档阶段就绪:愿景、需求(v1.2)、设计(001-006,002 已定稿)、任务拆解;即将进入实现阶段(阶段 4)。
+- 阶段 0-3 完成:愿景、需求(v1.2.1)、设计(001-006,002 已定稿)、ADR 0001/0002、任务拆解;已进入实现阶段(阶段 4)。
+- M0 脚手架已完成(2026-08-13):uv 单项目(包名 `agentplatform`,规避 stdlib `platform` 模块冲突)+ Next.js 14 手工脚手架 + docker-compose 四服务 + SQLAlchemy Base/Alembic。
 - 技术栈:Python(FastAPI)+ React(Next.js)+ PostgreSQL + Redis,docker-compose 单机部署;选型见 [docs/requirements/001-product-requirements.md](docs/requirements/001-product-requirements.md) §6。
 
-## 项目结构(规划,按 M0 建立)
+## 项目结构(M0 已建立)
 
-- `platform/` 后端(FastAPI,含插件 SDK `platform.sdk`)
+- `agentplatform/` 后端(FastAPI,含插件 SDK `agentplatform.sdk`)
 - `web/` 前端(Next.js)
+- `migrations/` Alembic 迁移(连接配置见 `alembic.ini`)
+- `docker-compose.yml` 单机部署(pg/redis/api/web)
 - `docs/` 产品 / 设计 / 任务 / ADR 文档
 
 > 目录按 [docs/tasks/001-task-breakdown.md](docs/tasks/001-task-breakdown.md) M0 脚手架任务建立。
