@@ -1,0 +1,56 @@
+# agentplatform 单机部署(见 docs/design/001-architecture.md §5)
+# 四服务:pg / redis / api / web
+services:
+  pg:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: agentplatform
+      POSTGRES_PASSWORD: agentplatform
+      POSTGRES_DB: agentplatform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentplatform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: agentplatform/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agentplatform:agentplatform@pg:5432/agentplatform
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+    ports:
+      - "8000:8000"
+    depends_on:
+      pg:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

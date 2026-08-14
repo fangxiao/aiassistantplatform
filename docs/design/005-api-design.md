@@ -30,19 +30,22 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/chat/sessions` | `{plugin_id}` -> `{session_id}` |
-| POST | `/chat/sessions/{sid}/messages` | `{content}` -> **SSE 流** |
-| POST | `/chat/sessions/{sid}/components/{cid}/submit` | `{result}` -> **SSE 流** |
+| POST | `/chat/sessions/{sid}/messages` | `{content}` -> **SSE 流**(响应消息生成) |
+| POST | `/api/sessions/{sid}/blocks/{bid}/interact` | 交互回传(对齐 003 v2.0 §9.1) |
+| POST | `/api/sessions/{sid}/messages/regenerate` | regenerate 触发(走流式 SSE) |
+| POST | `/api/sessions/{sid}/events` | 副作用事件(thumbs 等) |
 | GET | `/chat/sessions` | 我的会话列表 |
 | GET | `/chat/sessions/{sid}/messages` | 历史消息 |
 
-### SSE 事件类型
+### SSE 事件类型(对齐 003 v2.0 §3.3)
 | 事件 | data | 说明 |
 |------|------|------|
-| `token` | `{text}` | 文本片段(流式) |
+| `delta` | `{block_index, text}` | markdown 块增量(对齐旧 `token`) |
+| `block_meta` | `{block_index, type, data, meta?}` | 开新 ContentBlock(替代旧 `component`) |
 | `tool_call` | `{kind, name, args, result}` | skill/tool 调用过程 |
-| `component` | `{cid, type, props}` | 渲染组件 |
+| `interact_resp` | `{blocks: ContentBlock[]}` | 交互回传响应(handler 返回的续 block) |
 | `done` | `{message_id}` | 本轮结束 |
-| `error` | `{message}` | 错误 |
+| `error` | `{code, message}` | 错误 |
 
 ## 5. 插件管理(F1,开发者)
 | 方法 | 路径 | 说明 |
@@ -68,6 +71,6 @@
 | PATCH | `/admin/llm-endpoints/{id}` | 修改/设默认 |
 
 ## 8. 说明
-- 对话与组件回传均走 SSE,前端统一事件处理
+- 对话(消息流)走 SSE;**交互回传走 HTTP POST**(003 v2.0 §9):简单、RESTful、不引入双协议复杂度
 - 插件部署接口主要供 CLI 调用(带开发者 token)
 - 注册表只读对外;写入通过插件部署流程

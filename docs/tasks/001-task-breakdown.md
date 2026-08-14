@@ -29,10 +29,12 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 ### M0 · 项目脚手架与基础设施(P0)
 | ID | 任务 | 依赖 |
 |----|------|------|
-| T0.1 | 后端 `platform/` 结构 + Python 环境(uv)+ 依赖(FastAPI/SQLAlchemy/Pydantic 等) | - |
+| T0.1 | 后端 `agentplatform/` 结构 + Python 环境(uv)+ 依赖(FastAPI/SQLAlchemy/Pydantic 等) | - |
 | T0.2 | 前端 `web/` 结构 + Next.js 14 + Tailwind + TypeScript | - |
 | T0.3 | `docker-compose`(pg/redis/api/web 四服务) | T0.1, T0.2 |
 | T0.4 | 数据库基础:SQLAlchemy base + Alembic 迁移框架 | T0.1 |
+
+> **M0 状态:已完成(2026-08-13)**。实现采用 uv 单项目(pyproject 在仓库根),后端包名定为 `agentplatform`(原 `platform` 与 Python stdlib `platform` 模块冲突,会破坏 SQLAlchemy 导入;已同步 001/006/003 等文档)。前端为手工脚手架(避免 create-next-app 版本漂移)。docker-compose 仅验证 `config`;`up` 运行时验证需 docker daemon。
 
 ### M1 · 认证与用户(P1)
 | ID | 任务 | 依赖 |
@@ -50,12 +52,27 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T2.3 | 平台内置资源:PDF 解析 tool、摘要 skill、结构化输出 skill | T2.2 |
 | T2.4 | 注册表查询 API(`/registry/*`) | T2.2 |
 
+> **M2 状态:已完成(2026-08-13)**。`skill_tools` 表主键为 `(id, version)` 复合主键
+> (支持多版本,004 已同步);版本约束自研 semver 子集(`^`/`~`/精确/`>=`,不引入 packaging,
+> 因 packaging 不支持 npm caret)。内置资源自描述(`builtin/` 各模块 RESOURCE + 实现),
+> 数据迁移 `98efc5a8b1f9` 登记(单一来源)。`/api/registry/*` 只读三个接口,错误统一
+> `{error:{code,message}}`(005 §1,main.py 异常处理)。注册表服务测试用真实 PG 测试库
+> (`agentplatform_test`,conftest 共享,PG 不可达自动 skip)。`pdf_parse` 实现留 M5
+> 执行器接入时引入 pypdf。
+
 ### M3 · LLM 网关(P0)
 | ID | 任务 | 依赖 |
 |----|------|------|
 | T3.1 | `llm_endpoints` 表迁移 + 管理 API(`/admin/llm-endpoints`) | T0.4 |
 | T3.2 | OpenAI 兼容客户端(流式转发) | T3.1 |
 | T3.3 | 模型路由(助手指定单一模型) | T3.2 |
+
+> **M3 状态:已完成(2026-08-13)**。`llm_endpoints` 表与 004 一致;api_key 用 Fernet
+> 加密存储(密钥由 SECRET_KEY 派生,`core/llm/crypto.py`),明文不落库/不回传。
+> 客户端 `core/llm/client.py` 用 httpx 实现 chat/completions SSE 流式,支持 tools
+> (供 M5 显式调用);`core/llm/router.py` 按 model 精确匹配、`is_default` 兜底。
+> 测试 73 passed(ruff/mypy 全绿);已用 codingplan 端点(`deepseek-v4-flash`,
+> `ark.cn-beijing.volces.com/api/coding/v3`)真实冒烟通过。
 
 ### M4 · 插件管理(P0)
 | ID | 任务 | 依赖 |
@@ -65,6 +82,16 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T4.3 | 插件部署 API(`/plugins/deploy`,接收 CLI 上传) | T4.2 |
 | T4.4 | 插件管理 API(列表/启停/卸载) | T4.2 |
 
+> **M4 状态:已完成(2026-08-13)**。`plugins` 表与 004 一致(manifest jsonb、status
+> active/disabled,唯一约束 name+version)。加载器 `core/plugin/loader.py` 校验清单 →
+> 复用 M2 注册表解析 depends_on → 登记插件 → 登记自有 skill/tool(source=private,
+> owner=插件名,便于卸载清理)。`/api/plugins` 部署/列表/启停/卸载(005 §5),错误
+> 统一 422 `{error:{code,message}}`(dependency_missing / plugin_invalid)。
+> 清单以结构化 JSON 接收(YAML 解析在 M9 CLI 引入 PyYAML)。测试 90 passed。
+> 示例插件:`docs/examples/plugins/prd-review-assistant/`(依赖内置 pdf_parse +
+> summarize),已用真实 API 部署验证(注册、依赖校验 422 均通过)。skill/tool
+> 代码加载与执行留 M5。
+
 ### M5 · agent 运行时(P0,核心)
 | ID | 任务 | 依赖 |
 |----|------|------|
@@ -73,12 +100,32 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T5.3 | 上下文/会话管理(组装系统提示、历史、Redis 缓存) | T0.3 |
 | T5.4 | agent 调度循环(LLM -> tool_call -> 回填 -> 再推理) | T5.2, T5.3 |
 
+> **M5 状态:已完成(2026-08-13)**。`core/agent/`:executor(按 impl_path 解析实现;
+> tool 调 `run(**args)`,简单 skill 调 `build_prompt(**args)` 后嵌套一次 LLM 调用
+> 002 §5.3;插件相对路径代码未加载时报 AgentExecError,代码上传在 M9)、
+> tools(注册表行 -> OpenAI function 定义,002 §5.1 映射)、messages(系统提示
+> 列出可调用资源 + [system,history,user] 组装;Redis 缓存留 M6)、loop(LLM ->
+> tool_call -> 执行 -> 回填 -> 再推理,执行失败回填文本让 LLM 自纠,输出
+> ToolTrace 供 M6 SSE)。llm_client 注入可 mock;测试 101 passed(ruff/mypy 全绿)。
+> 已用 codingplan(deepseek-v4-flash)真实跑通完整显式调用循环:
+> 模型显式调用 skill:summarize -> 嵌套 LLM 产出摘要 -> 回填 -> 最终回答。
+
 ### M6 · 对话 API 与流式(P0)
 | ID | 任务 | 依赖 |
 |----|------|------|
 | T6.1 | `sessions` / `messages` 表迁移 | T0.4 |
 | T6.2 | 对话 API(创建会话、发消息、SSE 流) | T6.1, T5.4 |
 | T6.3 | SSE 事件:`token` / `tool_call` / `component` / `done` / `error` | T6.2 |
+
+> **M6 状态:已完成(2026-08-14)**。`sessions`/`messages` 表与 004 一致(messages.blocks
+> 存 ContentBlock 信封,content 仅历史兼容);对话编排 `core/chat/`(插件 -> LLM 端点
+> 解析 -> stream_agent 流式循环);`/api/chat` 建会话/发消息(SSE)/列表/历史(005 §4)。
+> SSE 事件:delta{block_index,text} / tool_call{kind,name,args,result} / done{message_id}
+> / error{code,message}(block_meta 等富交互事件留 M7)。M5 loop 增加流式 `stream_agent`
+> (run_agent 聚合兼容)。流结束落库 assistant 最终消息;`build_history` 从 blocks 提取
+> 文本。测试 107 passed(ruff/mypy 全绿)。**修复 M3 遗留 bug**:admin_llm POST/PATCH 缺
+> commit(同会话可见但新会话查不到),已补 commit + 回归测试。已用 codingplan 真实跑通
+> 完整对话流:模型显式调用 skill:summarize -> 嵌套摘要 -> delta 流式 -> done 落库。
 
 ### M7 · 富交互组件(P1)
 | ID | 任务 | 依赖 |
@@ -93,6 +140,14 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | ID | 任务 | 依赖 | 优先级 |
 |----|------|------|--------|
 | T8.1 | 对话页(消息流、流式渲染、组件渲染) | T6.3, T7.4 | P0 |
+
+> **T8.1 状态:已完成(2026-08-14,文案级,M7 富交互组件待 T7.4 扩展)**。
+> `web/lib/api`(fetch + SSE 解析)、`web/lib/registry`(Renderer Registry)、
+> `web/components/chat`(MessageList/Item/Composer)、`web/components/renderers`
+> (Renderer 分发 + 极简 markdown,转义防 XSS)、`web/app/page.tsx`(会话选择/创建
+> + SSE 流式渲染 + 工具调用徽标)。后端补 CORS(dev:localhost:3000)。`npm run build`
+> 通过(首屏 91.1kB);已用真实浏览器 + codingplan 完整跑通:发消息 -> 显式调用
+> summarize -> 流式 markdown 渲染 -> 历史回放。
 | T8.2 | 助手列表页(浏览/搜索/选用) | T4.4 | P1 |
 | T8.3 | 会话历史 | T6.2 | P1 |
 | T8.4 | 开发者管理台(插件启停/卸载) | T4.4 | P1 |
@@ -100,7 +155,7 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 ### M9 · 插件 SDK 与 CLI(P0,AI-native)
 | ID | 任务 | 依赖 |
 |----|------|------|
-| T9.1 | `platform.sdk` 包(`@skill`/`@tool` 装饰器、基类、schema 工具) | T2.2, T5.1 |
+| T9.1 | `agentplatform.sdk` 包(`@skill`/`@tool` 装饰器、基类、schema 工具) | T2.2, T5.1 |
 | T9.2 | CLI `init` / `validate`(结构化输出) | T9.1 |
 | T9.3 | CLI `dev`(本地运行调试,不依赖远程平台) | T9.1, T5.4 |
 | T9.4 | CLI `deploy`(部署协议,对接 `/plugins/deploy`) | T4.3, T9.1 |

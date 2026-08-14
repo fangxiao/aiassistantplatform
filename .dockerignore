@@ -1,0 +1,15 @@
+# api 构建 context = 仓库根;排除无需进入镜像的内容
+.git
+.claude
+.vscode
+docs
+web
+.venv
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.env
+.env.*
+.DS_Store

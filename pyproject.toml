@@ -1,0 +1,59 @@
+[project]
+name = "agentplatform"
+version = "0.1.0"
+description = "AI 助手开发与分发平台(后端 FastAPI;M0 单项目,SDK 独立发布留 M9)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    # auth 依赖(M1 使用);bcrypt 锁 <4.1:passlib 1.7.4 与 bcrypt>=4.1 不兼容(缺 __about__)
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt<4.1",
+    "python-jose[cryptography]>=3.3",
+    "httpx>=0.27",
+    "redis>=5.0",
+    "python-multipart>=0.0.9",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentplatform"]
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["agentplatform/tests"]
+# importlib 模式:包名 agentplatform 无 stdlib 冲突(prepend 模式在早期
+# 命名 platform 时曾被 stdlib platform 遮蔽;importlib 模式以顶层模块导入)。
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["agentplatform"]
+
+[tool.ruff.lint]
+# B008:FastAPI 惯用法,Depends() 出现在参数默认值中(官方推荐写法)
+extend-ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
