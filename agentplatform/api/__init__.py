@@ -6,9 +6,11 @@
 
 from fastapi import APIRouter
 
-from agentplatform.api import admin_llm, health, registry
+from agentplatform.api import admin_llm, chat, health, plugins, registry
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(registry.router)
 api_router.include_router(admin_llm.router)
+api_router.include_router(plugins.router)
+api_router.include_router(chat.router)

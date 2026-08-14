@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "dev-secret-change-me"  # TODO(M1): 认证启用前必须改为环境变量注入
+    # 前端跨域来源(MVP dev:Next.js 3000;生产按环境注入)
+    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
 settings = Settings()

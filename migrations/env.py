@@ -20,7 +20,10 @@ if config.config_file_name is not None:
 from agentplatform.config import settings
 from agentplatform.core.db.base import Base
 from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401
+from agentplatform.core.message.model import Message  # noqa: F401
+from agentplatform.core.plugin.model import Plugin  # noqa: F401
 from agentplatform.core.registry.model import SkillTool  # noqa: F401
+from agentplatform.core.session.model import Session  # noqa: F401
 
 target_metadata = Base.metadata
 

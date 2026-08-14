@@ -5,7 +5,7 @@ import uuid
 import pytest
 from cryptography.fernet import InvalidToken
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentplatform.core.llm import crypto
 from agentplatform.core.llm.schemas import LlmEndpointCreate
@@ -110,3 +110,14 @@ class TestEndpointApi:
         resp = await client.patch(f"/api/admin/llm-endpoints/{uuid.uuid4()}", json={"name": "x"})
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "not_found"
+
+    async def test_create_persists_across_sessions(
+        self, client: AsyncClient, db_engine, session: AsyncSession
+    ) -> None:
+        """回归:M3 曾缺 commit,同一请求内可见但新会话查不到。"""
+        resp = await client.post("/api/admin/llm-endpoints", json=ENDPOINT.model_dump())
+        assert resp.status_code == 201
+        factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        async with factory() as fresh:
+            rows = await list_endpoints(fresh)
+            assert len(rows) == 1

@@ -1,0 +1,14 @@
+# 示例插件:PRD 文档评审助手(006 §2 清单格式)
+# 依赖平台内置 pdf_parse tool + summarize skill(002 §4 复用协议)
+name: prd-review-assistant
+version: 0.1.0
+description: PRD 文档评审助手
+author: demo
+model: deepseek-v4-flash
+depends_on:
+  - tool:pdf_parse@^1.0
+  - skill:summarize@^1.0
+skills:
+  - id: skill:prd_review
+    file: ./skills/prd_review.py
+tools: []

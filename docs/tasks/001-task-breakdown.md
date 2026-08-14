@@ -82,6 +82,16 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T4.3 | 插件部署 API(`/plugins/deploy`,接收 CLI 上传) | T4.2 |
 | T4.4 | 插件管理 API(列表/启停/卸载) | T4.2 |
 
+> **M4 状态:已完成(2026-08-13)**。`plugins` 表与 004 一致(manifest jsonb、status
+> active/disabled,唯一约束 name+version)。加载器 `core/plugin/loader.py` 校验清单 →
+> 复用 M2 注册表解析 depends_on → 登记插件 → 登记自有 skill/tool(source=private,
+> owner=插件名,便于卸载清理)。`/api/plugins` 部署/列表/启停/卸载(005 §5),错误
+> 统一 422 `{error:{code,message}}`(dependency_missing / plugin_invalid)。
+> 清单以结构化 JSON 接收(YAML 解析在 M9 CLI 引入 PyYAML)。测试 90 passed。
+> 示例插件:`docs/examples/plugins/prd-review-assistant/`(依赖内置 pdf_parse +
+> summarize),已用真实 API 部署验证(注册、依赖校验 422 均通过)。skill/tool
+> 代码加载与执行留 M5。
+
 ### M5 · agent 运行时(P0,核心)
 | ID | 任务 | 依赖 |
 |----|------|------|
@@ -90,12 +100,32 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | T5.3 | 上下文/会话管理(组装系统提示、历史、Redis 缓存) | T0.3 |
 | T5.4 | agent 调度循环(LLM -> tool_call -> 回填 -> 再推理) | T5.2, T5.3 |
 
+> **M5 状态:已完成(2026-08-13)**。`core/agent/`:executor(按 impl_path 解析实现;
+> tool 调 `run(**args)`,简单 skill 调 `build_prompt(**args)` 后嵌套一次 LLM 调用
+> 002 §5.3;插件相对路径代码未加载时报 AgentExecError,代码上传在 M9)、
+> tools(注册表行 -> OpenAI function 定义,002 §5.1 映射)、messages(系统提示
+> 列出可调用资源 + [system,history,user] 组装;Redis 缓存留 M6)、loop(LLM ->
+> tool_call -> 执行 -> 回填 -> 再推理,执行失败回填文本让 LLM 自纠,输出
+> ToolTrace 供 M6 SSE)。llm_client 注入可 mock;测试 101 passed(ruff/mypy 全绿)。
+> 已用 codingplan(deepseek-v4-flash)真实跑通完整显式调用循环:
+> 模型显式调用 skill:summarize -> 嵌套 LLM 产出摘要 -> 回填 -> 最终回答。
+
 ### M6 · 对话 API 与流式(P0)
 | ID | 任务 | 依赖 |
 |----|------|------|
 | T6.1 | `sessions` / `messages` 表迁移 | T0.4 |
 | T6.2 | 对话 API(创建会话、发消息、SSE 流) | T6.1, T5.4 |
 | T6.3 | SSE 事件:`token` / `tool_call` / `component` / `done` / `error` | T6.2 |
+
+> **M6 状态:已完成(2026-08-14)**。`sessions`/`messages` 表与 004 一致(messages.blocks
+> 存 ContentBlock 信封,content 仅历史兼容);对话编排 `core/chat/`(插件 -> LLM 端点
+> 解析 -> stream_agent 流式循环);`/api/chat` 建会话/发消息(SSE)/列表/历史(005 §4)。
+> SSE 事件:delta{block_index,text} / tool_call{kind,name,args,result} / done{message_id}
+> / error{code,message}(block_meta 等富交互事件留 M7)。M5 loop 增加流式 `stream_agent`
+> (run_agent 聚合兼容)。流结束落库 assistant 最终消息;`build_history` 从 blocks 提取
+> 文本。测试 107 passed(ruff/mypy 全绿)。**修复 M3 遗留 bug**:admin_llm POST/PATCH 缺
+> commit(同会话可见但新会话查不到),已补 commit + 回归测试。已用 codingplan 真实跑通
+> 完整对话流:模型显式调用 skill:summarize -> 嵌套摘要 -> delta 流式 -> done 落库。
 
 ### M7 · 富交互组件(P1)
 | ID | 任务 | 依赖 |
@@ -110,6 +140,14 @@ M1(认证)、M7(富交互)、M8.2-8.4(其余前端) 在核心链路后并行补�
 | ID | 任务 | 依赖 | 优先级 |
 |----|------|------|--------|
 | T8.1 | 对话页(消息流、流式渲染、组件渲染) | T6.3, T7.4 | P0 |
+
+> **T8.1 状态:已完成(2026-08-14,文案级,M7 富交互组件待 T7.4 扩展)**。
+> `web/lib/api`(fetch + SSE 解析)、`web/lib/registry`(Renderer Registry)、
+> `web/components/chat`(MessageList/Item/Composer)、`web/components/renderers`
+> (Renderer 分发 + 极简 markdown,转义防 XSS)、`web/app/page.tsx`(会话选择/创建
+> + SSE 流式渲染 + 工具调用徽标)。后端补 CORS(dev:localhost:3000)。`npm run build`
+> 通过(首屏 91.1kB);已用真实浏览器 + codingplan 完整跑通:发消息 -> 显式调用
+> summarize -> 流式 markdown 渲染 -> 历史回放。
 | T8.2 | 助手列表页(浏览/搜索/选用) | T4.4 | P1 |
 | T8.3 | 会话历史 | T6.2 | P1 |
 | T8.4 | 开发者管理台(插件启停/卸载) | T4.4 | P1 |

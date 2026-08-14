@@ -6,12 +6,23 @@
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agentplatform.api import api_router
+from agentplatform.config import settings
 
 app = FastAPI(title="agentplatform", version="0.1.0")
 app.include_router(api_router, prefix="/api")
+
+# 前端跨域(dev:localhost:3000;来源按 CORS_ORIGINS 环境变量覆盖)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(HTTPException)

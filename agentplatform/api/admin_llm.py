@@ -38,7 +38,9 @@ async def post_endpoint(
     session: AsyncSession = Depends(get_session),
 ) -> LlmEndpoint:
     """新增端点;api_key 加密存储。"""
-    return await create_endpoint(session, **payload.model_dump())
+    endpoint = await create_endpoint(session, **payload.model_dump())
+    await session.commit()
+    return endpoint
 
 
 @router.patch("/{endpoint_id}", response_model=LlmEndpointOut)
@@ -56,4 +58,5 @@ async def patch_endpoint(
             status_code=404,
             detail={"code": "not_found", "message": f"端点不存在: {endpoint_id}"},
         )
+    await session.commit()
     return endpoint
