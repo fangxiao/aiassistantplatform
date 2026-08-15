@@ -79,8 +79,9 @@ class TestToolLoop:
         # 编排:tools 参数带 echo 的 function 定义
         _, tools = fake.calls[0]
         assert tools is not None
-        assert tools[0]["function"]["name"] == "tool:echo"
+        assert any(t["function"]["name"] == "tool:echo" for t in tools)
         # 回填:第二次调用消息含 assistant tool_calls + tool 结果
+
         messages = fake.calls[1][0]
         assert messages[-1] == {"role": "tool", "tool_call_id": "call_1", "content": "HI"}
 

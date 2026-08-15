@@ -16,8 +16,13 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "dev-secret-change-me"  # TODO(M1): 认证启用前必须改为环境变量注入
+    # 全局 LLM 端点(开发/测试共用，由 .env 覆盖注入)
+    openai_base_url: str = "https://api.eaglesine.com/v1"
+    openai_api_key: str = ""
+    default_model: str = "DeepSeek-V3"
     # 前端跨域来源(MVP dev:Next.js 3000;生产按环境注入)
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
 settings = Settings()
+

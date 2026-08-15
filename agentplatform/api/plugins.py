@@ -9,6 +9,11 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentplatform.core.auth.dependencies import (
+    get_current_user,
+    get_optional_current_user,
+)
+from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
 from agentplatform.core.plugin.errors import PluginError
 from agentplatform.core.plugin.loader import (
@@ -28,11 +33,14 @@ router = APIRouter(prefix="/plugins", tags=["plugins"])
 @router.post("/deploy", response_model=PluginOut, status_code=201)
 async def deploy(
     payload: PluginManifest,
+    overwrite: bool = False,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(get_optional_current_user),
 ) -> PluginOut:
     """部署插件:依赖校验通过后登记插件及其自有 skill/tool。"""
     try:
-        plugin = await deploy_plugin(session, payload)
+        owner_id = str(user.id) if user else "anonymous"
+        plugin = await deploy_plugin(session, payload, owner_id=owner_id, overwrite=overwrite)
         await session.commit()
     except PluginError as exc:
         await session.rollback()
@@ -40,9 +48,12 @@ async def deploy(
     return to_out(plugin)
 
 
+
+
 @router.get("", response_model=list[PluginOut])
 async def plugins_list(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> list[PluginOut]:
     """我的插件列表(按部署时间倒序)。"""
     return [to_out(p) for p in await list_plugins(session)]
@@ -52,6 +63,7 @@ async def plugins_list(
 async def enable(
     plugin_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> PluginOut:
     return await _set_status(plugin_id, PluginStatus.active, session)
 
@@ -60,6 +72,7 @@ async def enable(
 async def disable(
     plugin_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> PluginOut:
     return await _set_status(plugin_id, PluginStatus.disabled, session)
 
@@ -81,6 +94,7 @@ async def _set_status(
 async def uninstall(
     plugin_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Response:
     """卸载:删除插件及其私有 skill/tool。"""
     plugin = await get_plugin(session, plugin_id)

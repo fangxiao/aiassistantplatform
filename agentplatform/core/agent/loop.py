@@ -34,11 +34,13 @@ class ToolTrace:
 
 @dataclass(frozen=True)
 class AgentEvent:
-    """流式 agent 事件(供 M6 SSE)。"""
+    """流式 agent 事件(供 M6/M7 SSE)。"""
 
-    type: str  # delta | tool_call | done
+    type: str  # delta | tool_call | block_meta | done
     text: str | None = None
     tool_trace: ToolTrace | None = None
+    block: dict | None = None
+
 
 
 @dataclass(frozen=True)
@@ -125,9 +127,22 @@ async def stream_agent(
         if not calls:
             break
         for tc in calls:
-            result = await execute(resources.get(tc.name), tc.arguments)
-            trace = ToolTrace(id=tc.name, args=_parse_args(tc.arguments), result=result)
-            yield AgentEvent(type="tool_call", tool_trace=trace)
+            if tc.name == "output_block":
+                block_data = _parse_args(tc.arguments)
+                trace = ToolTrace(
+                    id="output_block",
+                    args=block_data,
+                    result="ContentBlock 已在客户端成功呈现。",
+                )
+                yield AgentEvent(type="tool_call", tool_trace=trace)
+                yield AgentEvent(type="block_meta", block=block_data)
+                result = "ContentBlock 已在客户端成功呈现。"
+            else:
+                result = await execute(resources.get(tc.name), tc.arguments)
+                trace = ToolTrace(
+                    id=tc.name, args=_parse_args(tc.arguments), result=result
+                )
+                yield AgentEvent(type="tool_call", tool_trace=trace)
             messages.append(
                 {
                     "role": "assistant",
@@ -143,6 +158,7 @@ async def stream_agent(
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     yield AgentEvent(type="done")
+
 
 
 def _parse_args(arguments: str) -> dict:

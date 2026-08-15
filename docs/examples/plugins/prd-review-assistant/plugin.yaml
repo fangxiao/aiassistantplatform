@@ -2,13 +2,16 @@
 # 依赖平台内置 pdf_parse tool + summarize skill(002 §4 复用协议)
 name: prd-review-assistant
 version: 0.1.0
-description: PRD 文档评审助手
-author: demo
+description: PRD 文档评审专家助手，支持文档解析、智能评审与多维度评分
+author: PlatformDemo
 model: deepseek-v4-flash
 depends_on:
   - tool:pdf_parse@^1.0
   - skill:summarize@^1.0
+  - skill:structured_output@^1.0
 skills:
   - id: skill:prd_review
     file: ./skills/prd_review.py
-tools: []
+tools:
+  - id: tool:prd_score
+    file: ./tools/prd_score.py

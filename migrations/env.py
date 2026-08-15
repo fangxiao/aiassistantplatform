@@ -18,6 +18,7 @@ if config.config_file_name is not None:
 # 平台 ORM 元数据(alembic autogenerate 据此生成迁移;见 004 数据模型)
 # 导入业务模型以注册进 Base.metadata(M2 起;后续里程碑在此补充)
 from agentplatform.config import settings
+from agentplatform.core.auth.model import User  # noqa: F401
 from agentplatform.core.db.base import Base
 from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401
 from agentplatform.core.message.model import Message  # noqa: F401

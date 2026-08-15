@@ -8,14 +8,12 @@ Create Date: 2026-08-13 11:58:25.696603
 元信息单一来源为 agentplatform.core.registry.builtin(与种子脚本/M5 执行器共用)。
 用 SQLAlchemy Core 而非 exec_driver_sql,由 SA 处理方言占位符与枚举/jsonb 适配。
 """
-import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
-
 from agentplatform.core.registry.builtin import ALL
 from agentplatform.core.registry.model import SkillTool
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "98efc5a8b1f9"

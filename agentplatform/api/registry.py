@@ -7,6 +7,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentplatform.core.auth.dependencies import get_current_user
+from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
 from agentplatform.core.registry.model import SkillToolKind
 from agentplatform.core.registry.schemas import SkillToolOut, to_out
@@ -18,6 +20,7 @@ router = APIRouter(prefix="/registry", tags=["registry"])
 @router.get("/skills", response_model=list[SkillToolOut])
 async def list_skills(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> list[SkillToolOut]:
     """公共 skill 列表(每资源取最高版本)。"""
     rows = latest_of_each(await list_public(session, kind=SkillToolKind.skill))
@@ -27,6 +30,7 @@ async def list_skills(
 @router.get("/tools", response_model=list[SkillToolOut])
 async def list_tools(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> list[SkillToolOut]:
     """公共 tool 列表(每资源取最高版本)。"""
     rows = latest_of_each(await list_public(session, kind=SkillToolKind.tool))
@@ -39,6 +43,7 @@ async def get_resource(
     name: str,
     version: str | None = None,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> SkillToolOut:
     """资源详情;?version= 传 semver 约束(^ / ~ / 精确)时按约束解析,缺省取最高版本。"""
     resource_id = f"{kind.value}:{name}"

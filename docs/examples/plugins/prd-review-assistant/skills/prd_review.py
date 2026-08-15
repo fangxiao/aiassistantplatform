@@ -1,19 +1,36 @@
-"""示例插件:PRD 评审 skill(006 §3 定义形态)。
+"""PRD 文档评审 Skill 定义 (设计 006 §3)。"""
 
-M4 只登记元信息;代码加载与执行在 M5/SDK(M9)接入后启用。
-此处给出与 006 一致的示意实现,供后续里程碑对齐。
-"""
+from typing import Any
 
-# from agentplatform.sdk import Skill, skill  # M9 SDK 引入后启用
+from agentplatform.sdk import Context, Skill, skill
 
-PROMPT = (
-    "你是一个 PRD 评审专家,请按以下维度评审:{{dimensions}}。"
-    "基于文档:\n{{doc}}"
+
+@skill(
+    id="skill:prd_review",
+    version="1.0.0",
+    description="按完整性、可行性、业务价值、潜在风险等多维度深度评审 PRD 文档",
+    schema={
+        "type": "object",
+        "properties": {
+            "doc": {"type": "string", "description": "PRD 需求文档正文或摘要"},
+            "dimensions": {
+                "type": "string",
+                "description": "自定义评审维度，如完整性、可行性、风险",
+            },
+        },
+        "required": ["doc"],
+    },
+    prompt=(
+        "你是一个资深产品专家，请针对以下 PRD 内容进行专业评审：\n"
+        "【评审维度】：{{dimensions}}\n"
+        "【PRD 文档正文】：\n{{doc}}\n\n"
+        "请给出：1. 核心亮点 2. 关键遗漏与潜在风险 3. 具体改进建议。"
+    ),
 )
+class PRDReview(Skill):
+    """PRD 评审技能实现。"""
 
-
-def render(args: dict) -> str:
-    """简单 skill:填充 prompt 模板(M5 执行器会调用)。"""
-    dimensions = args.get("dimensions", "完整性、可行性、优先级、风险")
-    doc = args.get("doc", "")
-    return PROMPT.format(dimensions=dimensions, doc=doc)
+    def execute(self, ctx: Context, args: dict[str, Any]) -> str:
+        if not args.get("dimensions"):
+            args["dimensions"] = "需求完整性、技术可行性、用户体验与业务风险"
+        return self.render(args)

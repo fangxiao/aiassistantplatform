@@ -12,6 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from agentplatform.core.auth.dependencies import get_current_user
+from agentplatform.core.auth.model import User  # noqa: F401  表注册进 metadata
+from agentplatform.core.auth.service import create_access_token, create_user
 from agentplatform.core.db.base import Base
 from agentplatform.core.db.session import get_session
 from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401  表注册进 metadata
@@ -65,9 +68,33 @@ async def session(db_engine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
-    """API 测试客户端:get_session 依赖覆盖为测试库会话。"""
+    """API 测试客户端:get_session 依赖覆盖为测试库会话。
+
+    同时覆盖 get_current_user 固定返回一个测试用户,使现有业务 API 测试
+    默认携带合法身份;认证本身的 401/注册/登录见 test_auth_api。
+    """
+    user = await create_user(session, f"unit-{id(session)}@test.dev", "password123")
+    await session.commit()
+
     app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_current_user] = lambda: user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def auth_token(session: AsyncSession) -> str:
+    """创建测试用户,返回合法 JWT(供受保护 API 测试携带)。"""
+    import uuid
+
+    user = await create_user(session, f"user-{uuid.uuid4()}@test.dev", "password123")
+    await session.commit()
+    return create_access_token(str(user.id), user.role.value)
+
+
+@pytest.fixture
+async def auth_headers(auth_token: str) -> dict[str, str]:
+    """带 Bearer 的请求头。"""
+    return {"Authorization": f"Bearer {auth_token}"}

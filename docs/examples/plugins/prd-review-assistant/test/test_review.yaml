@@ -1,0 +1,7 @@
+name: prd-review-tests
+cases:
+  - id: test_score
+    input: "项目背景：优化登录转化率。目标：提升20%。用户场景：一键登录。验收指标：注册转化率统计。"
+    assert:
+      contains:
+        - "total_score"

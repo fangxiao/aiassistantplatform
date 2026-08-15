@@ -37,3 +37,23 @@ class PluginManifest(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("skill/tool id 重复")
         return v
+
+
+def validate_manifest(manifest: PluginManifest) -> None:
+    """结构校验;不通过抛 PluginValidationError(无 DB 依赖)。"""
+    from agentplatform.core.plugin.errors import PluginValidationError
+    from agentplatform.core.registry.version import parse
+
+    if not manifest.name.strip():
+        raise PluginValidationError("name 不能为空")
+    try:
+        parse(manifest.version)
+    except ValueError as exc:
+        raise PluginValidationError(f"version 非法: {exc}") from exc
+    for r in manifest.skills:
+        if not r.id.startswith("skill:"):
+            raise PluginValidationError(f"skill id 必须以 'skill:' 开头: {r.id}")
+    for r in manifest.tools:
+        if not r.id.startswith("tool:"):
+            raise PluginValidationError(f"tool id 必须以 'tool:' 开头: {r.id}")
+

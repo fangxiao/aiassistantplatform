@@ -21,7 +21,11 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[project.scripts]
+agentplatform = "agentplatform.cli.main:main"
+
 [dependency-groups]
+
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
@@ -57,3 +61,8 @@ extend-ignore = ["B008"]
 
 [tool.mypy]
 python_version = "3.12"
+
+# jose / passlib 无第三方类型 stub,per-module 忽略 missing imports(不新增依赖)
+[[tool.mypy.overrides]]
+module = ["jose.*", "passlib.*"]
+ignore_missing_imports = true

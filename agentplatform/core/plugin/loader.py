@@ -12,31 +12,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.plugin.errors import DependencyError, PluginValidationError
-from agentplatform.core.plugin.manifest import PluginManifest, ResourceDef
+from agentplatform.core.plugin.manifest import PluginManifest, ResourceDef, validate_manifest
 from agentplatform.core.plugin.model import Plugin, PluginStatus
 from agentplatform.core.registry.model import SkillTool, SkillToolKind, SkillToolSource
 from agentplatform.core.registry.service import check_dependencies, register
 from agentplatform.core.registry.version import parse
 
 
-def validate_manifest(manifest: PluginManifest) -> None:
-    """结构校验;不通过抛 PluginValidationError。"""
-    if not manifest.name.strip():
-        raise PluginValidationError("name 不能为空")
-    try:
-        parse(manifest.version)
-    except ValueError as exc:
-        raise PluginValidationError(f"version 非法: {exc}") from exc
-    for r in manifest.skills:
-        if not r.id.startswith("skill:"):
-            raise PluginValidationError(f"skill id 必须以 'skill:' 开头: {r.id}")
-    for r in manifest.tools:
-        if not r.id.startswith("tool:"):
-            raise PluginValidationError(f"tool id 必须以 'tool:' 开头: {r.id}")
-
 
 async def deploy_plugin(
-    session: AsyncSession, manifest: PluginManifest, owner_id: str | None = None
+    session: AsyncSession,
+    manifest: PluginManifest,
+    owner_id: str | None = None,
+    overwrite: bool = False,
 ) -> Plugin:
     """部署插件:校验 + 依赖解析 + 登记插件及其自有资源。"""
     validate_manifest(manifest)
@@ -50,10 +38,14 @@ async def deploy_plugin(
             Plugin.name == manifest.name, Plugin.version == manifest.version
         )
     )
-    if existing is not None:
+    if existing is not None and not overwrite:
         raise PluginValidationError(
             f"插件已存在: {manifest.name}@{manifest.version}(先卸载再重部署)"
         )
+    if existing is not None and overwrite:
+        await uninstall_plugin(session, existing)
+
+
 
     plugin = Plugin(
         name=manifest.name,

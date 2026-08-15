@@ -48,15 +48,22 @@ async def save_user_message(session: AsyncSession, session_id: uuid.UUID, conten
     return msg
 
 
-async def save_assistant_message(session: AsyncSession, session_id: uuid.UUID, text: str) -> Message:
+async def save_assistant_message(
+    session: AsyncSession, session_id: uuid.UUID, content: str | list[dict]
+) -> Message:
+    if isinstance(content, list):
+        blocks = content
+    else:
+        blocks = [{"type": "markdown", "data": {"text": content}}]
     msg = Message(
         session_id=session_id,
         role=MessageRole.assistant,
-        blocks=[{"type": "markdown", "data": {"text": text}}],
+        blocks=blocks,
     )
     session.add(msg)
     await session.flush()
     return msg
+
 
 
 async def list_messages(

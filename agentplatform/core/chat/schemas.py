@@ -20,6 +20,10 @@ class SessionOut(BaseModel):
     updated_at: datetime
 
 
+class UpdateSession(BaseModel):
+    title: str
+
+
 class SendMessage(BaseModel):
     content: str
 
@@ -28,4 +32,6 @@ class MessageOut(BaseModel):
     id: uuid.UUID
     role: str
     text: str
+    blocks: list[dict] | None = None
     created_at: datetime
+

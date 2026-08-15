@@ -24,3 +24,5 @@ async def resolve_endpoint(
         if ep.is_default and default is None:
             default = ep
     return default
+
+

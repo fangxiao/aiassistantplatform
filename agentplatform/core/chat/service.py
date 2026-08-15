@@ -32,11 +32,25 @@ def resource_ids_from_plugin(plugin: Plugin) -> list[str]:
 
 
 async def make_llm_client(session: AsyncSession, model: str | None) -> OpenAIClient:
-    """按模型解析端点并构造客户端;无可用端点抛 ChatError。"""
+    """按模型解析端点并构造客户端;无可用端点回退到 .env 配置，均无抛 ChatError。"""
     endpoint = await resolve_endpoint(session, model or "")
     if endpoint is None:
-        raise ChatError(f"未配置可用 LLM 端点(模型: {model or '默认'})")
+        from agentplatform.config import settings
+        from agentplatform.core.llm import crypto
+        from agentplatform.core.llm.model import LlmEndpoint
+
+        if settings.openai_base_url and settings.openai_api_key:
+            endpoint = LlmEndpoint(
+                name="default_env",
+                base_url=settings.openai_base_url,
+                model=model or settings.default_model,
+                api_key_enc=crypto.encrypt(settings.openai_api_key),
+                is_default=True,
+            )
+        else:
+            raise ChatError(f"未配置可用 LLM 端点(模型: {model or '默认'})")
     return OpenAIClient(endpoint)
+
 
 
 async def agent_stream_for_session(

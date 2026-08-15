@@ -6,6 +6,7 @@ CLI validate / deploy 用:加载插件代码模块 -> 提取 @skill/@tool 注册
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from agentplatform.sdk.decorators import as_skill_callable, as_tool_callable
@@ -51,5 +52,6 @@ def load_resources(path: str) -> list[dict]:
     if spec is None or spec.loader is None:
         raise ImportError(f"无法加载模块: {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return resources_from_module(module)

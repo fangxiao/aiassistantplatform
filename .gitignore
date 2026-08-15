@@ -38,3 +38,8 @@ out/
 # skills/rules/hooks/ecc/scripts/mcp-configs 等)本地生成、不入库。
 .claude/*
 !.claude/settings.json
+
+# Local dev chat history & test artifacts
+.chat_history.json
+*.shot.png
+
