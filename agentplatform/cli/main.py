@@ -214,8 +214,16 @@ def cmd_dev(args: argparse.Namespace) -> int:
     base = os.environ.get("OPENAI_BASE_URL") or settings.openai_base_url or "https://api.eaglesine.com/v1"
     key = os.environ.get("OPENAI_API_KEY") or settings.openai_api_key
     model = os.environ.get("MODEL") or settings.default_model or "DeepSeek-V3"
+
+    if not key or key == "dev":
+        print("\n❌ 错误: 未检测到有效 OPENAI_API_KEY。")
+        print("请在系统环境变量中设置: export OPENAI_API_KEY=\"sk-...\"")
+        print("或在项目根目录 / ~/.agentplatform/.env 中写入: OPENAI_API_KEY=sk-...\n")
+        return 1
+
     asyncio.run(run_dev_loop(Path(args.path), base, key, model))
     return 0
+
 
 
 

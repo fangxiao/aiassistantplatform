@@ -3,12 +3,26 @@
 从环境变量 / .env 加载(见 .env.example)。LLM 端点等后续里程碑在此扩展。
 """
 
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _find_env_files() -> tuple[str, ...]:
+    files = [
+        str(Path.home() / ".agentplatform" / ".env"),
+        str(Path.home() / ".config" / "agentplatform" / ".env"),
+    ]
+    cur = Path.cwd().resolve()
+    for parent in [cur, *cur.parents]:
+        env_p = parent / ".env"
+        if env_p.exists():
+            files.append(str(env_p))
+    return tuple(files)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=_find_env_files(), env_file_encoding="utf-8", extra="ignore"
     )
 
     database_url: str = (
@@ -25,4 +39,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
 
