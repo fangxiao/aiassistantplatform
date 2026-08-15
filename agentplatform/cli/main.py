@@ -268,18 +268,42 @@ def cmd_update(args: argparse.Namespace) -> int:
     except Exception:
         name = "plugin"
 
-    # 1. 如果指定了 --package，自动通过 pip 拉取/升级最新的 agentplatform 包
+    # 1. 如果指定了 --package，自动升级包(若指定了 --target 则直接从平台服务端下载 live 代码包)
     if getattr(args, "package", False):
-        print("📦 正在拉取升级 agentplatform 最新软件包...")
-        try:
-            cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "agentplatform"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            if proc.returncode == 0:
-                print("✅ 软件包已升级到最新版本！")
-            else:
-                print(f"提示: pip 升级输出: {proc.stderr.strip() or proc.stdout.strip()}")
-        except Exception as exc:
-            print(f"提示: 尝试自动升级包失败 ({exc})，建议运行 pip install -U agentplatform")
+        if getattr(args, "target", None):
+            pkg_url = f"{args.target.rstrip('/')}/api/specs/package.tar.gz"
+            print(f"📦 正在直接从平台服务拉取最新 live 软件包 ({pkg_url})...")
+            try:
+                import tempfile
+                resp = httpx.get(pkg_url, timeout=30)
+                if resp.status_code == 200:
+                    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tf:
+                        tf.write(resp.content)
+                        tmp_path = tf.name
+                    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", tmp_path]
+                    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                    if proc.returncode == 0:
+                        print("✅ 已直接从平台服务端成功同步安装最新代码包！")
+                    else:
+                        print(f"提示: pip 安装输出: {proc.stderr.strip() or proc.stdout.strip()}")
+                else:
+                    print(f"提示: 从平台拉取包返回 {resp.status_code}，尝试常规 pip 升级...")
+                    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "agentplatform"], check=False)
+            except Exception as exc:
+                print(f"提示: 平台拉取异常 ({exc})，尝试常规 pip 升级...")
+                subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "agentplatform"], check=False)
+        else:
+            print("📦 正在从远程仓库升级 agentplatform 最新软件包...")
+            try:
+                cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "agentplatform"]
+                proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if proc.returncode == 0:
+                    print("✅ 软件包已升级到最新版本！")
+                else:
+                    print(f"提示: pip 升级输出: {proc.stderr.strip() or proc.stdout.strip()}")
+            except Exception as exc:
+                print(f"提示: 尝试自动升级包失败 ({exc})，建议运行 pip install -U agentplatform")
+
 
     # 2. 如果指定了 --target，从远程平台服务器拉取最新规范模板
     content = TEMPLATE_AGENTS_MD
