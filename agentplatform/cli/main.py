@@ -121,7 +121,16 @@ TEMPLATE_AGENTS_MD = """\
 2. **开发者模式 (Developer Mode)**：
    - 触发暗号：当开发者说「切回开发」、「改代码」、「修 bug」或提出代码修改需求时。
    - 行为要求：恢复为资深研发伙伴，协助开发者分析代码、编写单测、修复 Bug 并执行 validate。
+
+---
+
+## 6. 自然语言一键远程升级指令 (REMOTE AUTO-UPGRADE DIRECTIVE)
+- 当开发者说「更新 CLI」、「升级平台」、「同步规范」、「拉取最新平台代码」或「更新一下」时：
+  1. 立即在后台静默执行：`agentplatform update --package --target http://localhost:8000`
+  2. 自动从远程平台服务拉取最新的 live 代码包与最新规范模版；
+  3. 执行完毕后向开发者回复简明升级确认。
 """
+
 
 
 
@@ -252,6 +261,7 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 def cmd_update(args: argparse.Namespace) -> int:
     """一键同步/升级插件项目的标准规范与协议文件 (AGENTS.md / CLAUDE.md)，支持拉取新包与远程规范。"""
+    import os
     import subprocess
     import sys
     import httpx
@@ -268,10 +278,12 @@ def cmd_update(args: argparse.Namespace) -> int:
     except Exception:
         name = "plugin"
 
-    # 1. 如果指定了 --package，自动升级包(若指定了 --target 则直接从平台服务端下载 live 代码包)
+    target = getattr(args, "target", None) or os.environ.get("AGENTPLATFORM_TARGET") or "http://localhost:8000"
+
+    # 1. 如果指定了 --package，自动升级包(默认直接从平台服务端下载 live 代码包)
     if getattr(args, "package", False):
-        if getattr(args, "target", None):
-            pkg_url = f"{args.target.rstrip('/')}/api/specs/package.tar.gz"
+        if target:
+            pkg_url = f"{target.rstrip('/')}/api/specs/package.tar.gz"
             print(f"📦 正在直接从平台服务拉取最新 live 软件包 ({pkg_url})...")
             try:
                 import tempfile
@@ -304,11 +316,10 @@ def cmd_update(args: argparse.Namespace) -> int:
             except Exception as exc:
                 print(f"提示: 尝试自动升级包失败 ({exc})，建议运行 pip install -U agentplatform")
 
-
-    # 2. 如果指定了 --target，从远程平台服务器拉取最新规范模板
+    # 2. 从远程平台服务器拉取最新规范模板
     content = TEMPLATE_AGENTS_MD
-    if getattr(args, "target", None):
-        target_url = f"{args.target.rstrip('/')}/api/specs/agents-md"
+    if target:
+        target_url = f"{target.rstrip('/')}/api/specs/agents-md"
         print(f"🌐 正在从远程平台拉取最新规范 ({target_url})...")
         try:
             resp = httpx.get(target_url, timeout=10)
@@ -319,6 +330,7 @@ def cmd_update(args: argparse.Namespace) -> int:
                 print(f"警告: 远程获取失败 ({resp.status_code})，使用本地内置最新规范。")
         except Exception as exc:
             print(f"警告: 连接远程平台失败 ({exc})，使用本地内置最新规范。")
+
 
     # 3. 刷新写入本地 CLAUDE.md 与 AGENTS.md
     formatted_content = content.format(name=name)
