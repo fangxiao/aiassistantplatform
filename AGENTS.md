@@ -1,4 +1,4 @@
-# 🤖 AgentPlatform 智能体平台与插件开发核心规范 (CLAUDE.md)
+# 🤖 AgentPlatform 智能体平台与插件开发核心规范 (AGENTS.md)
 
 本仓库是 **AgentPlatform (AI Assistant Platform)** 核心平台与插件开发生态根目录。
 

@@ -1,0 +1,11 @@
+# AgentPlatform AI 插件与平台开发规范 (Cursor / Windsurf)
+- 本仓库是 AgentPlatform AI 智能体开发与分发平台。
+- 平台第一特色：复用平台公共 Skill (`skill:summarize`, `skill:structured_output`) 和 Tool (`tool:pdf_parse`)，在 plugin.yaml 的 depends_on 声明。
+- 平台富交互控件能力：模型可通过 output_block 工具输出 22 种富交互控件（Markdown, Table, Card, Collapsible, Mermaid, input.form, input.confirm, input.select, action.copy 等）。
+- 插件开发者命令：
+  - 查阅公共能力：agentplatform registry
+  - 查阅可用控件：agentplatform widgets
+  - 校验清单：agentplatform validate .
+  - 运行测试：agentplatform test .
+  - 本地冒烟：agentplatform dev .
+  - 部署平台：agentplatform deploy . --target http://localhost:8000

@@ -3,7 +3,6 @@
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Composer from "../components/chat/Composer";
-
 import MessageList from "../components/chat/MessageList";
 import { Navbar } from "../components/layout/Navbar";
 import { SessionDrawer } from "../components/chat/SessionDrawer";
@@ -17,8 +16,15 @@ import {
   sendFeedbackEvent,
   sendMessage,
 } from "../lib/api/chat";
+import { apiGet } from "../lib/api/client";
 import { isAuthed } from "../lib/api/auth";
-import type { ChatMessage, ContentBlock, SessionInfo, ToolCallInfo } from "../lib/types";
+import type {
+  AssistantInfo,
+  ChatMessage,
+  ContentBlock,
+  SessionInfo,
+  ToolCallInfo,
+} from "../lib/types";
 
 let tempSeq = 0;
 const nid = (prefix: string) => `${prefix}-${Date.now()}-${tempSeq++}`;
@@ -28,12 +34,13 @@ function ChatHome() {
   const searchParams = useSearchParams();
   const querySessionId = searchParams.get("sessionId");
 
-
+  const [assistants, setAssistants] = useState<AssistantInfo[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [current, setCurrent] = useState<SessionInfo | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
+  const [showAsstModal, setShowAsstModal] = useState(false);
 
   // 门禁
   useEffect(() => {
@@ -66,6 +73,14 @@ function ChatHome() {
   useEffect(() => {
     if (!isAuthed()) return;
     (async () => {
+      // 加载助手市场列表，用于名称映射与详情呈现
+      try {
+        const asstList = await apiGet<AssistantInfo[]>("/assistants");
+        setAssistants(asstList);
+      } catch {
+        // ignore
+      }
+
       let list = await refreshSessions();
       if (querySessionId) {
         const found = list.find((s) => s.id === querySessionId);
@@ -211,6 +226,8 @@ function ChatHome() {
     }
   };
 
+  const currentAssistant = assistants.find((a) => a.id === current?.plugin_id);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navbar />
@@ -219,6 +236,7 @@ function ChatHome() {
         {/* 左侧会话抽屉 */}
         <SessionDrawer
           sessions={sessions}
+          assistants={assistants}
           currentId={current?.id ?? null}
           onSelect={(id) => {
             const s = sessions.find((x) => x.id === id);
@@ -233,22 +251,69 @@ function ChatHome() {
 
         {/* 右侧主聊天区域 */}
         <main className="flex flex-1 flex-col overflow-hidden bg-slate-50">
-          <div className="flex h-11 items-center justify-between border-b border-slate-200 bg-white px-4">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-800">
-                {current?.title || (current ? `会话 ${current.id.slice(0, 8)}` : "新建对话")}
-              </span>
-              {current?.plugin_id && (
-                <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 border border-indigo-100">
-                  插件助手
-                </span>
+          {/* Header Bar 明确展示当前助手信息 */}
+          <div className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-2xs">
+            <div className="flex items-center gap-3">
+              {currentAssistant ? (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 text-base font-bold shadow-2xs">
+                    🤖
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900">
+                        {currentAssistant.name}
+                      </span>
+                      <span className="rounded bg-slate-100 px-1.5 py-0.2 font-mono text-[10px] text-slate-600">
+                        v{currentAssistant.version}
+                      </span>
+                      {currentAssistant.model && (
+                        <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.2 font-mono text-[10px] text-emerald-700">
+                          {currentAssistant.model}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowAsstModal(true)}
+                        title="查看助手详情与依赖"
+                        className="text-slate-400 hover:text-slate-600 text-xs transition"
+                      >
+                        ℹ️
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate max-w-sm">
+                      {current?.title || "专属助手会话"}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs">
+                    💬
+                  </span>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800">
+                      {current?.title || "通用对话"}
+                    </span>
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.2 text-[10px] text-slate-500">
+                      默认助手
+                    </span>
+                  </div>
+                </div>
               )}
             </div>
-            <div className="text-[11px] text-slate-400">
+
+            <div className="text-[11px] text-slate-400 flex items-center gap-2">
               {streaming ? (
-                <span className="text-indigo-600 font-medium animate-pulse">● 正在生成回答与组件...</span>
+                <span className="inline-flex items-center gap-1.5 text-indigo-600 font-medium animate-pulse">
+                  <span className="h-2 w-2 rounded-full bg-indigo-600" />
+                  正在生成回答与富交互组件...
+                </span>
               ) : (
-                "就绪"
+                <span className="inline-flex items-center gap-1 text-slate-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  就绪
+                </span>
               )}
             </div>
           </div>
@@ -257,6 +322,76 @@ function ChatHome() {
           <Composer onSend={handleSend} disabled={streaming} />
         </main>
       </div>
+
+      {/* Assistant Details Modal */}
+      {showAsstModal && currentAssistant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🤖</span>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">{currentAssistant.name}</h3>
+                  <span className="font-mono text-xs text-slate-400">v{currentAssistant.version}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAsstModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="font-semibold text-slate-700">助手描述：</span>
+                <p className="mt-1 text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">
+                  {currentAssistant.description || "暂无描述"}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                  <span className="text-slate-500">作者 / 发布者:</span>
+                  <div className="font-semibold text-slate-800 mt-0.5">{currentAssistant.author || "官方平台"}</div>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                  <span className="text-slate-500">运行模型:</span>
+                  <div className="font-mono font-semibold text-slate-800 mt-0.5">{currentAssistant.model || "默认模型"}</div>
+                </div>
+              </div>
+
+              {currentAssistant.depends_on && currentAssistant.depends_on.length > 0 && (
+                <div>
+                  <span className="font-semibold text-slate-700">复用的平台共享能力 (depends_on)：</span>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {currentAssistant.depends_on.map((dep, idx) => (
+                      <span
+                        key={idx}
+                        className="rounded bg-indigo-50 border border-indigo-100 px-2 py-0.5 font-mono text-[10px] text-indigo-700"
+                      >
+                        {dep}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAsstModal(false)}
+                className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -274,4 +409,3 @@ export default function Home() {
     </Suspense>
   );
 }
-

@@ -14,8 +14,10 @@ class ResourceDef(BaseModel):
 
     id: str
     file: str
+    code: str | None = None  # 源码内容 (支持跨机器/分布式部署时服务端持久化存储与加载)
     description: str | None = None
     schema_: dict | None = Field(default=None, alias="schema")  # JSON 键为 schema
+
 
 
 class PluginManifest(BaseModel):

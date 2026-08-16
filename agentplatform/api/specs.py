@@ -14,13 +14,21 @@ class SpecsResponse(BaseModel):
     template_agents_md: str
 
 
+@router.get("/capabilities")
+async def get_capabilities() -> dict:
+    """获取平台共享能力全景清单 (Skill / Tool / 22 种 ContentBlock 控件)。"""
+    from agentplatform.core.registry.capabilities import get_capabilities_manifest
+
+    return get_capabilities_manifest()
+
+
 @router.get("/agents-md", response_model=SpecsResponse)
 async def get_latest_specs() -> SpecsResponse:
     """获取平台最新版本的 AGENTS.md / CLAUDE.md 规范模版。"""
     from agentplatform.cli.main import TEMPLATE_AGENTS_MD
 
     return SpecsResponse(
-        version="0.1.0",
+        version="0.2.0",
         template_agents_md=TEMPLATE_AGENTS_MD,
     )
 

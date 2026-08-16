@@ -26,6 +26,12 @@ async def run_dev_loop(root: Path, base_url: str, api_key: str, model: str) -> N
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
+        from agentplatform.cli import yaml_io
+        from agentplatform.core.registry.service import seed_builtin, split_dependency
+
+        # 注册平台内置/公共技能与工具
+        await seed_builtin(session)
+
         # 把插件自有资源登记进本地注册表(内存库,用于 agent 循环)
         for r in result["resources"]:
             await register(
@@ -47,9 +53,17 @@ async def run_dev_loop(root: Path, base_url: str, api_key: str, model: str) -> N
             is_default=True,
         )
         _attach_dev_impls(root)
+
+        # 解析 depends_on 与自有资源 id 集合
+        manifest_path = root / "plugin.yaml"
+        raw_m = yaml_io.load_manifest(manifest_path) if manifest_path.exists() else {}
+        dep_ids = [split_dependency(d)[0] for d in raw_m.get("depends_on", []) or []]
+        all_resource_ids = list(dict.fromkeys(dep_ids + [r["id"] for r in result["resources"]]))
+
         # 本地端点直接构造客户端(dev 模式不经 DB 查端点)
         client = OpenAIClient(endpoint)
         print("=== 本地 dev 对话(输入 exit 退出)===")
+        print(f"📦 已挂载资源 ({len(all_resource_ids)}): {', '.join(all_resource_ids)}")
         while True:
             try:
                 text = input("你> ").strip()
@@ -57,7 +71,7 @@ async def run_dev_loop(root: Path, base_url: str, api_key: str, model: str) -> N
                 break
             if text.lower() in ("exit", "quit"):
                 break
-            async for ev in stream_agent(session, client, resource_ids=[r["id"] for r in result["resources"]], user_message=text):
+            async for ev in stream_agent(session, client, resource_ids=all_resource_ids, user_message=text):
                 if ev.type == "delta" and ev.text:
                     print(ev.text, end="", flush=True)
                 elif ev.type == "tool_call" and ev.tool_trace:

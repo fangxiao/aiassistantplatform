@@ -107,7 +107,7 @@ async def execute_tool(resource: SkillTool, args: dict) -> str:
 
 
 async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall) -> str:
-    """执行简单 skill:填充 prompt 模板 + 一次 LLM 调用(002 §5.3)。"""
+    """执行简单 skill: 填充 prompt 模板 + 一次 LLM 调用 (002 §5.3)。支持无本地文件时的元数据优雅降级。"""
     if resource.id in _DEV_REGISTRY:
         impl = _DEV_REGISTRY[resource.id]
         prompt = impl(args)
@@ -115,11 +115,27 @@ async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall)
             prompt = await prompt
         return await llm_call(str(prompt))
 
-    impl = resolve_impl(resource)
+    try:
+        impl = resolve_impl(resource)
+    except AgentExecError:
+        # 优雅降级：如果无本地实现文件（如纯 Prompt 声明或跨机器部署），通过资源描述与参数动态构建提示词
+        import json
+
+        args_str = json.dumps(args, ensure_ascii=False, indent=2)
+        desc = resource.description or resource.name
+        prompt = (
+            f"请作为专业技能 [{resource.name}] 执行以下任务。\n"
+            f"技能说明: {desc}\n"
+            f"输入参数:\n{args_str}\n\n"
+            f"请根据上述要求与参数完成处理并输出专业、详尽的结果。"
+        )
+        return await llm_call(prompt)
+
     if hasattr(impl, "__skill_registry__"):
         for entry in getattr(impl, "__skill_registry__", []):
             if entry["id"] == resource.id:
                 from agentplatform.sdk.decorators import as_skill_callable
+
                 callable_skill = as_skill_callable(entry["cls"])
                 prompt = callable_skill(args)
                 if hasattr(prompt, "__await__"):
@@ -128,8 +144,14 @@ async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall)
 
     build = getattr(impl, "build_prompt", None)
     if build is None:
-        raise AgentExecError(f"skill {resource.id} 缺少 build_prompt 实现")
+        import json
+
+        args_str = json.dumps(args, ensure_ascii=False, indent=2)
+        desc = resource.description or resource.name
+        prompt = f"请作为技能 [{resource.name}] ({desc}) 处理以下参数:\n{args_str}"
+        return await llm_call(prompt)
     prompt = build(**args)
     return await llm_call(prompt)
+
 
 

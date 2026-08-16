@@ -1,18 +1,18 @@
-# 🤖 AgentPlatform 智能体平台与插件开发核心规范 (CLAUDE.md)
-
-本仓库是 **AgentPlatform (AI Assistant Platform)** 核心平台与插件开发生态根目录。
-
+---
+name: agentplatform-plugin-dev
+description: Comprehensive development guide, shared skill/tool catalog, and 22 UI ContentBlocks specification for AgentPlatform plugins.
 ---
 
-## 🌟 平台核心优势与三大特色
+# AgentPlatform 智能体插件开发专属指南
 
-1. **第一特色 · 细粒度能力复用 (Skill & Tool Registry)**：
+## 🌟 平台核心优势与三大特色
+1. **细粒度能力复用 (Skill & Tool Registry)**：
    - 平台维护公共注册表，内置通用技能与工具（`tool:pdf_parse@^1.0`、`skill:summarize@^1.0`、`skill:structured_output@^1.0`）。
    - 插件通过 `depends_on` 声明复合 SemVer 版本约束（`^`、`~`、`>=`），实现跨插件高效复用与组合。
-2. **第二特色 · AI-Native 插件 SDK 与 CLI 工具链**：
+2. **AI-Native 插件 SDK 与 CLI 工具链**：
    - 提供简洁优雅的 Python SDK（`@skill`、`@tool` 装饰器）。
    - CLI 提供 `init` / `registry` / `widgets` / `validate` / `dev` / `test` / `deploy` / `chat` / `update` 全套闭环。
-3. **第三特色 · 消息信封与 22 种富交互组件 (ContentBlocks)**：
+3. **消息信封与 22 种富交互组件 (ContentBlocks)**：
    - 全面采用 `Message = {role, blocks[]}` 消息信封。
    - 智能体可通过 `output_block` 工具调用 22 种内置组件（展示类 8 种、交互输入类 11 种、反馈动作类 3 种）。
 
@@ -31,23 +31,7 @@
 
 ---
 
-## 🛠️ 插件开发者核心指引
-
-### 1. 插件工程标准目录结构
-```
-my-assistant/
-├── plugin.yaml          # 清单文件 (声明元信息、模型、depends_on、skills 与 tools)
-├── pyproject.toml       # 插件依赖声明 (agentplatform, pyyaml, pytest)
-├── skills/              # 领域技能 (Prompt + 参数渲染，使用 @skill)
-│   └── custom_skill.py
-├── tools/               # 确定性工具 (Python 计算/接口，使用 @tool)
-│   └── custom_tool.py
-├── test/                # 自动化测试用例
-│   └── test_cases.yaml
-└── .agents/skills/      # AI 智能体开发技能规范
-```
-
-### 2. 常用开发命令
+## 🛠️ 常用开发命令
 - **查阅公共技能与工具**：`agentplatform registry`
 - **查阅 22 种富交互控件**：`agentplatform widgets`
 - **新建插件脚手架**：`agentplatform init <plugin_name>`

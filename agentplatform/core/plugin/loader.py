@@ -70,6 +70,23 @@ async def _register_resource(
     kind: SkillToolKind,
     manifest: PluginManifest,
 ) -> None:
+    from pathlib import Path
+
+    impl_path = res.file
+    if res.code:
+        storage_dir = (
+            Path.home()
+            / ".agentplatform"
+            / "installed_plugins"
+            / manifest.name
+            / ("skills" if kind == SkillToolKind.skill else "tools")
+        )
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        file_name = Path(res.file).name or f"{res.id.split(':', 1)[1]}.py"
+        target_file = storage_dir / file_name
+        target_file.write_text(res.code, encoding="utf-8")
+        impl_path = str(target_file.resolve())
+
     await register(
         session,
         resource_id=res.id,
@@ -78,7 +95,7 @@ async def _register_resource(
         version=manifest.version,
         source=SkillToolSource.private,
         schema_=res.schema_ or {"parameters": {"type": "object"}},
-        impl_path=res.file,
+        impl_path=impl_path,
         description=res.description,
         owner_id=manifest.name,  # 资源归属插件,便于卸载时按 owner 清理
     )
@@ -106,6 +123,9 @@ async def set_status(
 
 async def uninstall_plugin(session: AsyncSession, plugin: Plugin) -> None:
     """删除插件及其私有 skill/tool(注册表 source=private)。"""
+    import shutil
+    from pathlib import Path
+
     await session.execute(
         sa.delete(SkillTool).where(
             SkillTool.owner_id == plugin.name,
@@ -113,5 +133,11 @@ async def uninstall_plugin(session: AsyncSession, plugin: Plugin) -> None:
             SkillTool.source == SkillToolSource.private,
         )
     )
+
+    plugin_storage = Path.home() / ".agentplatform" / "installed_plugins" / plugin.name
+    if plugin_storage.exists():
+        shutil.rmtree(plugin_storage, ignore_errors=True)
+
     await session.delete(plugin)
     await session.flush()
+

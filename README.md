@@ -75,19 +75,25 @@ npm run dev
 ## 🛠️ CLI 插件开发与部署
 
 ```bash
-# 快速初始化一个助手插件
+# 1. 查阅平台公共内置/共享技能 (Skill) 与工具 (Tool) 注册表
+uv run python -m agentplatform.cli.main registry
+
+# 2. 查阅平台 22 种富交互 ContentBlock 控件清单与调用样例
+uv run python -m agentplatform.cli.main widgets
+
+# 3. 快速初始化插件脚手架 (自动注入 AI 规范与依赖模板)
 uv run python -m agentplatform.cli.main init my-assistant
 
-# 校验清单规范与代码合法性
+# 4. 校验清单规范与代码合法性
 uv run python -m agentplatform.cli.main validate ./my-assistant
 
-# 本地交互式调试 (不依赖远程服务器)
+# 5. 本地交互式调试 (自动挂载 depends_on 共享能力，无需依赖远程服务器)
 uv run python -m agentplatform.cli.main dev ./my-assistant
 
-# 执行自动化测试用例
+# 6. 执行自动化测试用例
 uv run python -m agentplatform.cli.main test ./my-assistant
 
-# 部署到平台
+# 7. 部署到平台 (自动准入校验、依赖解析并入库助手市场)
 uv run python -m agentplatform.cli.main deploy ./my-assistant --target http://localhost:8000
 ```
 

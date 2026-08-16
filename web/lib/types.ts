@@ -59,3 +59,36 @@ export interface LlmEndpointInfo {
   model: string;
   is_default: boolean;
 }
+
+export interface BuiltinResourceInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  schema: Record<string, any>;
+  dependency_example: string;
+}
+
+export interface ContentBlockDef {
+  type: string;
+  category: "display" | "interactive" | "action";
+  category_name: string;
+  name: string;
+  description: string;
+  sample_data: Record<string, any>;
+  python_snippet: string;
+}
+
+export interface CapabilitiesInfo {
+  platform: string;
+  version: string;
+  summary: {
+    builtin_skills_count: number;
+    builtin_tools_count: number;
+    content_blocks_count: number;
+  };
+  builtin_skills: BuiltinResourceInfo[];
+  builtin_tools: BuiltinResourceInfo[];
+  content_blocks: ContentBlockDef[];
+}
+

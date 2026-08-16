@@ -63,6 +63,12 @@ async def run_single_chat(
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
+        from agentplatform.cli import yaml_io
+        from agentplatform.core.registry.service import seed_builtin, split_dependency
+
+        # 注册平台内置/公共技能与工具
+        await seed_builtin(session)
+
         for r in val_res["resources"]:
             await register(
                 session,
@@ -76,7 +82,11 @@ async def run_single_chat(
                 owner_id="dev",
             )
 
-        resource_ids = [r["id"] for r in val_res["resources"]]
+        manifest_path = root / "plugin.yaml"
+        raw_m = yaml_io.load_manifest(manifest_path) if manifest_path.exists() else {}
+        dep_ids = [split_dependency(d)[0] for d in raw_m.get("depends_on", []) or []]
+        resource_ids = list(dict.fromkeys(dep_ids + [r["id"] for r in val_res["resources"]]))
+
         result = await run_agent(
             session,
             client,
