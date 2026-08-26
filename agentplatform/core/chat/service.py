@@ -84,5 +84,6 @@ async def agent_stream_for_session(
         resource_ids=resource_ids,
         user_message=user_message,
         history=prior,
+        owner_id=str(sess.user_id) if sess.user_id else None,
     ):
         yield ev

@@ -9,14 +9,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
-
-import yaml  # type: ignore[import-untyped]
 
 from agentplatform.cli import yaml_io
 from agentplatform.cli.validate import validate_project
-from agentplatform.core.registry.capabilities import CONTENT_BLOCKS_CATALOG, get_capabilities_manifest
+from agentplatform.core.registry.capabilities import (
+    CONTENT_BLOCKS_CATALOG,
+    get_capabilities_manifest,
+)
 
 TEMPLATE_PLUGIN_YAML = """\
 # 🤖 AgentPlatform 插件清单 (006 §2)
@@ -322,14 +323,14 @@ def get_target_url(args: argparse.Namespace | None = None) -> str:
     if env_target:
         return env_target.rstrip("/")
 
-    try:
-        user_cfg = Path.home() / ".agentplatform" / "config.json"
-        if user_cfg.exists():
-            cfg = json.loads(user_cfg.read_text(encoding="utf-8"))
-            if cfg.get("target"):
-                return cfg["target"].rstrip("/")
-    except Exception:
-        pass
+    user_cfg = Path.home() / ".agentplatform" / "config.json"
+    cfg: dict = {}
+    with suppress(OSError, ValueError):
+        loaded_cfg = json.loads(user_cfg.read_text(encoding="utf-8"))
+        if isinstance(loaded_cfg, dict):
+            cfg = loaded_cfg
+    if cfg.get("target"):
+        return cfg["target"].rstrip("/")
 
     return "http://localhost:8000"
 
@@ -341,14 +342,12 @@ def cmd_registry(args: argparse.Namespace) -> int:
 
     # 优先尝试从远程平台服务拉取实时注册表 (跨机器支持)
     if target:
-        try:
+        with suppress(Exception):
             import httpx
 
             resp = httpx.get(f"{target}/api/specs/capabilities", timeout=5)
             if resp.status_code == 200:
                 manifest = resp.json()
-        except Exception:
-            pass
 
     if manifest is None:
         manifest = get_capabilities_manifest()
@@ -443,10 +442,8 @@ def _build_manifest(root: Path, resources: list[dict]) -> dict:
         if file_path_str:
             p = Path(file_path_str) if Path(file_path_str).is_absolute() else (root / file_path_str)
             if p.exists() and p.is_file():
-                try:
+                with suppress(OSError, UnicodeDecodeError):
                     code_content = p.read_text(encoding="utf-8")
-                except Exception:
-                    pass
 
         by_kind[r["kind"]].append(
             {
@@ -546,7 +543,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
 def cmd_update(args: argparse.Namespace) -> int:
     """一键从远程平台服务同步/升级插件项目的标准规范、SDK 包与协议文件 (默认跨机器远程同步)。"""
-    import os
     import subprocess
     import sys
 
@@ -561,7 +557,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     try:
         raw = yaml_io.load_manifest(manifest_path)
         name = raw.get("name", "plugin")
-    except Exception:
+    except (OSError, TypeError):
         name = "plugin"
 
     target = get_target_url(args)
@@ -600,7 +596,7 @@ def cmd_update(args: argparse.Namespace) -> int:
                     print(f"💡 提示: 自动包安装已就绪。如需升级环境，可手动运行: uv pip install {pkg_url}")
             else:
                 print(f"提示: 远程平台未返回包 ({resp.status_code})，跳过 SDK 升级。")
-        except Exception as exc:
+        except (httpx.HTTPError, ImportError, OSError) as exc:
             print(f"提示: 远程平台包下载异常 ({exc})，跳过 SDK 升级。")
 
     # 2. 从远程平台服务器拉取最新规范模板
@@ -614,7 +610,7 @@ def cmd_update(args: argparse.Namespace) -> int:
             print(f"✅ 成功获取远程规范模版 (v{resp.json().get('version', 'latest')})")
         else:
             print(f"警告: 远程获取失败 ({resp.status_code})，使用本地内置最新规范。")
-    except Exception as exc:
+    except (httpx.HTTPError, ImportError, ValueError, AttributeError) as exc:
         print(f"警告: 连接远程平台失败 ({exc})，使用本地内置最新规范。")
 
     # 3. 刷新写入本地 CLAUDE.md、AGENTS.md、.cursorrules、pyproject.toml 与 .agents 技能

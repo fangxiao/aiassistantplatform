@@ -10,6 +10,7 @@ from agentplatform.api import (
     admin_llm,
     assistants,
     auth,
+    browser,
     chat,
     health,
     plugins,
@@ -26,5 +27,6 @@ api_router.include_router(admin_llm.router)
 api_router.include_router(plugins.router)
 api_router.include_router(chat.router)
 api_router.include_router(specs.router)
+api_router.include_router(browser.router)
 
 

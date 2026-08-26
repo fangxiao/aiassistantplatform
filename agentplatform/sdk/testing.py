@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentplatform.sdk.base import Context, Skill, Tool
+from agentplatform.sdk.base import Context, Skill
 
 
 class TestContext(Context):

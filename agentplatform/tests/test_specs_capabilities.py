@@ -1,16 +1,10 @@
 """平台共享能力、22 种控件元数据与 CLI 增强功能测试。"""
 
 from pathlib import Path
-from unittest.mock import patch
 
 from httpx import AsyncClient
 
 from agentplatform.cli.main import (
-    cmd_guide,
-    cmd_init,
-    cmd_registry,
-    cmd_update,
-    cmd_widgets,
     main,
 )
 from agentplatform.core.registry.capabilities import (
@@ -23,8 +17,8 @@ class TestCapabilitiesCatalog:
     def test_catalog_structure(self) -> None:
         manifest = get_capabilities_manifest()
         assert manifest["platform"] == "AgentPlatform"
-        assert len(manifest["builtin_skills"]) == 2
-        assert len(manifest["builtin_tools"]) == 1
+        assert len(manifest["builtin_skills"]) == 3
+        assert len(manifest["builtin_tools"]) == 2
         assert len(manifest["content_blocks"]) == 22
         assert len(CONTENT_BLOCKS_CATALOG) == 22
 

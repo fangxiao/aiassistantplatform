@@ -84,10 +84,10 @@ async def execute_tool(resource: SkillTool, args: dict) -> str:
             result = await result
         return result if isinstance(result, str) else str(result)
 
-    impl = resolve_impl(resource)
-    run_fn = getattr(impl, "run", None)
-    if run_fn is None and hasattr(impl, "__tool_registry__"):
-        for entry in getattr(impl, "__tool_registry__", []):
+    module = resolve_impl(resource)
+    run_fn = getattr(module, "run", None)
+    if run_fn is None and hasattr(module, "__tool_registry__"):
+        for entry in getattr(module, "__tool_registry__", []):
             if entry["id"] == resource.id:
                 from agentplatform.sdk.decorators import as_tool_callable
                 run_fn = as_tool_callable(entry["obj"])
@@ -116,7 +116,7 @@ async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall)
         return await llm_call(str(prompt))
 
     try:
-        impl = resolve_impl(resource)
+        module = resolve_impl(resource)
     except AgentExecError:
         # 优雅降级：如果无本地实现文件（如纯 Prompt 声明或跨机器部署），通过资源描述与参数动态构建提示词
         import json
@@ -131,8 +131,8 @@ async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall)
         )
         return await llm_call(prompt)
 
-    if hasattr(impl, "__skill_registry__"):
-        for entry in getattr(impl, "__skill_registry__", []):
+    if hasattr(module, "__skill_registry__"):
+        for entry in getattr(module, "__skill_registry__", []):
             if entry["id"] == resource.id:
                 from agentplatform.sdk.decorators import as_skill_callable
 
@@ -142,7 +142,7 @@ async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall)
                     prompt = await prompt
                 return await llm_call(str(prompt))
 
-    build = getattr(impl, "build_prompt", None)
+    build = getattr(module, "build_prompt", None)
     if build is None:
         import json
 

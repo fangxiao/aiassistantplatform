@@ -16,8 +16,6 @@ from agentplatform.core.plugin.manifest import PluginManifest, ResourceDef, vali
 from agentplatform.core.plugin.model import Plugin, PluginStatus
 from agentplatform.core.registry.model import SkillTool, SkillToolKind, SkillToolSource
 from agentplatform.core.registry.service import check_dependencies, register
-from agentplatform.core.registry.version import parse
-
 
 
 async def deploy_plugin(

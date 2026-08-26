@@ -4,6 +4,7 @@
 """
 
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +37,11 @@ class Settings(BaseSettings):
     default_model: str = "DeepSeek-V3"
     # 前端跨域来源(MVP dev:Next.js 3000;生产按环境注入)
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    # 浏览器隧道(Browser Tunnel / T11.11)
+    browser_tunnel_heartbeat: int = 30  # 服务端心跳探测间隔(秒)
+    browser_tunnel_timeout: int = 15  # 心跳探测超时(秒),超时断开
+    browser_route_timeout: int = 120  # 端侧动作最长等待(秒)
 
 
 settings = Settings()

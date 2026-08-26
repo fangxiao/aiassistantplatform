@@ -47,6 +47,10 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        # 前端在浏览器侧调用后端 API 的地址;局域网开发机需指向宿主机 LAN IP,
+        # 默认 localhost 仅本机可用(见 web/lib/api/client.ts)。
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000/api}
     ports:
       - "3000:3000"
     depends_on:

@@ -41,6 +41,7 @@ async def delete_session(session: AsyncSession, session_id: uuid.UUID) -> bool:
     if row is None:
         return False
     from sqlalchemy import delete
+
     from agentplatform.core.message.model import Message
 
     await session.execute(delete(Message).where(Message.session_id == session_id))

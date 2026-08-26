@@ -179,7 +179,39 @@ uv run python -m agentplatform.cli.main test ./my-assistant
 
 # 7. 一键部署到平台 (自动准入校验、依赖解析并入库助手市场)
 uv run python -m agentplatform.cli.main deploy ./my-assistant --target http://localhost:8000
+
+# 8. 一键从远程平台同步升级 SDK 包 + AI 规范 (平台能力更新后使用)
+uv run python -m agentplatform.cli.main update ./my-assistant --target http://localhost:8000
 ```
+
+> **远程目标地址 (`--target`)**：本地单机开发默认 `http://localhost:8000`；跨机器开发请改为**平台服务端的局域网/公网 IP**，例如 `http://192.168.111.104:8000`。
+> ⚠️ 若开发机配置了全局 SOCKS/HTTP 代理，局域网访问可能被代理拦截（pip 报 "Missing dependencies for SOCKS support"），请用 `env -u all_proxy -u https_proxy -u http_proxy` 前缀绕开代理执行。
+
+---
+
+## 🚀 5.1 远程同步升级：让插件始终跟随平台最新能力
+
+平台迭代新能力（新增 `@skill`/`@tool` 特性、新的 `output_block` 控件、更新的 AI 规范）后，插件工程**无需重建**，执行一次 `update` 即可同步到最新：
+
+```bash
+# 在插件工程目录内执行 (或指定路径)
+agentplatform update . --target http://192.168.111.104:8000
+```
+
+`update` 自动完成三件事：
+
+1. **升级 SDK 代码包**：从 `{target}/api/specs/package.tar.gz` 拉取最新 live 包并安装
+   （依次尝试 `uv pip` → `python -m pip` → `pip`；若都不可用会给出手动安装提示）
+2. **拉取最新 AI 规范模板**：从 `{target}/api/specs/agents-md` 获取
+3. **刷新工程内规范文件**：重写 `AGENTS.md` / `CLAUDE.md` / `.cursorrules`，补齐 `.agents/skills/` 与缺失的 `pyproject.toml`
+
+**仅同步规范、跳过 SDK 升级**：
+```bash
+agentplatform update . --target http://192.168.111.104:8000 --no-package
+```
+
+> **验证升级是否生效**：执行 `agentplatform --version` 或 `pip show agentplatform` 查看版本号是否更新。
+> 若 `update` 已输出 "✅ 已成功安装" 但版本未变，说明 SDK 被装进了**与 `agentplatform` 命令不同的环境**（如 venv/uv tool 隔离），需要在本机 Python 环境内手动 `pip install` 对应包。
 
 ---
 

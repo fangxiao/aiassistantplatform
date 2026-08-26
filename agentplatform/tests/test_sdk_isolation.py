@@ -1,8 +1,15 @@
 """架构隔离与 SDK 测试 (确保 SDK 与 CLI validate 零重型依赖)。"""
 
-import sys
-from agentplatform.sdk import Context, Skill, TestContext, create_test_context, render_skill, skill, tool
 from agentplatform.cli.validate import validate_project
+from agentplatform.sdk import (
+    Context,
+    Skill,
+    TestContext,
+    create_test_context,
+    render_skill,
+    skill,
+    tool,
+)
 
 
 def test_sdk_testing_helpers():
@@ -32,6 +39,7 @@ def test_sdk_isolation_no_db_dependencies():
 def test_sdk_dynamic_load_and_validate_json_serializable(tmp_path):
     """回归测试：动态加载 @tool/@skill 并确保 validate_project 输出可安全 json.dumps。"""
     import json
+
     from agentplatform.sdk.loader import load_resources
 
     tool_file = tmp_path / "custom_tool.py"

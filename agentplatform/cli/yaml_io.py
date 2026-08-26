@@ -53,7 +53,7 @@ def _simple_yaml_load(text: str) -> dict[str, Any]:
                 if v.startswith("[") and v.endswith("]"):
                     try:
                         result[k] = json.loads(v)
-                    except Exception:
+                    except ValueError:
                         items = [x.strip().strip("\"'") for x in v[1:-1].split(",") if x.strip()]
                         result[k] = items
                 elif v.lower() == "true":
@@ -76,10 +76,10 @@ def load_manifest(path: Path) -> dict:
     if HAS_PYYAML and yaml is not None:
         try:
             data = yaml.safe_load(content) or {}
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
+        except yaml.YAMLError:
+            data = {}
+        if isinstance(data, dict):
+            return data
 
     # 降级使用内置解析器
     data = _simple_yaml_load(content)

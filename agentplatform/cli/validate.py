@@ -10,10 +10,11 @@ from pathlib import Path
 
 from agentplatform.core.plugin.manifest import (
     PluginManifest,
+)
+from agentplatform.core.plugin.manifest import (
     validate_manifest as _validate_structure,
 )
 from agentplatform.sdk.loader import load_resources
-
 
 
 def validate_project(root: Path) -> dict:

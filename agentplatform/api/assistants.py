@@ -13,7 +13,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import (
-    get_current_user,
     get_optional_current_user,
 )
 from agentplatform.core.auth.model import User

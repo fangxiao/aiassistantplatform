@@ -160,6 +160,10 @@ async def send_message(
                 elif ev.type == "block_meta" and ev.block:
                     blocks.append(ev.block)
                     yield sse("block_meta", ev.block)
+                elif ev.type == "await_external" and ev.block:
+                    # 端侧动作块:作为独立事件下发,客户端执行端侧动作后通过 interact 回传
+                    blocks.append(ev.block)
+                    yield sse("await_external", ev.block)
                 elif ev.type == "tool_call" and ev.tool_trace is not None:
                     t = ev.tool_trace
                     yield sse(

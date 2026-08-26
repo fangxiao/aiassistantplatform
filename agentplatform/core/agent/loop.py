@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentplatform.core.agent.bridge import bridge
 from agentplatform.core.agent.errors import AgentLoopError
 from agentplatform.core.agent.executor import execute_skill, execute_tool
 from agentplatform.core.agent.messages import build_messages, build_system_prompt
@@ -21,6 +22,14 @@ from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
 
 MAX_ITERATIONS = 6
+
+# 端侧工具标记:impl_path 以该前缀开头表示"非本地执行,下发到端侧(浏览器/扩展)等待结果回传"
+ENDPOINT_PREFIX = "endpoint:"
+
+
+def is_endpoint_resource(resource: SkillTool | None) -> bool:
+    """判断资源是否为端侧工具(endpoint 路由,不本地执行)。"""
+    return resource is not None and (resource.impl_path or "").startswith(ENDPOINT_PREFIX)
 
 
 @dataclass(frozen=True)
@@ -36,7 +45,7 @@ class ToolTrace:
 class AgentEvent:
     """流式 agent 事件(供 M6/M7 SSE)。"""
 
-    type: str  # delta | tool_call | block_meta | done
+    type: str  # delta | tool_call | block_meta | await_external | done
     text: str | None = None
     tool_trace: ToolTrace | None = None
     block: dict | None = None
@@ -59,6 +68,7 @@ async def run_agent(
     user_message: str,
     history: list[dict] | None = None,
     max_iterations: int = MAX_ITERATIONS,
+    owner_id: str | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
@@ -70,6 +80,7 @@ async def run_agent(
         user_message=user_message,
         history=history,
         max_iterations=max_iterations,
+        owner_id=owner_id,
     ):
         if ev.type == "delta" and ev.text:
             text_parts.append(ev.text)
@@ -86,14 +97,22 @@ async def stream_agent(
     user_message: str,
     history: list[dict] | None = None,
     max_iterations: int = MAX_ITERATIONS,
+    owner_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """流式调度循环:显式调用编排 + 执行回填(002 §5)。"""
+    """流式调度循环:显式调用编排 + 执行回填(002 §5)。
+
+    owner_id 为资源属主(会话用户 id),用于端侧工具经浏览器隧道路由;
+    为 None 或浏览器未连接时,端侧工具降级为 await_external SSE + 暂停。
+    """
     tools = await build_tools(session, resource_ids)
     resources: dict[str, SkillTool] = {}
     for rid in resource_ids:
         row = await resolve(session, rid)
         if row is not None:
             resources[row.id] = row
+    # 资源加载完毕即提交释放事务:LLM 流式远超 idle_in_transaction_session_timeout(30s),
+    # 携带空闲事务进入长流式阶段会被 PG 终止连接,导致最终结果无法落库。
+    await session.commit()
 
     system = build_system_prompt(list(resources.values()))
     messages = build_messages(system, history, user_message)
@@ -138,11 +157,45 @@ async def stream_agent(
                 yield AgentEvent(type="block_meta", block=block_data)
                 result = "ContentBlock 已在客户端成功呈现。"
             else:
-                result = await execute(resources.get(tc.name), tc.arguments)
-                trace = ToolTrace(
-                    id=tc.name, args=_parse_args(tc.arguments), result=result
-                )
-                yield AgentEvent(type="tool_call", tool_trace=trace)
+                resource = resources.get(tc.name)
+                if is_endpoint_resource(resource):
+                    # 端侧工具:不本地执行,经桥接下发浏览器并等待结果回填
+                    args = _parse_args(tc.arguments)
+                    action = resource.impl_path[len(ENDPOINT_PREFIX):]  # type: ignore[union-attr]
+                    if owner_id and bridge.is_connected(owner_id):
+                        # 双向隧道:route_to_endpoint 等待 TOOL_RESULT 后返回(阻塞于同事件循环)
+                        result = await bridge.route_to_endpoint(
+                            owner_id, action, args, call_id=tc.id
+                        )
+                        yield AgentEvent(
+                            type="tool_call",
+                            tool_trace=ToolTrace(id=tc.name, args=args, result=result),
+                        )
+                    else:
+                        # 无浏览器连接:降级为 await_external SSE + 暂停(interact 回传),维持既有 POC
+                        block = {
+                            "type": "await_external",
+                            "data": {
+                                "action": action,
+                                "tool_id": tc.name,
+                                "call_id": tc.id,
+                                "args": args,
+                            },
+                        }
+                        trace = ToolTrace(
+                            id=tc.name,
+                            args=args,
+                            result=f"端侧动作已下发({action}),等待浏览器执行结果回传。",
+                        )
+                        yield AgentEvent(type="tool_call", tool_trace=trace)
+                        yield AgentEvent(type="await_external", block=block)
+                        return
+                else:
+                    result = await execute(resource, tc.arguments)
+                    trace = ToolTrace(
+                        id=tc.name, args=_parse_args(tc.arguments), result=result
+                    )
+                    yield AgentEvent(type="tool_call", tool_trace=trace)
             messages.append(
                 {
                     "role": "assistant",

@@ -6,8 +6,9 @@ llm_client 用脚本化 FakeClient 完全 mock,不发起真实 LLM 请求。
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentplatform.core.agent.bridge import bridge
 from agentplatform.core.agent.errors import AgentLoopError
-from agentplatform.core.agent.loop import run_agent
+from agentplatform.core.agent.loop import run_agent, stream_agent
 from agentplatform.core.llm.client import StreamEvent, ToolCall
 from agentplatform.core.registry.model import SkillToolKind as K
 from agentplatform.core.registry.model import SkillToolSource as S
@@ -133,3 +134,97 @@ class TestErrors:
         fake = FakeClient([[StreamEvent(type="error", error="HTTP 500: boom")]])
         with pytest.raises(AgentLoopError, match="HTTP 500"):
             await run_agent(session, fake, resource_ids=[], user_message="hi")
+
+
+async def _register_endpoint(session: AsyncSession) -> None:
+    """登记一个端侧工具(impl_path 以 endpoint: 前缀标记,不本地执行)。"""
+    await register(
+        session,
+        resource_id="tool:browser.read_page",
+        kind=K.tool,
+        name="read_page",
+        version="1.0.0",
+        source=S.builtin,
+        schema_={
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+            }
+        },
+        impl_path="endpoint:browser.action.readPage",
+        description="读取浏览器当前/指定页面",
+    )
+    await session.commit()
+
+
+class TestEndpointTunnel:
+    """端侧工具经浏览器隧道路由:已连接走桥接回填,未连接降级 await_external。"""
+
+    async def test_routed_through_bridge_when_connected(self, session: AsyncSession) -> None:
+        await _register_endpoint(session)
+
+        sent: list[dict] = []
+
+        async def fake_send(msg: dict) -> None:
+            sent.append(msg)
+            # 模拟浏览器执行完毕,同步回传结果
+            bridge.deliver_result(msg["callId"], {"ok": True, "rows": [["Plus", "$10"]]})
+
+        sess = bridge.register("user-1", fake_send)
+        try:
+            fake = FakeClient([
+                [_call("tool:browser.read_page", '{"url": "https://x"}'), StreamEvent(type="done", message_id="m1")],
+                [_text("已读取"), StreamEvent(type="done", message_id="m2")],
+            ])
+            result = await run_agent(
+                session, fake,
+                resource_ids=["tool:browser.read_page"],
+                user_message="读一下",
+                owner_id="user-1",
+            )
+        finally:
+            bridge.unregister("user-1", sess)
+
+        # 桥接路径:结果回填,loop 继续到最终文本
+        assert result.text == "已读取"
+        assert len(result.tool_traces) == 1
+        trace = result.tool_traces[0]
+        assert trace.id == "tool:browser.read_page"
+        assert trace.result == '{"ok": true, "rows": [["Plus", "$10"]]}'
+        # TOOL_CALL 已下发到浏览器
+        assert sent and sent[0]["type"] == "TOOL_CALL"
+        assert sent[0]["toolCall"]["name"] == "browser.action.readPage"
+
+    async def test_falls_back_to_await_external_when_not_connected(self, session: AsyncSession) -> None:
+        await _register_endpoint(session)
+        fake = FakeClient([
+            [_call("tool:browser.read_page", "{}"), StreamEvent(type="done", message_id="m1")],
+        ])
+        events = [
+            ev
+            async for ev in stream_agent(
+                session, fake,
+                resource_ids=["tool:browser.read_page"],
+                user_message="读一下",
+                owner_id="user-1",
+            )
+        ]
+        types = [ev.type for ev in events]
+        assert "await_external" in types
+        # 无浏览器连接:暂停,不产出 done,不回填
+        assert "done" not in types
+
+    async def test_falls_back_without_owner(self, session: AsyncSession) -> None:
+        """owner_id 为 None(旧调用/非流式聚合路径)也走 await_external 降级。"""
+        await _register_endpoint(session)
+        fake = FakeClient([
+            [_call("tool:browser.read_page", "{}"), StreamEvent(type="done", message_id="m1")],
+        ])
+        events = [
+            ev
+            async for ev in stream_agent(
+                session, fake, resource_ids=["tool:browser.read_page"], user_message="读一下"
+            )
+        ]
+        assert "await_external" in [ev.type for ev in events]
+        assert "done" not in [ev.type for ev in events]

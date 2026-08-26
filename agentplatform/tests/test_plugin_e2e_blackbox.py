@@ -14,8 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agentplatform.cli.main import cmd_init, cmd_test, cmd_validate
-
+from agentplatform.cli.main import cmd_init, cmd_validate
 from agentplatform.cli.validate import validate_project
 
 

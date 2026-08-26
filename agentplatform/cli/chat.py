@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 
 from agentplatform.cli.dev import _attach_dev_impls
@@ -28,6 +29,7 @@ async def run_single_chat(
 ) -> str:
     """执行单轮本地对话并自动持久化多轮历史。"""
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from agentplatform.core.db.engine import engine
 
     history_path = root / HISTORY_FILE
@@ -40,7 +42,7 @@ async def run_single_chat(
     if history_path.exists():
         try:
             history = json.loads(history_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError):
             history = []
 
     val_res = validate_project(root)
@@ -98,9 +100,7 @@ async def run_single_chat(
     # 更新并保存历史
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": result.text})
-    try:
+    with suppress(OSError):
         history_path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
 
     return result.text

@@ -22,13 +22,13 @@ class TestListEndpoints:
         resp = await seeded_client.get("/api/registry/skills")
         assert resp.status_code == 200
         ids = {r["id"] for r in resp.json()}
-        assert ids == {"skill:summarize", "skill:structured_output"}
+        assert ids == {"skill:summarize", "skill:structured_output", "skill:cross_document_compare"}
 
     async def test_list_tools(self, seeded_client: AsyncClient) -> None:
         resp = await seeded_client.get("/api/registry/tools")
         assert resp.status_code == 200
         ids = {r["id"] for r in resp.json()}
-        assert ids == {"tool:pdf_parse"}
+        assert ids == {"tool:pdf_parse", "tool:html_cleaner"}
 
     async def test_list_includes_schema_and_source(self, seeded_client: AsyncClient) -> None:
         resp = await seeded_client.get("/api/registry/skills")

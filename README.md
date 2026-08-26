@@ -95,6 +95,9 @@ uv run python -m agentplatform.cli.main test ./my-assistant
 
 # 7. 部署到平台 (自动准入校验、依赖解析并入库助手市场)
 uv run python -m agentplatform.cli.main deploy ./my-assistant --target http://localhost:8000
+
+# 8. 一键从远程平台同步升级 SDK 包 + AI 规范 (平台能力更新后执行)
+uv run python -m agentplatform.cli.main update ./my-assistant --target http://localhost:8000
 ```
 
 ---
