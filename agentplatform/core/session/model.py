@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Text, Uuid, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agentplatform.core.db.base import Base
@@ -21,6 +22,8 @@ class Session(Base):
     user_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # M1 后 FK
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 运行时挂载的知识库 id 列表(M12,设计 008 §4.2);服务端写入前校验可读
+    mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

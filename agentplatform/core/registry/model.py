@@ -16,10 +16,12 @@ from agentplatform.core.db.base import Base
 
 
 class SkillToolKind(str, Enum):
-    """资源类型:tool 为确定性编程接口,skill 为能力/知识单元。"""
+    """资源类型:tool 为确定性编程接口,skill 为能力/知识单元,kb 为知识库
+    (M12,ADR 0005:注册表行只承担依赖解析与版本约束,内容在 knowledge_bases 三表)。"""
 
     tool = "tool"
     skill = "skill"
+    kb = "kb"
 
 
 class SkillToolSource(str, Enum):

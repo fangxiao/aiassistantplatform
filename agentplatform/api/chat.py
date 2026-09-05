@@ -41,7 +41,7 @@ from agentplatform.core.session.service import (
     delete_session,
     get_session,
     list_sessions,
-    update_session_title,
+    update_session,
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -65,6 +65,22 @@ async def _ensure_session_owned(
     return row
 
 
+async def _validate_mounted_kbs(
+    session: AsyncSession, kb_ids: list[uuid.UUID], user: User
+) -> list[uuid.UUID]:
+    """挂载校验:库须存在且当前用户可读(设计 008 §4.2;授权在写入侧把关)。"""
+    from agentplatform.core.kb import service as kb_service
+
+    for kid in kb_ids:
+        kb = await kb_service.get_kb(session, kid)
+        if kb is None or not kb_service.can_read(kb, str(user.id)):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "挂载的知识库不存在或不可读"},
+            )
+    return kb_ids
+
+
 @router.post("/sessions", response_model=SessionOut, status_code=201)
 async def create_chat_session(
     payload: CreateSession,
@@ -72,7 +88,10 @@ async def create_chat_session(
     user: User = Depends(get_current_user),
 ) -> SessionOut:
     """创建会话(关联插件助手);response_model 负责序列化。"""
-    row = await create_session(session, plugin_id=payload.plugin_id, user_id=str(user.id))
+    mounted = await _validate_mounted_kbs(session, payload.mounted_kb_ids, user)
+    row = await create_session(
+        session, plugin_id=payload.plugin_id, user_id=str(user.id), mounted_kb_ids=mounted
+    )
     out = SessionOut.model_validate(row, from_attributes=True)
     await session.commit()
     return out
@@ -108,9 +127,14 @@ async def rename_session(
     session: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_user),
 ) -> SessionOut:
-    """重命名会话标题。"""
+    """重命名会话标题 / 更新挂载知识库(M12)。"""
     await _ensure_session_owned(session, sid, user.id)
-    row = await update_session_title(session, sid, payload.title)
+    mounted = (
+        await _validate_mounted_kbs(session, payload.mounted_kb_ids, user)
+        if payload.mounted_kb_ids is not None
+        else None
+    )
+    row = await update_session(session, sid, title=payload.title, mounted_kb_ids=mounted)
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "会话不存在"})
     out = SessionOut.model_validate(row, from_attributes=True)

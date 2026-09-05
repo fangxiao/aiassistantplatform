@@ -2,7 +2,8 @@
 # 四服务:pg / redis / api / web
 services:
   pg:
-    image: postgres:15-alpine
+    # pgvector 扩展镜像(M12 知识库,ADR 0004);与 postgres:15 同版本线
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: agentplatform
       POSTGRES_PASSWORD: agentplatform

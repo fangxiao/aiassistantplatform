@@ -8,6 +8,7 @@ skill 执行嵌套一次 LLM 调用(002 §5.3 简单 skill)。
 """
 
 import json
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -18,6 +19,7 @@ from agentplatform.core.agent.errors import AgentLoopError
 from agentplatform.core.agent.executor import execute_skill, execute_tool
 from agentplatform.core.agent.messages import build_messages, build_system_prompt
 from agentplatform.core.agent.tools import build_tools
+from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, run_kb_search
 from agentplatform.core.llm.client import ToolCall
 from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
@@ -70,6 +72,7 @@ async def run_agent(
     history: list[dict] | None = None,
     max_iterations: int = MAX_ITERATIONS,
     owner_id: str | None = None,
+    allowed_kb_ids: list[uuid.UUID] | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
@@ -82,6 +85,7 @@ async def run_agent(
         history=history,
         max_iterations=max_iterations,
         owner_id=owner_id,
+        allowed_kb_ids=allowed_kb_ids,
     ):
         if ev.type == "delta" and ev.text:
             text_parts.append(ev.text)
@@ -139,11 +143,13 @@ async def stream_agent(
     max_iterations: int = MAX_ITERATIONS,
     owner_id: str | None = None,
     plugin_desc: str | None = None,
+    allowed_kb_ids: list[uuid.UUID] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
     owner_id 为资源属主(会话用户 id),用于端侧工具经浏览器隧道路由;
     为 None 或浏览器未连接时,端侧工具降级为 await_external SSE + 暂停。
+    allowed_kb_ids 为知识库检索允许范围(M12,chat 侧组装,设计 008 §3.3)。
     """
     tools = await build_tools(session, resource_ids)
     resources: dict[str, SkillTool] = {}
@@ -186,6 +192,9 @@ async def stream_agent(
             return "错误:未找到该资源"
         args = _parse_args(arguments)
         try:
+            if resource.id == KB_SEARCH_TOOL_ID:
+                # 知识库检索:需要会话允许范围,不走通用 executor(设计 008 §3.3)
+                return await run_kb_search(session, allowed_kb_ids or [], args)
             if resource.kind == SkillToolKind.tool:
                 return await execute_tool(resource, args)
             return await execute_skill(resource, args, skill_call)

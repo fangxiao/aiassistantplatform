@@ -52,6 +52,10 @@ def validate_project(root: Path) -> dict:
         for dep in raw.get("depends_on", []) or []:
             if not isinstance(dep, str) or "@" not in dep:
                 errors.append(f"depends_on 依赖项格式错误(建议带版本约束如 tool:pdf_parse@^1.0): {dep!r}")
+                continue
+            # kb: 资源为版本化公共库(ADR 0005),必须带版本约束(设计 008 §4.1)
+            if dep.startswith("kb:") and dep.split("@", 1)[1].strip() == "":
+                errors.append(f"kb: 依赖必须带版本约束(如 kb:product_docs@^1.0): {dep!r}")
 
         # 从代码提取资源元信息(含 schema)
         resources: list[dict] = []

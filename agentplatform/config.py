@@ -76,6 +76,15 @@ class Settings(BaseSettings):
     sandbox_high_risk_only: bool = True
     sandbox_timeout_seconds: int = 30
 
+    # 知识库(M12,设计 008)
+    kb_embedding_dim: int = 1024  # 与迁移中 vector 维度一致,变更需全量重算
+    kb_embedding_model: str = ""  # 兜底 embedding 模型名;空则仅用端点表中 embedding 类型端点
+    kb_max_document_mb: int = 20  # 单文档大小上限
+    kb_max_documents_per_kb: int = 200  # 单库文档数上限
+    kb_chunk_tokens: int = 512  # 切分目标长度
+    kb_chunk_overlap_tokens: int = 50  # 切分重叠
+    kb_search_top_k: int = 5  # kb_search 默认返回条数
+
 
 settings = Settings()
 

@@ -10,6 +10,7 @@
 | 002 | [002-skill-tool-sharing.md](./002-skill-tool-sharing.md) | skill/tool 共享机制(增量) | v1.0 定稿 | [002-skill-tool-model.md](../design/002-skill-tool-model.md) |
 | 003 | [003-message-rendering.md](./003-message-rendering.md) | 消息展示扩展 / 21 种 renderer(增量) | v1.0 定稿 | [003-ui-components.md](../design/003-ui-components.md) |
 | 004 | [004-remote-dev.md](./004-remote-dev.md) | 远程开发与调试(增量) | v0.1 已实现 | [007-remote-dev.md](../design/007-remote-dev.md) |
+| 005 | [005-knowledge-base.md](./005-knowledge-base.md) | 知识库(个人库 + 公共库,增量) | v0.1 草稿待评审 | 008(待产出) |
 
 ## 阅读路径
 
@@ -33,6 +34,7 @@
 |------|---------------------|------|
 | 002 | §F7 skill/tool 复用与显式调用(替代 §F7.5 / F7.6"待设计"标记) | 已定稿 |
 | 003 | §F3 对话与富交互 UI(扩展 21 种 renderer;替代 §8.2"组件协议细节"留待设计) | 已定稿 |
+| 005 | §1.2 可复用生态的延伸——知识库作为第三类注册表资源;§F3 对话的知识增强 | 草稿待评审 |
 
 ## 维护规则
 

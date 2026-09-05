@@ -7,6 +7,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 from agentplatform.core.agent.loop import AgentEvent, stream_agent
+from agentplatform.core.kb.search_tool import resolve_allowed_kb_ids
 from agentplatform.core.llm.client import OpenAIClient
 from agentplatform.core.llm.router import resolve_endpoint
 from agentplatform.core.message.service import build_history, save_user_message
@@ -91,9 +92,16 @@ async def agent_stream_for_session(
     await save_user_message(session, session_id, user_message)
 
     plugin = await get_plugin(session, sess.plugin_id) if sess.plugin_id else None
-    model = (plugin.manifest or {}).get("model") if plugin else None
+    manifest = (plugin.manifest or {}) if plugin else None
+    model = (manifest or {}).get("model")
     resource_ids = resource_ids_from_plugin(plugin) if plugin else []
     client = await make_llm_client(session, model)
+    # 知识库检索允许范围(设计 008 §3.3):挂载 ∪ 插件依赖,唯一授权来源
+    allowed_kb_ids = await resolve_allowed_kb_ids(
+        session,
+        mounted_kb_ids=[uuid.UUID(k) for k in (sess.mounted_kb_ids or [])],
+        plugin_manifest=manifest,
+    )
 
     history = await build_history(session, session_id)
     # history 末尾是刚保存的用户消息,拆出作为 user_message,其余作为前文
@@ -109,5 +117,6 @@ async def agent_stream_for_session(
         history=prior,
         owner_id=str(sess.user_id) if sess.user_id else None,
         plugin_desc=(plugin.manifest or {}).get("description") if plugin else None,
+        allowed_kb_ids=allowed_kb_ids,
     ):
         yield ev

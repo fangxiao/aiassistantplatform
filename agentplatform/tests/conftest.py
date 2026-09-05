@@ -41,6 +41,13 @@ async def _ensure_test_db() -> None:
                 await conn.execute(text('CREATE DATABASE "agentplatform_test"'))
     finally:
         await admin.dispose()
+    # 知识库(M12)需要 pgvector 扩展(按库安装);在 test 库上启用
+    test_admin = create_async_engine(TEST_URL, isolation_level="AUTOCOMMIT")
+    try:
+        async with test_admin.connect() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    finally:
+        await test_admin.dispose()
 
 
 @pytest.fixture(scope="session")

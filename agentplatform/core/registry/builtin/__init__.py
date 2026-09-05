@@ -11,6 +11,7 @@ from agentplatform.core.registry.builtin import (
     browser_wechat_draft,
     cross_document_compare,
     html_cleaner,
+    kb_search,
     pdf_parse,
     structured_output,
     summarize,
@@ -26,6 +27,7 @@ __all__ = [
     "browser_wechat_draft",
     "cross_document_compare",
     "html_cleaner",
+    "kb_search",
     "pdf_parse",
     "structured_output",
     "summarize",
@@ -42,4 +44,5 @@ ALL: tuple[ResourceMeta, ...] = (
     browser_extract_dom.RESOURCE,
     browser_action.RESOURCE,
     browser_list_tabs.RESOURCE,
+    kb_search.RESOURCE,
 )

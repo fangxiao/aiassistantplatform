@@ -38,7 +38,19 @@ async def _ttl_reaper() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     reaper = asyncio.create_task(_ttl_reaper())
+    # M12:内置资源幂等补种(含 tool:kb_search,web 链路注册表可用)+ 知识库 worker
+    from agentplatform.core.db.engine import SessionLocal as _DbSession
+    from agentplatform.core.kb import pipeline as kb_pipeline
+    from agentplatform.core.registry.service import seed_builtin
+
+    try:
+        async with _DbSession() as db:
+            await seed_builtin(db)
+    except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
+        logger.warning("内置资源补种跳过: %s", exc)
+    await kb_pipeline.start_worker()
     yield
+    await kb_pipeline.stop_worker()
     reaper.cancel()
 
 

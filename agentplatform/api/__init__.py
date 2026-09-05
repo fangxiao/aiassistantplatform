@@ -15,6 +15,7 @@ from agentplatform.api import (
     dev_session,
     files,
     health,
+    kb,
     plugins,
     registry,
     specs,
@@ -32,5 +33,6 @@ api_router.include_router(specs.router)
 api_router.include_router(browser.router)
 api_router.include_router(dev_session.router)
 api_router.include_router(files.router)
+api_router.include_router(kb.router)
 
 

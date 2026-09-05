@@ -5,7 +5,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentplatform.core.registry.model import SkillTool
+from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
 
 OUTPUT_BLOCK_TOOL = {
@@ -82,13 +82,16 @@ def to_function_schema(row: SkillTool) -> dict:
 async def build_tools(
     session: AsyncSession, resource_ids: list[str], include_output_block: bool = True
 ) -> list[dict]:
-    """把资源 id 列表解析为 OpenAI tools(002 §5.1);缺失的资源跳过。"""
+    """把资源 id 列表解析为 OpenAI tools(002 §5.1);缺失的资源跳过。
+
+    kb: 资源(kind=kb)不是可调用函数,不下发(检索经 tool:kb_search,设计 008 §4.1)。
+    """
     tools: list[dict] = []
     if include_output_block:
         tools.append(OUTPUT_BLOCK_TOOL)
     for rid in resource_ids:
         row = await resolve(session, rid)
-        if row is not None:
+        if row is not None and row.kind != SkillToolKind.kb:
             tools.append(to_function_schema(row))
     return tools
 

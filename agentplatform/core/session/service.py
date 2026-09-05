@@ -13,8 +13,14 @@ async def create_session(
     plugin_id: uuid.UUID | None,
     title: str | None = None,
     user_id: str | None = None,
+    mounted_kb_ids: list[uuid.UUID] | None = None,
 ) -> Session:
-    row = Session(plugin_id=plugin_id, title=title, user_id=user_id)
+    row = Session(
+        plugin_id=plugin_id,
+        title=title,
+        user_id=user_id,
+        mounted_kb_ids=[str(k) for k in (mounted_kb_ids or [])],
+    )
     session.add(row)
     await session.flush()
     await session.refresh(row)
@@ -58,6 +64,26 @@ async def update_session_title(
     if row is None:
         return None
     row.title = title
+    await session.flush()
+    await session.refresh(row)
+    return row
+
+
+async def update_session(
+    session: AsyncSession,
+    session_id: uuid.UUID,
+    *,
+    title: str | None = None,
+    mounted_kb_ids: list[uuid.UUID] | None = None,
+) -> Session | None:
+    """按需更新标题与挂载知识库(M12);mounted_kb_ids 传 [] 表示清空。"""
+    row = await session.get(Session, session_id)
+    if row is None:
+        return None
+    if title is not None:
+        row.title = title
+    if mounted_kb_ids is not None:
+        row.mounted_kb_ids = [str(k) for k in mounted_kb_ids]  # JSONB 存字符串形式,读侧转 UUID
     await session.flush()
     await session.refresh(row)
     return row

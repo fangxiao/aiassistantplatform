@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 class CreateSession(BaseModel):
     plugin_id: uuid.UUID | None = None
+    mounted_kb_ids: list[uuid.UUID] = []  # 会话挂载知识库(M12,设计 008 §4.2)
 
 
 class SessionOut(BaseModel):
@@ -16,12 +17,14 @@ class SessionOut(BaseModel):
     id: uuid.UUID
     plugin_id: uuid.UUID | None = None
     title: str | None = None
+    mounted_kb_ids: list[uuid.UUID] = []
     created_at: datetime
     updated_at: datetime
 
 
 class UpdateSession(BaseModel):
-    title: str
+    title: str | None = None
+    mounted_kb_ids: list[uuid.UUID] | None = None  # None=不修改;[] =清空挂载
 
 
 class SendMessage(BaseModel):

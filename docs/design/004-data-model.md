@@ -11,16 +11,20 @@
 
 ```
 users 1───* sessions 1───* messages(blocks[] 存 ContentBlock 列表)
-  │
-  └──* plugins 1──* (depends_on) skill_tools(注册表)
-                                    ▲
-                          platform builtin / shared
+  │                          │ mounted_kb_ids(jsonb,008)
+  └──* plugins 1──* (depends_on) skill_tools(注册表,kind 扩展 kb)
+       │                            ▲
+       │                  platform builtin / shared / kb:<slug>
+       │
+       └──(插件静态依赖公共库,008)
+users 1───* knowledge_bases 1──* kb_documents 1──* kb_chunks(pgvector,008)
 
-llm_endpoints(独立)
+llm_endpoints(独立;endpoint_type 扩展 embedding,008)
 ```
 
 - **Plugin 即 Assistant**:插件部署后即为可选用助手,不单建 Assistant 表
 - **skill_tools 表 = 注册表持久化**(对应 002 §3)
+- **知识库三表 + 注册表 kind=kb 行**(对应 008 §3,ADR 0004/0005)
 
 ## 2. 表设计
 
