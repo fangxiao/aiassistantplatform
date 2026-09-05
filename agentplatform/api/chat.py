@@ -147,21 +147,21 @@ async def send_message(
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """发送消息,返回 SSE 流(响应消息生成)。"""
-    await _ensure_session_owned(session, sid, user.id)
-
     async def event_stream():
         text_parts: list[str] = []
         blocks: list[dict] = []
+
         try:
             async for ev in agent_stream_for_session(session, sid, payload.content):
-                if ev.type == "delta" and ev.text:
+                if ev.type == "reasoning" and ev.text:
+                    yield sse("reasoning", {"text": ev.text})
+                elif ev.type == "delta" and ev.text:
                     text_parts.append(ev.text)
                     yield sse("delta", {"block_index": 0, "text": ev.text})
                 elif ev.type == "block_meta" and ev.block:
                     blocks.append(ev.block)
                     yield sse("block_meta", ev.block)
                 elif ev.type == "await_external" and ev.block:
-                    # 端侧动作块:作为独立事件下发,客户端执行端侧动作后通过 interact 回传
                     blocks.append(ev.block)
                     yield sse("await_external", ev.block)
                 elif ev.type == "tool_call" and ev.tool_trace is not None:

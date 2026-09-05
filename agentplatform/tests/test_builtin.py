@@ -16,7 +16,7 @@ from agentplatform.core.registry.service import resolve, seed_builtin
 
 class TestResourceMetadata:
     def test_all_builtins_well_formed(self) -> None:
-        assert len(ALL) == 5
+        assert len(ALL) == 9
         for res in ALL:
             assert res["id"].startswith(("tool:", "skill:"))
             assert res["kind"] in {"tool", "skill"}

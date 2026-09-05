@@ -6,9 +6,44 @@ Tool:确定性编程接口(函数或类)。Context 承载运行时上下文(会�
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+
+def get_plugin_data_dir(plugin_name: str | None = None) -> Path:
+    """获取当前插件专属持久化数据目录。
+
+    解析顺序：
+    1. 环境变量 AGENTPLATFORM_PLUGIN_DATA_DIR；
+    2. 若未注入，则回退到 ~/.agentplatform/plugins/<plugin_name>/data/ (默认 plugin_name 为 'default')；
+    3. 自动递归创建该目录并返回 Path 对象。
+    """
+    env_dir = os.environ.get("AGENTPLATFORM_PLUGIN_DATA_DIR")
+    if env_dir:
+        path = Path(env_dir)
+    else:
+        name = plugin_name or "default"
+        path = Path.home() / ".agentplatform" / "plugins" / name / "data"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_base_url() -> str:
+    """获取平台服务 Base URL。
+
+    解析顺序：
+    1. 环境变量 AGENTPLATFORM_BASE_URL；
+    2. 环境变量 AGENTPLATFORM_TARGET；
+    3. 默认 http://localhost:8000。
+    """
+    return (
+        os.environ.get("AGENTPLATFORM_BASE_URL")
+        or os.environ.get("AGENTPLATFORM_TARGET")
+        or "http://localhost:8000"
+    ).rstrip("/")
 
 
 @dataclass
@@ -17,6 +52,16 @@ class Context:
 
     session_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def data_dir(self) -> Path:
+        """插件专属数据持久化目录。"""
+        return get_plugin_data_dir()
+
+    @property
+    def base_url(self) -> str:
+        """平台基础服务地址。"""
+        return get_base_url()
 
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")

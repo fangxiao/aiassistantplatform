@@ -23,6 +23,7 @@ TEMPLATE_PLUGIN_YAML = """\
 # 🤖 AgentPlatform 插件清单 (006 §2)
 # 插件即专属 AI 助手，可复用平台公共 Skill/Tool 与 22 种富交互组件。
 name: {name}
+display_name: {display_name}  # 助手中文展示名称（如：合同审核助手、微信写作助手）
 version: 0.1.0
 description: {name} 智能体助手
 author: Developer
@@ -149,19 +150,46 @@ TEMPLATE_AGENTS_MD = """\
 
 ---
 
-## 1. 平台公共内置能力 (可在 plugin.yaml 的 depends_on 中直接复用)
-无需自行重复编写底层解析与算法，平台已内置高稳定性的基础工具与技能：
-- `tool:pdf_parse@^1.0` : 确定性 PDF 文件文本与结构解析提取 (输入: `file_path`)
-- `skill:summarize@^1.0` : 针对长文本/文档的多维度核心摘要提取 (参数: `text`, `style`, `max_words`)
-- `skill:structured_output@^1.0` : 结构化 JSON 数据抽取与字段规范化 (参数: `text`, `schema_desc`)
+## 🌟 AI 辅助开发标准化流程 (AI ARCHITECT SELECTION SOP)
+作为开发者的 AI 研发伙伴，当开发者提出新插件或新业务需求时（例如「我要做个合同审核/标书比对/文章排版助手」），你必须严格遵循以下 **4 步黄金 SOP**：
 
-**依赖声明语法示例 (`plugin.yaml`)**：
+### 🎯 步骤 1 · 需求分析与平台公共能力推荐 (点单式选型)
+在编写任何代码之前，**必须在第一轮回复中主动列出匹配的平台公共能力与 UI 控件清单**，引导开发者确认：
+```markdown
+🎯 收到您的需求！为避免重复造轮子，检测到平台已内置以下开箱即用的公共能力，建议复用：
+- [x] `tool:pdf_parse@^1.0` —— PDF 文档高精度文本与表格抽取
+- [x] `skill:structured_output@^1.0` —— 按 JSON Schema 结构化提取核心字段
+- [x] `skill:cross_document_compare@^1.0` —— 跨文档多版本多材料比对
+- [ ] `tool:html_cleaner@^1.0` —— 网页与 HTML 标签清洗正文提取
+- [ ] `skill:summarize@^1.0` —— 领域长文本/文档智能摘要
+推荐搭配的前端交互组件：`table` (表格展示), `input.confirm` (操作确认)
+
+请确认是否采用上述公共能力方案？确认后我将为您配置 plugin.yaml 并编写核心业务逻辑。
+```
+
+### 🎯 步骤 2 · 自动声明 depends_on
+经开发者确认后，将选中的公共能力以 SemVer 约束（`^1.0`）写入 `plugin.yaml`：
 ```yaml
 depends_on:
   - tool:pdf_parse@^1.0
-  - skill:summarize@^1.0
   - skill:structured_output@^1.0
 ```
+
+### 🎯 步骤 3 · 编写专属领域业务逻辑
+仅在 `skills/` 和 `tools/` 中编写插件专属的 Prompt 思考链与确定性 Python 计算，**严禁自行重新实现平台已有的底层公共解析逻辑**。
+
+### 🎯 步骤 4 · 本地自闭环验证与发布
+运行 `agentplatform validate .` 和 `agentplatform test .`，确保 100% 绿色通过后发布。
+
+---
+
+## 1. 平台公共内置能力库 (可在 plugin.yaml 的 depends_on 中直接复用)
+平台内置 5 大通用技能与工具（均经严格单测与多模型适配）：
+1. `tool:pdf_parse@^1.0` : 确定性 PDF 文件文本与结构解析提取 (输入: `file_path`)
+2. `tool:html_cleaner@^1.0` : 网页/HTML 标签清洗与纯正文提取 (输入: `html_content`)
+3. `skill:summarize@^1.0` : 针对长文本/文档的多维度核心摘要提取 (参数: `text`, `style`, `max_words`)
+4. `skill:structured_output@^1.0` : 任意复杂 JSON Schema 结构化数据抽取与规范化 (参数: `text`, `schema_desc`)
+5. `skill:cross_document_compare@^1.0` : 跨文档多版本差异、一致性与冲突比对 (参数: `doc_a`, `doc_b`, `aspects`)
 
 ---
 
@@ -268,11 +296,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     (root / ".agents" / "skills" / "agentplatform-plugin-dev").mkdir(parents=True, exist_ok=True)
 
     plugin_name = Path(args.name).name
+    display_name = getattr(args, "display_name", None) or f"{plugin_name}助手"
     yaml_io.dump_manifest(
         yaml_io.load_manifest(Path("dummy")) if False else {
             "name": plugin_name,
+            "display_name": display_name,
             "version": "0.1.0",
-            "description": f"{plugin_name} 智能体助手",
+            "description": f"{display_name}，提供专属领域能力",
             "author": "Developer",
             "model": "deepseek-v4-flash",
             "depends_on": ["tool:pdf_parse@^1.0", "skill:summarize@^1.0"],
@@ -468,16 +498,45 @@ def _build_manifest(root: Path, resources: list[dict]) -> dict:
 
 
 def cmd_dev(args: argparse.Namespace) -> int:
-    """本地对话调试(006 §6.1):复用 M5 agent 循环 + OpenAI 兼容端点。"""
+    """本地对话调试(006 §6.1):复用 M5 agent 循环 + OpenAI 兼容端点。
+
+    远程模式(设计 007):--target 指向非本地地址时上传插件到平台端远程调试。
+    """
     import asyncio
     import os
+    from urllib.parse import urlparse
 
-    from agentplatform.cli.dev import run_dev_loop
+    from agentplatform.cli.dev import run_dev_loop, run_remote_dev_loop
+
+    target = get_target_url(args)
+    parsed = urlparse(target)
+    host = parsed.hostname or "localhost"
+    # 如果 host 是 localhost/127.0.0.1/0.0.0.0 且未显式传 --target,走本地模式
+    # 显式传了 --target 即使指向 localhost 也走远程模式
+    is_remote = args.target is not None or host not in ("localhost", "127.0.0.1", "0.0.0.0", "")
+
+    if is_remote:
+        asyncio.run(run_remote_dev_loop(Path(args.path), target))
+        return 0
+
+    # 本地模式(现有逻辑,不动)
     from agentplatform.config import settings
 
-    base = os.environ.get("OPENAI_BASE_URL") or settings.openai_base_url or "https://api.eaglesine.com/v1"
+    manifest_path = Path(args.path) / "plugin.yaml"
+    raw_m = yaml_io.load_manifest(manifest_path) if manifest_path.exists() else {}
+
+    base = (
+        os.environ.get("OPENAI_BASE_URL")
+        or settings.openai_base_url
+        or "https://api.ailearning.top/v1"
+    )
     key = os.environ.get("OPENAI_API_KEY") or settings.openai_api_key
-    model = os.environ.get("MODEL") or settings.default_model or "DeepSeek-V3"
+    model = (
+        os.environ.get("MODEL")
+        or raw_m.get("model")
+        or settings.default_model
+        or "auto"
+    )
 
     if not key or key == "dev":
         print("\n❌ 错误: 未检测到有效 OPENAI_API_KEY。")
@@ -646,6 +705,45 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_sandbox(args: argparse.Namespace) -> int:
+    import platform as sys_platform
+    import shutil
+    from agentplatform.config import settings
+    from agentplatform.core.sandbox.runner import is_sandbox_available
+
+    print("🛡️  AgentPlatform 沙箱子系统状态 (Anthropic srt 架构)")
+    print("=" * 55)
+    status_str = "🟢 已开启 (强制隔离)" if settings.sandbox_enabled else "⚪ 默认旁路模式 (开发阶段已关闭)"
+    print(f"  • 当前开关状态: {status_str}")
+    print(f"  • 高危工具过滤: {'仅拦截代码/命令高危工具' if settings.sandbox_high_risk_only else '全量工具隔离'}")
+
+    srt_ok = is_sandbox_available(settings.sandbox_runner_cmd)
+    srt_icon = "✅" if srt_ok else "⚠️"
+    srt_desc = (
+        f"已就绪 ({shutil.which(settings.sandbox_runner_cmd)})"
+        if srt_ok
+        else f"未在 PATH 检测到 '{settings.sandbox_runner_cmd}' (npm i -g @anthropic-ai/sandbox-runtime)"
+    )
+    print(f"  • srt 运行时:   {srt_icon} {srt_desc}")
+
+    os_name = sys_platform.system()
+    if os_name == "Darwin":
+        sb_ok = shutil.which("sandbox-exec") is not None
+        print(f"  • OS 内核原语:  {'✅' if sb_ok else '⚠️'} macOS Seatbelt (sandbox-exec: {'存在' if sb_ok else '缺失'})")
+    elif os_name == "Linux":
+        bw_ok = shutil.which("bwrap") is not None
+        print(f"  • OS 内核原语:  {'✅' if bw_ok else '⚠️'} Linux Bubblewrap (bwrap: {'存在' if bw_ok else '缺失'})")
+    else:
+        print(f"  • OS 内核原语:  ℹ️ {os_name} 平台")
+
+    print("\n💡 演进提示:")
+    print("  当前开发模式下所有业务工具直接流畅运行，端侧真机与本地网络无任何拦截；")
+    print("  待未来对外开放托管第三方不可信插件时，只需设置环境变量:")
+    print("    export AGENTPLATFORM_SANDBOX_ENABLED=true")
+    print("  即可实现零代码重构、全自动化开启内核级沙箱兜底。")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agentplatform", description="AgentPlatform 插件开发 CLI 工具链")
     sub = p.add_subparsers(dest="command", required=True)
@@ -653,6 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 1. 初始化
     sp = sub.add_parser("init", help="快速生成带共享能力示例与 AI 规范的插件脚手架")
     sp.add_argument("name", help="插件助手名称 (如 my-assistant)")
+    sp.add_argument("--display-name", "--title", dest="display_name", default=None, help="助手中文展示名称 (如 我的智能助理)")
     sp.set_defaults(func=cmd_init)
 
     # 2. 共享能力与控件查询
@@ -690,8 +789,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("path", default=".", nargs="?")
     sp.set_defaults(func=cmd_test)
 
-    sp = sub.add_parser("dev", help="启动本地交互式终端对话调试 (REPL)")
+    sp = sub.add_parser("dev", help="启动本地交互式终端对话调试 (REPL),--target 远程模式")
     sp.add_argument("path", default=".", nargs="?")
+    sp.add_argument("--target", default=None, help="远程平台服务器地址 (默认: AGENTPLATFORM_TARGET 或 http://localhost:8000)")
     sp.set_defaults(func=cmd_dev)
 
     sp = sub.add_parser("chat", help="执行单句/多轮本地对话 (人肉测试模式后台静默调用)")
@@ -707,6 +807,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("logs", help="查看插件运行时日志")
     sp.set_defaults(func=cmd_logs)
+
+    sp = sub.add_parser("check-sandbox", help="检测当前运行环境的沙箱子系统状态与 OS 隔离原语")
+    sp.set_defaults(func=cmd_check_sandbox)
 
     return p
 

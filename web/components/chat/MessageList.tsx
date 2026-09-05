@@ -8,10 +8,15 @@ import MessageItem from "./MessageItem";
 
 interface MessageListProps {
   messages: ChatMessage[];
+  streaming?: boolean;
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
 }
 
-export default function MessageList({ messages, onInteract }: MessageListProps) {
+export default function MessageList({
+  messages,
+  streaming = false,
+  onInteract,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,8 +32,14 @@ export default function MessageList({ messages, onInteract }: MessageListProps) 
           <p className="text-xs text-slate-400 mt-1">支持显式调用 skill/tool 与富交互组件渲染</p>
         </div>
       )}
-      {messages.map((m) => (
-        <MessageItem key={m.id} message={m} onInteract={onInteract} />
+      {messages.map((m, index) => (
+        <MessageItem
+          key={m.id}
+          message={m}
+          isStreaming={streaming}
+          isLast={index === messages.length - 1}
+          onInteract={onInteract}
+        />
       ))}
       <div ref={bottomRef} />
     </div>

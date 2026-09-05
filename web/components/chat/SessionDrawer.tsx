@@ -28,11 +28,20 @@ export function SessionDrawer({
 }: SessionDrawerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const getAssistantName = (pluginId?: string | null) => {
     if (!pluginId) return null;
     const found = assistants.find((a) => a.id === pluginId);
-    return found ? found.name : "插件助手";
+    return found ? (found.display_name || found.name) : "插件助手";
+  };
+
+  const getAssistantIcon = (asstName: string, pluginId?: string | null) => {
+    const n = (asstName || "").toLowerCase();
+    if (n.includes("微信") || n.includes("writewx")) return "✍️";
+    if (n.includes("合同") || n.includes("contract")) return "📄";
+    if (n.includes("prd") || n.includes("评审")) return "📋";
+    return "🤖";
   };
 
   const handleStartRename = (s: SessionInfo, e: React.MouseEvent) => {
@@ -56,9 +65,14 @@ export function SessionDrawer({
     }
   };
 
+  const handleCreateWithAssistant = (pluginId: string | null) => {
+    setMenuOpen(false);
+    onCreate(pluginId);
+  };
+
   if (collapsed) {
     return (
-      <div className="flex h-full flex-col items-center border-r border-slate-200 bg-white py-3 px-2">
+      <div className="relative flex h-full flex-col items-center border-r border-slate-200 bg-white py-3 px-2">
         <button
           type="button"
           onClick={onToggleCollapse}
@@ -69,18 +83,50 @@ export function SessionDrawer({
         </button>
         <button
           type="button"
-          onClick={() => onCreate(null)}
-          title="新建通用对话"
+          onClick={() => setMenuOpen(!menuOpen)}
+          title="新建对话"
           className="mt-3 flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition text-sm font-bold shadow-xs"
         >
           +
         </button>
+
+        {/* 折叠模式下的助手弹出菜单 */}
+        {menuOpen && (
+          <div className="absolute left-14 top-14 z-50 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl animate-in fade-in zoom-in-95 duration-100">
+            <div className="px-2 py-1 text-[11px] font-semibold text-slate-400">选择助手新建对话</div>
+            <button
+              type="button"
+              onClick={() => handleCreateWithAssistant(null)}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-slate-700 hover:bg-slate-100 transition text-left"
+            >
+              <span>💬</span>
+              <span className="font-medium">通用对话</span>
+            </button>
+            {assistants.length > 0 && (
+              <>
+                <div className="my-1 border-t border-slate-100" />
+                <div className="px-2 py-1 text-[10px] text-slate-400">已安装智能体 ({assistants.length})</div>
+                {assistants.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => handleCreateWithAssistant(a.id)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-slate-800 hover:bg-indigo-50 hover:text-indigo-700 transition text-left"
+                  >
+                    <span>{getAssistantIcon(a.display_name || a.name, a.id)}</span>
+                    <span className="truncate font-medium">{a.display_name || a.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-slate-200 bg-white">
+    <aside className="relative flex h-full w-64 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center justify-between border-b border-slate-100 p-3">
         <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
           <span>💬</span> 历史对话
@@ -95,15 +141,85 @@ export function SessionDrawer({
         </button>
       </div>
 
-      <div className="p-3">
+      {/* 新建对话按钮与下拉助手选择器 */}
+      <div className="relative p-3">
         <button
           type="button"
-          onClick={() => onCreate(null)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-medium text-slate-700 hover:border-slate-400 hover:bg-slate-50 transition shadow-2xs"
+          onClick={() => setMenuOpen(!menuOpen)}
+          className="flex w-full items-center justify-between gap-1.5 rounded-lg border border-slate-300 bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 transition shadow-xs"
         >
-          <span>＋</span>
-          <span>新建对话</span>
+          <span className="flex items-center gap-1.5">
+            <span>＋</span>
+            <span>新建对话</span>
+          </span>
+          <span className={`text-[10px] transition-transform duration-150 ${menuOpen ? "rotate-180" : ""}`}>
+            ▼
+          </span>
         </button>
+
+        {/* 助手选择浮层菜单 */}
+        {menuOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setMenuOpen(false)}
+            />
+            <div className="absolute left-3 right-3 top-12 z-50 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl animate-in fade-in zoom-in-95 duration-100">
+              <button
+                type="button"
+                onClick={() => handleCreateWithAssistant(null)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-slate-700 hover:bg-slate-100 transition text-left"
+              >
+                <span className="text-sm">💬</span>
+                <div>
+                  <div className="font-medium text-slate-900">通用对话</div>
+                  <div className="text-[10px] text-slate-400">标准大模型自由问答</div>
+                </div>
+              </button>
+
+              {assistants.length > 0 && (
+                <>
+                  <div className="my-1 border-t border-slate-100" />
+                  <div className="px-2 py-1 text-[10px] font-semibold text-slate-400">
+                    已安装智能体 ({assistants.length})
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-0.5">
+                    {assistants.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => handleCreateWithAssistant(a.id)}
+                        className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-slate-800 hover:bg-indigo-50 hover:text-indigo-700 transition text-left"
+                      >
+                        <span className="text-base">{getAssistantIcon(a.display_name || a.name, a.id)}</span>
+                        <div className="overflow-hidden flex-1">
+                          <div className="font-medium truncate">{a.display_name || a.name}</div>
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5 flex items-center gap-1">
+                            <span className="font-mono text-[9px] text-slate-400">({a.name})</span>
+                            {a.description && (
+                              <>
+                                <span>·</span>
+                                <span className="truncate">{a.description}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="my-1 border-t border-slate-100" />
+              <a
+                href="/assistants"
+                className="flex items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50 transition"
+              >
+                <span>🔍 浏览助手广场...</span>
+              </a>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 space-y-1">

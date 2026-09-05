@@ -22,6 +22,7 @@ async def test_assistants_workflow(
 
     manifest = PluginManifest(
         name="test-assistant",
+        display_name="智能测试助理",
         version="1.0.0",
         description="A helpful test assistant",
         author="Developer",
@@ -36,12 +37,20 @@ async def test_assistants_workflow(
     res = await client.get("/api/assistants")
     assert res.status_code == 200
     data = res.json()
-    assert any(a["name"] == "test-assistant" for a in data)
+    assert any(a["name"] == "test-assistant" and a["display_name"] == "智能测试助理" for a in data)
 
-    # Search filter
+    # Search filter by description
     search_res = await client.get("/api/assistants?query=helpful")
     assert search_res.status_code == 200
     search_data = search_res.json()
     assert len(search_data) >= 1
     assert search_data[0]["name"] == "test-assistant"
+
+    # Search filter by display_name
+    search_cn = await client.get("/api/assistants?query=智能测试")
+    assert search_cn.status_code == 200
+    search_cn_data = search_cn.json()
+    assert len(search_cn_data) >= 1
+    assert search_cn_data[0]["name"] == "test-assistant"
+    assert search_cn_data[0]["display_name"] == "智能测试助理"
 

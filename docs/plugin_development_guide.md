@@ -21,6 +21,7 @@ AgentPlatform 采用 **Plugin 即 Assistant** 的轻量设计理念。开发者�
 
 ```yaml
 name: contract-review-assistant
+display_name: 合同法务审查助手
 version: 0.1.0
 description: 智能合同法务审查专家，复用平台 PDF 解析与结构化提取能力
 model: deepseek-v4-flash

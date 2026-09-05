@@ -45,6 +45,8 @@ def resolve_impl(resource: SkillTool) -> object:
         parent_dir = str(p.parent.parent.resolve())
         if parent_dir not in sys.path:
             sys.path.insert(0, parent_dir)
+        from agentplatform.core.plugin.env import setup_plugin_env
+        setup_plugin_env(root=p.parent.parent)
         for parent in p.parents:
             for venv_site in parent.glob(".venv/lib/python*/site-packages"):
                 sp_str = str(venv_site.resolve())
@@ -77,6 +79,25 @@ def resolve_impl(resource: SkillTool) -> object:
 
 async def execute_tool(resource: SkillTool, args: dict) -> str:
     """执行确定性 tool,返回可回填的字符串结果。"""
+    # 沙箱分流检查 (阶段一预埋：默认 settings.sandbox_enabled 为 False 旁路放行)
+    from agentplatform.config import settings
+    from agentplatform.core.sandbox.runner import execute_command_in_sandbox, is_high_risk_tool
+
+    if settings.sandbox_enabled and is_high_risk_tool(resource):
+        cmd = args.get("cmd") or args.get("command")
+        if isinstance(cmd, str):
+            import shlex
+            cmd_list = shlex.split(cmd)
+            res = await execute_command_in_sandbox(cmd_list, plugin_name=resource.name)
+            if not res.success and res.violation:
+                return f"【安全拦截】沙箱检测到越权操作已阻断:\n{res.stderr}"
+            return res.stdout if res.success else f"执行失败 (code {res.returncode}):\n{res.stderr}"
+        if isinstance(cmd, list):
+            res = await execute_command_in_sandbox([str(x) for x in cmd], plugin_name=resource.name)
+            if not res.success and res.violation:
+                return f"【安全拦截】沙箱检测到越权操作已阻断:\n{res.stderr}"
+            return res.stdout if res.success else f"执行失败 (code {res.returncode}):\n{res.stderr}"
+
     if resource.id in _DEV_REGISTRY:
         impl = _DEV_REGISTRY[resource.id]
         result = impl(args)

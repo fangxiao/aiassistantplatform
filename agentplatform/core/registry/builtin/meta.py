@@ -3,7 +3,7 @@
 from typing import TypedDict
 
 
-class ResourceMeta(TypedDict):
+class ResourceMeta(TypedDict, total=False):
     """内置资源自描述元信息,与 skill_tools 表字段对应。"""
 
     id: str
@@ -12,3 +12,4 @@ class ResourceMeta(TypedDict):
     version: str
     description: str
     schema: dict
+    impl_path: str

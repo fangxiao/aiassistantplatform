@@ -17,8 +17,21 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function handleUnauthorized(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("agentplatform_token");
+  localStorage.removeItem("agentplatform_user");
+  if (!window.location.pathname.startsWith("/auth")) {
+    window.location.href = "/auth";
+  }
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, { headers: getAuthHeader() });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   return (await resp.json()) as T;
 }
@@ -29,6 +42,10 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json", ...getAuthHeader() },
     body: JSON.stringify(body),
   });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   return (await resp.json()) as T;
 }
@@ -39,6 +56,10 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json", ...getAuthHeader() },
     body: JSON.stringify(body),
   });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   return (await resp.json()) as T;
 }
@@ -48,6 +69,10 @@ export async function apiDelete<T>(path: string): Promise<T> {
     method: "DELETE",
     headers: getAuthHeader(),
   });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   if (resp.status === 204) return {} as T;
   return (await resp.json()) as T;

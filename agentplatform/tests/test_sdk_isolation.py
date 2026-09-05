@@ -6,6 +6,8 @@ from agentplatform.sdk import (
     Skill,
     TestContext,
     create_test_context,
+    get_base_url,
+    get_plugin_data_dir,
     render_skill,
     skill,
     tool,
@@ -32,8 +34,18 @@ def test_sdk_testing_helpers():
 
 def test_sdk_isolation_no_db_dependencies():
     """确保 SDK 模块本身绝不引入 sqlalchemy / fastapi / asyncpg 等服务端依赖。"""
-    sdk_symbols = [Context, Skill, TestContext, create_test_context, render_skill, skill, tool]
-    assert len(sdk_symbols) == 7
+    sdk_symbols = [
+        Context,
+        Skill,
+        TestContext,
+        create_test_context,
+        render_skill,
+        skill,
+        tool,
+        get_base_url,
+        get_plugin_data_dir,
+    ]
+    assert len(sdk_symbols) == 9
 
 
 def test_sdk_dynamic_load_and_validate_json_serializable(tmp_path):

@@ -304,7 +304,12 @@ export default function DeveloperPage() {
                           <div className="flex items-center gap-2">
                             <span className="text-base">🤖</span>
                             <div>
-                              <div className="font-bold text-slate-900">{p.name}</div>
+                              <div className="flex items-center gap-1.5">
+                                <div className="font-bold text-slate-900">{p.display_name || p.name}</div>
+                                {p.display_name && (
+                                  <span className="font-mono text-[10px] text-slate-400">({p.name})</span>
+                                )}
+                              </div>
                               {p.manifest?.description && (
                                 <div className="text-[11px] font-normal text-slate-400 truncate max-w-xs">
                                   {p.manifest.description}

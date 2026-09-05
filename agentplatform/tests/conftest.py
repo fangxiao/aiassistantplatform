@@ -17,8 +17,12 @@ from agentplatform.core.auth.model import User  # noqa: F401  表注册进 metad
 from agentplatform.core.auth.service import create_access_token, create_user
 from agentplatform.core.db.base import Base
 from agentplatform.core.db.session import get_session
-from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401  表注册进 metadata
-from agentplatform.core.registry.model import SkillTool  # noqa: F401  表注册进 metadata
+from agentplatform.core.interact.model import InteractEvent  # noqa: F401
+from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401
+from agentplatform.core.message.model import Message  # noqa: F401
+from agentplatform.core.plugin.model import Plugin  # noqa: F401
+from agentplatform.core.registry.model import SkillTool  # noqa: F401
+from agentplatform.core.session.model import Session as ChatSession  # noqa: F401
 from agentplatform.main import app
 
 ADMIN_URL = "postgresql+asyncpg://agentplatform:agentplatform@localhost:5432/agentplatform"

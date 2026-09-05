@@ -161,10 +161,18 @@ function ChatHome() {
 
       try {
         for await (const ev of sendMessage(current.id, content)) {
-          if (ev.event === "delta") {
+          if (ev.event === "reasoning") {
+            // 模型深度思考中：在助手消息上实时展示思考进度，不计入正文
             const d = ev.data as { text?: string };
             patch((m) => ({
               ...m,
+              reasoning: (m.reasoning ?? "") + (d.text ?? ""),
+            }));
+          } else if (ev.event === "delta") {
+            const d = ev.data as { text?: string };
+            patch((m) => ({
+              ...m,
+              reasoning: undefined,   // 正文开始后清空思考内容
               text: m.text + (d.text ?? ""),
             }));
           } else if (ev.event === "block_meta") {
@@ -175,10 +183,21 @@ function ChatHome() {
             }));
           } else if (ev.event === "tool_call") {
             const d = ev.data as ToolCallInfo;
-            patch((m) => ({ ...m, toolCalls: [...(m.toolCalls ?? []), d] }));
+            patch((m) => {
+              const currentList = m.toolCalls ?? [];
+              const matchIndex = currentList.findLastIndex(
+                (tc) => tc.id === d.id || (tc.name && tc.name === d.name)
+              );
+              if (matchIndex >= 0) {
+                const copy = [...currentList];
+                copy[matchIndex] = d;
+                return { ...m, toolCalls: copy };
+              }
+              return { ...m, toolCalls: [...currentList, d] };
+            });
           } else if (ev.event === "done") {
             const d = ev.data as { message_id?: string };
-            patch((m) => ({ ...m, id: d.message_id ?? m.id }));
+            patch((m) => ({ ...m, id: d.message_id ?? m.id, reasoning: undefined }));
           } else if (ev.event === "error") {
             const d = ev.data as { message?: string };
             patch((m) => ({
@@ -262,8 +281,13 @@ function ChatHome() {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-slate-900">
-                        {currentAssistant.name}
+                        {currentAssistant.display_name || currentAssistant.name}
                       </span>
+                      {currentAssistant.display_name && (
+                        <span className="font-mono text-[10px] text-slate-400">
+                          ({currentAssistant.name})
+                        </span>
+                      )}
                       <span className="rounded bg-slate-100 px-1.5 py-0.2 font-mono text-[10px] text-slate-600">
                         v{currentAssistant.version}
                       </span>
@@ -306,8 +330,8 @@ function ChatHome() {
             <div className="text-[11px] text-slate-400 flex items-center gap-2">
               {streaming ? (
                 <span className="inline-flex items-center gap-1.5 text-indigo-600 font-medium animate-pulse">
-                  <span className="h-2 w-2 rounded-full bg-indigo-600" />
-                  正在生成回答与富交互组件...
+                  <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping" />
+                  生成中
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-slate-400">
@@ -318,7 +342,7 @@ function ChatHome() {
             </div>
           </div>
 
-          <MessageList messages={messages} onInteract={handleInteract} />
+          <MessageList messages={messages} streaming={streaming} onInteract={handleInteract} />
           <Composer onSend={handleSend} disabled={streaming} />
         </main>
       </div>
@@ -331,8 +355,14 @@ function ChatHome() {
               <div className="flex items-center gap-2">
                 <span className="text-xl">🤖</span>
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900">{currentAssistant.name}</h3>
-                  <span className="font-mono text-xs text-slate-400">v{currentAssistant.version}</span>
+                  <h3 className="font-bold text-sm text-slate-900">
+                    {currentAssistant.display_name || currentAssistant.name}
+                  </h3>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
+                    <span>{currentAssistant.name}</span>
+                    <span>•</span>
+                    <span>v{currentAssistant.version}</span>
+                  </div>
                 </div>
               </div>
               <button

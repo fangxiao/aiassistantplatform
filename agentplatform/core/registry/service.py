@@ -81,6 +81,7 @@ async def seed_builtin(session: AsyncSession) -> int:
 
     count = 0
     for res in ALL:
+        impl = res.get("impl_path") or f"agentplatform.core.registry.builtin.{res['name'].replace('-', '_')}"
         await register(
             session,
             resource_id=res["id"],
@@ -89,7 +90,7 @@ async def seed_builtin(session: AsyncSession) -> int:
             version=res["version"],
             source=SkillToolSource.builtin,
             schema_=res["schema"],
-            impl_path=f"agentplatform.core.registry.builtin.{res['name'].replace('-', '_')}",
+            impl_path=impl,
             description=res["description"],
         )
         count += 1

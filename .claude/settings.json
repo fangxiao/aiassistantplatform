@@ -1,6 +1,12 @@
 {
+  "env": {
+    "HUB_AGENT": "platform",
+    "HUB_HOME": "/Users/admin/work/project/agent-hub"
+  },
   "permissions": {
     "allow": [
+      "Bash(hub:*)",
+      "Bash(/Users/admin/work/project/agent-hub/hub:*)",
       "Bash(mkdir:*)",
       "Bash(touch:*)",
       "Bash(mv:*)",
@@ -55,5 +61,17 @@
   },
   "enabledPlugins": {
     "planning-with-files@planning-with-files": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/admin/work/project/agent-hub/hub hook-session-start"
+          }
+        ]
+      }
+    ]
   }
 }

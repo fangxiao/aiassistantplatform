@@ -24,6 +24,8 @@ class PluginManifest(BaseModel):
     """插件清单(对应 plugin.yaml)。"""
 
     name: str
+    display_name: str | None = None  # 中文展示名称（如：微信公众号写作助手）
+    title: str | None = None  # display_name 同义别名
     version: str
     description: str | None = None
     author: str | None = None
@@ -39,6 +41,18 @@ class PluginManifest(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("skill/tool id 重复")
         return v
+
+
+def infer_display_name(description: str | None, default_name: str) -> str:
+    """从 description 中智能推导友好的中文展示名称；若无匹配则回退到 default_name。"""
+    if not description:
+        return default_name
+    for sep in ("：", ":", "，", ","):
+        if sep in description:
+            prefix = description.split(sep, 1)[0].strip()
+            if 2 <= len(prefix) <= 25 and any("\u4e00" <= char <= "\u9fff" for char in prefix):
+                return prefix
+    return default_name
 
 
 def validate_manifest(manifest: PluginManifest) -> None:

@@ -5,6 +5,7 @@
 
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,10 +32,31 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "dev-secret-change-me"  # TODO(M1): 认证启用前必须改为环境变量注入
-    # 全局 LLM 端点(开发/测试共用，由 .env 覆盖注入)
-    openai_base_url: str = "https://api.eaglesine.com/v1"
+    # 默认主 LLM 端点 (个人智能网关 / 直连统一模型网关)
+    openai_base_url: str = "https://api.ailearning.top/v1"
     openai_api_key: str = ""
-    default_model: str = "DeepSeek-V3"
+    default_model: str = "auto"
+    available_models: str = '["auto"]'
+    multimodal_model: str = "auto"
+
+    # 可选备用容灾 LLM 端点 (由 .env 决定是否启用)
+    fallback_openai_base_url: str = ""
+    fallback_openai_api_key: str = ""
+    fallback_default_model: str = "auto"
+    fallback_available_models: str = '["auto"]'
+
+    @property
+    def model_list(self) -> list[str]:
+        import json
+        v = (self.available_models or "").strip()
+        if v.startswith("[") and v.endswith("]"):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [str(m).strip() for m in parsed if str(m).strip()]
+            except Exception:
+                pass
+        return [m.strip() for m in v.split(",") if m.strip()] or [self.default_model]
     # 前端跨域来源(MVP dev:Next.js 3000;生产按环境注入)
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
@@ -42,6 +64,17 @@ class Settings(BaseSettings):
     browser_tunnel_heartbeat: int = 30  # 服务端心跳探测间隔(秒)
     browser_tunnel_timeout: int = 15  # 心跳探测超时(秒),超时断开
     browser_route_timeout: int = 120  # 端侧动作最长等待(秒)
+
+    # 远程调试会话(Remote Dev / 设计 007)
+    dev_session_ttl: int = 1800  # 调试会话 TTL(秒),默认 30 分钟
+    dev_session_max_interactions: int = 100  # 每会话最大消息交互次数
+
+    # 沙箱安全配置 (基于 @anthropic-ai/sandbox-runtime / srt)
+    # 当前阶段默认关闭 (旁路模式)，待未来对外开放或托管不可信插件时一键开启
+    sandbox_enabled: bool = False
+    sandbox_runner_cmd: str = "srt"
+    sandbox_high_risk_only: bool = True
+    sandbox_timeout_seconds: int = 30
 
 
 settings = Settings()

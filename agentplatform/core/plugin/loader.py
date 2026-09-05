@@ -59,6 +59,10 @@ async def deploy_plugin(
         await _register_resource(session, r, SkillToolKind.skill, manifest)
     for r in manifest.tools:
         await _register_resource(session, r, SkillToolKind.tool, manifest)
+
+    from agentplatform.core.plugin.env import get_plugin_data_dir
+
+    get_plugin_data_dir(manifest.name)
     return plugin
 
 

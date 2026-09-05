@@ -9,6 +9,7 @@
 | 001 | [001-product-requirements.md](./001-product-requirements.md) | 平台总需求(主 PRD) | v1.2 已定稿 | 001-006 全套 |
 | 002 | [002-skill-tool-sharing.md](./002-skill-tool-sharing.md) | skill/tool 共享机制(增量) | v1.0 定稿 | [002-skill-tool-model.md](../design/002-skill-tool-model.md) |
 | 003 | [003-message-rendering.md](./003-message-rendering.md) | 消息展示扩展 / 21 种 renderer(增量) | v1.0 定稿 | [003-ui-components.md](../design/003-ui-components.md) |
+| 004 | [004-remote-dev.md](./004-remote-dev.md) | 远程开发与调试(增量) | v0.1 已实现 | [007-remote-dev.md](../design/007-remote-dev.md) |
 
 ## 阅读路径
 

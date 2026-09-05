@@ -80,10 +80,20 @@ async def list_messages(
 async def build_history(
     session: AsyncSession, session_id: uuid.UUID
 ) -> list[dict]:
-    """组装 agent 输入历史 [{role, content}],仅 user/assistant。"""
+    """组装 agent 输入历史 [{role, content}],仅 user/assistant 且非空且无思考标签消息。"""
+    import re
+
     history: list[dict] = []
     for m in await list_messages(session, session_id):
         if m.role not in (MessageRole.user, MessageRole.assistant):
             continue
-        history.append({"role": m.role.value, "content": message_text(m)})
+        txt = message_text(m)
+        if not txt or not txt.strip():
+            continue
+        # 剔除思考过程与松散标签
+        clean_txt = re.sub(r"<think>[\s\S]*?</think>", "", txt)
+        clean_txt = re.sub(r"</?think>", "", clean_txt).strip()
+        if not clean_txt:
+            continue
+        history.append({"role": m.role.value, "content": clean_txt})
     return history

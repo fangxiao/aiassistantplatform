@@ -3,7 +3,13 @@
 提供 @skill / @tool 装饰器、Skill / Tool 基类与 Context 上下文。
 """
 
-from agentplatform.sdk.base import Context, Skill, Tool
+from agentplatform.sdk.base import (
+    Context,
+    Skill,
+    Tool,
+    get_base_url,
+    get_plugin_data_dir,
+)
 from agentplatform.sdk.decorators import (
     as_skill_callable,
     as_tool_callable,
@@ -20,6 +26,8 @@ __all__ = [
     "as_skill_callable",
     "as_tool_callable",
     "create_test_context",
+    "get_base_url",
+    "get_plugin_data_dir",
     "render_skill",
     "skill",
     "tool",

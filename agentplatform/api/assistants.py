@@ -17,6 +17,7 @@ from agentplatform.core.auth.dependencies import (
 )
 from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
+from agentplatform.core.plugin.manifest import infer_display_name
 from agentplatform.core.plugin.model import Plugin, PluginStatus
 
 router = APIRouter(prefix="/assistants", tags=["assistants"])
@@ -27,6 +28,7 @@ class AssistantOut(BaseModel):
 
     id: uuid.UUID
     name: str
+    display_name: str | None = None
     version: str
     description: str | None = None
     author: str | None = None
@@ -38,9 +40,11 @@ class AssistantOut(BaseModel):
 
 def _plugin_to_assistant(p: Plugin) -> AssistantOut:
     manifest = p.manifest if isinstance(p.manifest, dict) else {}
+    display_name = manifest.get("display_name") or manifest.get("title") or infer_display_name(manifest.get("description"), p.name)
     return AssistantOut(
         id=p.id,
         name=p.name,
+        display_name=display_name,
         version=p.version,
         description=manifest.get("description"),
         author=manifest.get("author"),
@@ -54,23 +58,37 @@ def _plugin_to_assistant(p: Plugin) -> AssistantOut:
 @router.get("", response_model=list[AssistantOut])
 async def list_assistants(
     query: str | None = Query(default=None, description="搜索关键词"),
+    all_versions: bool = Query(default=False, description="是否返回所有历史版本"),
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_current_user),
 ) -> list[AssistantOut]:
-    """获取可用助手列表(仅展示 active 状态插件)。"""
+    """获取可用助手列表(默认按插件名称去重，仅展示最新部署版本)。"""
     stmt = (
         select(Plugin)
         .where(Plugin.status == PluginStatus.active)
         .order_by(Plugin.deployed_at.desc())
     )
-    rows = await session.scalars(stmt)
+    rows = list((await session.scalars(stmt)).all())
+
+    if not all_versions:
+        seen: set[str] = set()
+        deduped: list[Plugin] = []
+        for p in rows:
+            key = f"{p.owner_id}:{p.name}"
+            if key not in seen:
+                seen.add(key)
+                deduped.append(p)
+        rows = deduped
+
     results = [_plugin_to_assistant(p) for p in rows]
     if query:
         q = query.lower()
         results = [
             a
             for a in results
-            if q in a.name.lower() or (a.description and q in a.description.lower())
+            if q in a.name.lower()
+            or (a.display_name and q in a.display_name.lower())
+            or (a.description and q in a.description.lower())
         ]
     return results
 

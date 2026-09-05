@@ -49,6 +49,7 @@ export default function AssistantsPage() {
     const q = search.toLowerCase();
     return (
       a.name.toLowerCase().includes(q) ||
+      (a.display_name && a.display_name.toLowerCase().includes(q)) ||
       (a.description && a.description.toLowerCase().includes(q))
     );
   });
@@ -108,10 +109,17 @@ export default function AssistantsPage() {
                         🤖
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-slate-900">{item.name}</h3>
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
-                          v{item.version}
-                        </span>
+                        <h3 className="text-sm font-bold text-slate-900">
+                          {item.display_name || item.name}
+                        </h3>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="font-mono text-[10px] text-slate-400">
+                            {item.name}
+                          </span>
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
+                            v{item.version}
+                          </span>
+                        </div>
                       </div>
                     </div>
                     {item.model && (

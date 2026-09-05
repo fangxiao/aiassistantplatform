@@ -28,7 +28,7 @@ async def get_latest_specs() -> SpecsResponse:
     from agentplatform.cli.main import TEMPLATE_AGENTS_MD
 
     return SpecsResponse(
-        version="0.2.0",
+        version="0.3.0",
         template_agents_md=TEMPLATE_AGENTS_MD,
     )
 

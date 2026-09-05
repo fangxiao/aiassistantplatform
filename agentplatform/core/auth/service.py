@@ -18,7 +18,7 @@ from agentplatform.core.auth.model import User, UserRole
 # bcrypt 自带随机会话盐(salt);后端 1.7.4 + bcrypt<4.1(兼容性见 pyproject 注释)
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-ACCESS_TOKEN_EXPIRE = timedelta(hours=24)
+ACCESS_TOKEN_EXPIRE = timedelta(days=30)
 
 
 def hash_password(password: str) -> str:

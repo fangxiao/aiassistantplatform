@@ -8,12 +8,14 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from agentplatform.core.plugin.manifest import infer_display_name
 from agentplatform.core.plugin.model import Plugin, PluginStatus
 
 
 class PluginOut(BaseModel):
     id: uuid.UUID
     name: str
+    display_name: str | None = None
     version: str
     status: PluginStatus
     description: str | None = None
@@ -22,11 +24,13 @@ class PluginOut(BaseModel):
 
 
 def to_out(plugin: Plugin) -> PluginOut:
-    """ORM -> 响应模型(description/model 从 manifest 摘出)。"""
+    """ORM -> 响应模型(description/model/display_name 从 manifest 摘出)。"""
     m = plugin.manifest or {}
+    display_name = m.get("display_name") or m.get("title") or infer_display_name(m.get("description"), plugin.name)
     return PluginOut(
         id=plugin.id,
         name=plugin.name,
+        display_name=display_name,
         version=plugin.version,
         status=plugin.status,
         description=m.get("description"),

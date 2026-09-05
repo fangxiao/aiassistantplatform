@@ -54,6 +54,22 @@ function inline(text: string): ReactNode[] {
 
 export default function MarkdownRenderer({ block }: { block: ContentBlock }) {
   const text = String(block.data?.text ?? "");
+
+  // 1. 如果整段文本为完整 HTML 根结构(如微信公众号排版 <section style="..."> 或 <!DOCTYPE)
+  if (
+    /^\s*<(?:section|article|div|html|!DOCTYPE)\b/i.test(text.trim()) &&
+    /(?:<\/(?:section|article|div|html)>|\/>)\s*$/i.test(text.trim())
+  ) {
+    return (
+      <div className="my-2 overflow-x-auto rounded-xl border border-slate-200/80 bg-white p-2 shadow-xs">
+        <div
+          className="wechat-article-preview"
+          dangerouslySetInnerHTML={{ __html: text.trim() }}
+        />
+      </div>
+    );
+  }
+
   const lines = text.split("\n");
   const out: ReactNode[] = [];
   let key = 0;
@@ -61,6 +77,33 @@ export default function MarkdownRenderer({ block }: { block: ContentBlock }) {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+
+    // HTML 块 (如微信排版组件 <section style="...">, <div>, <table>, <!DOCTYPE)
+    if (/^\s*<(?:section|div|article|table|header|footer|main|aside|nav|blockquote|!DOCTYPE|html)\b/i.test(line.trim())) {
+      const htmlBuf: string[] = [line];
+      i++;
+      while (
+        i < lines.length &&
+        !/^\s*(?:#{1,3}\s|```|[-*]\s|\d+\.\s)/.test(lines[i])
+      ) {
+        htmlBuf.push(lines[i]);
+        if (/<\/(?:section|div|article|table|html)>\s*$/i.test(lines[i].trim())) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      const fullHtml = htmlBuf.join("\n");
+      out.push(
+        <div
+          key={key++}
+          className="my-3 overflow-x-auto rounded-xl border border-slate-200/80 bg-white p-2 shadow-xs"
+          dangerouslySetInnerHTML={{ __html: fullHtml }}
+        />
+      );
+      continue;
+    }
+
     // 代码块
     if (/^```/.test(line.trim())) {
       const buf: string[] = [];

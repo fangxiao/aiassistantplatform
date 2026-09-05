@@ -18,6 +18,7 @@ from agentplatform.core.agent.errors import AgentLoopError
 from agentplatform.core.agent.executor import execute_skill, execute_tool
 from agentplatform.core.agent.messages import build_messages, build_system_prompt
 from agentplatform.core.agent.tools import build_tools
+from agentplatform.core.llm.client import ToolCall
 from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
 
@@ -85,8 +86,47 @@ async def run_agent(
         if ev.type == "delta" and ev.text:
             text_parts.append(ev.text)
         elif ev.type == "tool_call" and ev.tool_trace is not None:
-            traces.append(ev.tool_trace)
+            if ev.tool_trace.result != "":
+                traces.append(ev.tool_trace)
     return AgentResult(text="".join(text_parts), tool_traces=traces)
+
+
+def _find_resource(name: str, resources: dict[str, SkillTool]) -> SkillTool | None:
+    """鲁棒解析工具/技能资源，兼容带前缀、下划线转换、点号路径、版本号后缀等全部变体。"""
+    if not name:
+        return None
+    if name in resources:
+        return resources[name]
+    norm = name.replace("__", ":")
+    if norm in resources:
+        return resources[norm]
+    bare = norm.split(":", 1)[-1].split("@", 1)[0].strip()
+    if bare in resources:
+        return resources[bare]
+    if name.startswith("tool_"):
+        candidate = f"tool:{name[5:]}"
+        if candidate in resources:
+            return resources[candidate]
+    if name.startswith("skill_"):
+        candidate = f"skill:{name[6:]}"
+        if candidate in resources:
+            return resources[candidate]
+    dot_replaced = bare.replace(".", "_")
+    if dot_replaced in resources:
+        return resources[dot_replaced]
+    for k, v in resources.items():
+        if (
+            k == bare
+            or v.name == bare
+            or v.name == dot_replaced
+            or k.endswith(f":{bare}")
+            or k.endswith(f"__{bare}")
+            or bare == k.split(":", 1)[-1]
+            or (v.impl_path and v.impl_path.endswith(bare))
+            or (v.impl_path and v.impl_path.replace(".", "_").endswith(dot_replaced))
+        ):
+            return v
+    return None
 
 
 async def stream_agent(
@@ -98,6 +138,7 @@ async def stream_agent(
     history: list[dict] | None = None,
     max_iterations: int = MAX_ITERATIONS,
     owner_id: str | None = None,
+    plugin_desc: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
@@ -109,18 +150,35 @@ async def stream_agent(
     for rid in resource_ids:
         row = await resolve(session, rid)
         if row is not None:
+            # 注册全部名称与别名形式，确保任意调用形式(如 tool:xxx, tool__xxx, xxx)均能精准命中
             resources[row.id] = row
+            resources[row.id.replace(":", "__")] = row
+            if ":" in row.id:
+                bare = row.id.split(":", 1)[1]
+                resources[bare] = row
+                resources[bare.replace(":", "__")] = row
+                resources[f"tool:{bare}"] = row
+                resources[f"tool__{bare}"] = row
+                resources[f"skill:{bare}"] = row
+                resources[f"skill__{bare}"] = row
     # 资源加载完毕即提交释放事务:LLM 流式远超 idle_in_transaction_session_timeout(30s),
     # 携带空闲事务进入长流式阶段会被 PG 终止连接,导致最终结果无法落库。
     await session.commit()
 
-    system = build_system_prompt(list(resources.values()))
+    system = build_system_prompt(list(resources.values()), plugin_desc=plugin_desc)
     messages = build_messages(system, history, user_message)
 
+    import asyncio
+    skill_delta_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
     async def skill_call(prompt: str) -> str:
-        """简单 skill 的一次 LLM 调用(002 §5.3)。"""
-        events = [e async for e in _stream(llm_client, [{"role": "user", "content": prompt}])]
-        return "".join(e.text or "" for e in events if e.type == "delta")
+        """简单 skill 的一次 LLM 调用(002 §5.3)。实时将 delta 注入队列以流式渲染给用户。"""
+        chunks: list[str] = []
+        async for e in _stream(llm_client, [{"role": "user", "content": prompt}]):
+            if e.type == "delta" and e.text:
+                chunks.append(e.text)
+                await skill_delta_queue.put(e.text)
+        return "".join(chunks)
 
     async def execute(resource: SkillTool | None, arguments: str) -> str:
         """执行单个 tool_call,任何异常都回填为文本(让 LLM 可自纠)。"""
@@ -135,16 +193,62 @@ async def stream_agent(
             return f"执行错误: {exc}"
 
     for _ in range(max_iterations):
-        events = [e async for e in _stream(llm_client, messages, tools)]
-        error = next((e for e in events if e.type == "error"), None)
-        if error is not None:
-            raise AgentLoopError(error.error or "LLM 调用失败")
-        for e in events:
-            if e.type == "delta" and e.text:
+        delta_chunks: list[str] = []
+        reasoning_chunks: list[str] = []
+        calls: list[ToolCall] = []
+
+        async for e in _stream(llm_client, messages, tools):
+            if e.type == "error":
+                raise AgentLoopError(e.error or "LLM 调用失败")
+            elif e.type == "reasoning" and e.text:
+                reasoning_chunks.append(e.text)
+                yield AgentEvent(type="reasoning", text=e.text)
+            elif e.type == "delta" and e.text:
+                delta_chunks.append(e.text)
                 yield AgentEvent(type="delta", text=e.text)
-        calls = [e.tool_call for e in events if e.type == "tool_call"]
+            elif e.type == "tool_call" and e.tool_call is not None:
+                calls.append(e.tool_call)
+
+        accumulated_text = "".join(delta_chunks)
+        accumulated_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
+
+        # 思考模型兜底：如果模型把文章或输出写在推理/思考流中导致正文 delta 为空，自动提取实质内容作为回复
+        if not accumulated_text.strip() and accumulated_reasoning:
+            import re
+            content_match = re.search(
+                r"(?:^|\n)(#+\s+[^\n]+|【标题】[^\n]+|<(?:section|div|p|h\d)[\s\S]*)\Z",
+                accumulated_reasoning,
+            )
+            if content_match:
+                extracted_content = content_match.group(1).strip()
+                accumulated_text = extracted_content
+            else:
+                accumulated_text = accumulated_reasoning
+            yield AgentEvent(type="delta", text=accumulated_text)
+
         if not calls:
+            calls = _extract_text_tool_calls(accumulated_text, resources)
+
+        if not calls:
+            # 没有工具调用: 本轮对话流式生成完毕，直接退出
             break
+
+        assistant_msg: dict = {
+            "role": "assistant",
+            "content": accumulated_text or None,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.name, "arguments": tc.arguments},
+                }
+                for tc in calls
+            ],
+        }
+        if accumulated_reasoning:
+            assistant_msg["reasoning_content"] = accumulated_reasoning
+        messages.append(assistant_msg)
+
         for tc in calls:
             if tc.name == "output_block":
                 block_data = _parse_args(tc.arguments)
@@ -157,19 +261,62 @@ async def stream_agent(
                 yield AgentEvent(type="block_meta", block=block_data)
                 result = "ContentBlock 已在客户端成功呈现。"
             else:
-                resource = resources.get(tc.name)
+                resource = _find_resource(tc.name, resources)
+                norm_name = resource.id if resource else (tc.name.replace("__", ":") if "__" in tc.name else tc.name)
                 if is_endpoint_resource(resource):
                     # 端侧工具:不本地执行,经桥接下发浏览器并等待结果回填
                     args = _parse_args(tc.arguments)
+                    if "browser_wechat_draft" in norm_name:
+                        if not args.get("html_content") or len(str(args.get("html_content", "")).strip()) < 20:
+                            art_title, art_digest, art_html = _extract_article_info(history, accumulated_text)
+                            if art_html:
+                                args["html_content"] = art_html
+                            if not args.get("title") and art_title:
+                                args["title"] = art_title
+                            if not args.get("digest") and art_digest:
+                                args["digest"] = art_digest
                     action = resource.impl_path[len(ENDPOINT_PREFIX):]  # type: ignore[union-attr]
                     if owner_id and bridge.is_connected(owner_id):
-                        # 双向隧道:route_to_endpoint 等待 TOOL_RESULT 后返回(阻塞于同事件循环)
-                        result = await bridge.route_to_endpoint(
-                            owner_id, action, args, call_id=tc.id
+                        progress_q: asyncio.Queue[AgentEvent] = asyncio.Queue()
+
+                        async def _on_step(step_data: dict) -> None:
+                            step_desc = (
+                                step_data.get("message")
+                                or step_data.get("title")
+                                or step_data.get("step")
+                                or str(step_data)
+                            )
+                            await progress_q.put(
+                                AgentEvent(
+                                    type="tool_call",
+                                    tool_trace=ToolTrace(
+                                        id=norm_name,
+                                        args=args,
+                                        result=f"⚡ [{step_desc}]",
+                                    ),
+                                    block={"type": "collaboration.step", "data": step_data},
+                                )
+                            )
+
+                        # 双向隧道:route_to_endpoint 等待 TOOL_RESULT 后返回,并实时上报 step 进度
+                        route_task = asyncio.create_task(
+                            bridge.route_to_endpoint(
+                                owner_id, action, args, call_id=tc.id, on_progress=_on_step
+                            )
                         )
+                        while not route_task.done():
+                            try:
+                                ev = await asyncio.wait_for(progress_q.get(), timeout=0.1)
+                                yield ev
+                            except TimeoutError:
+                                continue
+                        while not progress_q.empty():
+                            yield progress_q.get_nowait()
+
+                        result = await route_task
                         yield AgentEvent(
                             type="tool_call",
-                            tool_trace=ToolTrace(id=tc.name, args=args, result=result),
+                            tool_trace=ToolTrace(id=norm_name, args=args, result=result),
                         )
                     else:
                         # 无浏览器连接:降级为 await_external SSE + 暂停(interact 回传),维持既有 POC
@@ -177,13 +324,13 @@ async def stream_agent(
                             "type": "await_external",
                             "data": {
                                 "action": action,
-                                "tool_id": tc.name,
+                                "tool_id": norm_name,
                                 "call_id": tc.id,
                                 "args": args,
                             },
                         }
                         trace = ToolTrace(
-                            id=tc.name,
+                            id=norm_name,
                             args=args,
                             result=f"端侧动作已下发({action}),等待浏览器执行结果回传。",
                         )
@@ -191,24 +338,113 @@ async def stream_agent(
                         yield AgentEvent(type="await_external", block=block)
                         return
                 else:
-                    result = await execute(resource, tc.arguments)
+                    # 1. 自动补全空参数与 HTML 回填
+                    tool_args = _parse_args(tc.arguments)
+                    if "writewx_preview" in norm_name:
+                        if not tool_args.get("html") or len(str(tool_args.get("html", "")).strip()) < 20:
+                            extracted_h = _extract_html_fallback(accumulated_text)
+                            if extracted_h:
+                                tool_args["html"] = extracted_h
+                        if not tool_args.get("title"):
+                            tool_args["title"] = "技术长文"
+                        tc = ToolCall(
+                            id=tc.id,
+                            name=tc.name,
+                            arguments=json.dumps(tool_args, ensure_ascii=False),
+                        )
+
+                    # 1. 优先下发工具调用开始事件(通知前端立即进入执行态)
+                    start_trace = ToolTrace(
+                        id=norm_name, args=tool_args, result=""
+                    )
+                    yield AgentEvent(type="tool_call", tool_trace=start_trace)
+
+                    # 2. 实际执行工具逻辑（若为 skill 撰写，则将内部生成内容实时流式传输给用户）
+                    exec_task = asyncio.create_task(execute(resource, tc.arguments))
+                    while not exec_task.done():
+                        try:
+                            chunk = await asyncio.wait_for(skill_delta_queue.get(), timeout=0.05)
+                            if chunk:
+                                yield AgentEvent(type="skill_delta", text=chunk)
+                        except TimeoutError:
+                            continue
+                    while not skill_delta_queue.empty():
+                        chunk = skill_delta_queue.get_nowait()
+                        if chunk:
+                            yield AgentEvent(type="skill_delta", text=chunk)
+
+                    result = await exec_task
                     trace = ToolTrace(
-                        id=tc.name, args=_parse_args(tc.arguments), result=result
+                        id=norm_name, args=tool_args, result=result
                     )
                     yield AgentEvent(type="tool_call", tool_trace=trace)
-            messages.append(
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": tc.name, "arguments": tc.arguments},
-                        }
-                    ],
-                }
-            )
+
+                    # 3. 如果是预览工具，自动向前端下发文件下载/预览卡片
+                    if "writewx_preview" in norm_name:
+                        try:
+                            res_data = json.loads(result)
+                            if isinstance(res_data, dict) and res_data.get("status") == "success":
+                                file_path = res_data.get("path", "")
+                                filename = res_data.get("filename", "article.html")
+                                yield AgentEvent(
+                                    type="block_meta",
+                                    block={
+                                        "type": "file",
+                                        "data": {
+                                            "name": filename,
+                                            "path": file_path,
+                                            "mime": "text/html",
+                                        },
+                                    },
+                                )
+                        except Exception:
+                            pass
+
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+
+    # 4. 自动落盘兜底:如果模型直接生成了 HTML 但未显式调用 preview 工具
+    preview_res = next((res for rid, res in resources.items() if "preview" in rid), None)
+    if preview_res:
+        extracted_html = _extract_html_fallback(accumulated_text)
+        if extracted_html and len(extracted_html) > 100:
+            import re
+            extracted_title = "微信公众号文章"
+            title_patterns = [
+                r"(?:\d+\.\s*)?\*{0,2}文章标题\*{0,2}[：:]\s*([^\n\r]+)",
+                r"【标题】\s*([^\n\r]+)",
+                r"<title>([^<]+)</title>",
+                r"<h1[^>]*>([^<]+)</h1>",
+                r"(?:^|\n)#\s+([^\n\r]+)",
+            ]
+            for p in title_patterns:
+                m = re.search(p, accumulated_text, re.IGNORECASE)
+                if m:
+                    t = re.sub(r"[*_#`]+", "", m.group(1)).strip()
+                    if t and len(t) < 80:
+                        extracted_title = t
+                        break
+
+            preview_args = {"html": extracted_html, "title": extracted_title}
+            prev_result_str = await execute_tool(preview_res, preview_args)
+            try:
+                res_data = json.loads(prev_result_str)
+                if isinstance(res_data, dict) and res_data.get("status") == "success":
+                    file_path = res_data.get("path", "")
+                    filename = res_data.get("filename", f"{extracted_title}-公众号版.html")
+                    yield AgentEvent(
+                        type="block_meta",
+                        block={
+                            "type": "file",
+                            "data": {
+                                "name": filename,
+                                "path": file_path,
+                                "url": f"http://localhost:8000/api/files/raw?path={file_path}",
+                                "mime": "text/html",
+                            },
+                        },
+                    )
+            except Exception:
+                pass
 
     yield AgentEvent(type="done")
 
@@ -226,3 +462,370 @@ def _stream(
 ) -> AsyncIterator:
     """适配:客户端 stream(messages, tools) 的鸭子接口。"""
     return llm_client.stream(messages, tools)  # type: ignore[attr-defined]
+
+
+def _strip_tool_syntax(text: str) -> str:
+    """过滤模型输出中混杂的 JSON 参数、tool_call 标记等内部调用代码。"""
+    if not text:
+        return ""
+    import re
+    # 移除 <tool_call>...</tool_call>
+    t = re.sub(r"<tool_call>[\s\S]*?(?:</tool_call>|\Z)", "", text)
+    # 移除 `tool:xxx`(...) 或 `skill:xxx`(...)
+    t = re.sub(r"`?(?:skill|tool):[a-zA-Z0-9_-]+`?\s*\([\s\S]*?\)", "", t)
+    # 移除独立代码块 ```json ... ``` 或 ``` ... ```
+    t = re.sub(r"```(?:json)?\s*\{[\s\S]*?\}\s*```", "", t)
+    # 移除纯 JSON 对象 { ... }
+    t_stripped = t.strip()
+    if t_stripped.startswith("{") and t_stripped.endswith("}"):
+        try:
+            json.loads(t_stripped)
+            return ""
+        except Exception:
+            pass
+    # 移除类似 "topic": "...", "audience": "..." 散乱参数行及内部工具调用宣告
+    lines = [
+        l
+        for l in t.splitlines()
+        if not re.search(r'^\s*"(?:topic|audience|style|length|title|tone|word_count)"\s*:', l)
+        and not re.search(r"^\s*[{}]\s*$", l)
+        and not re.search(r"(?:调用(?:技能|工具)|执行(?:技能|工具))\s*[`']?(?:skill|tool):", l)
+        and not re.search(r"^步骤\s*\d+[\s:：].*(?:获取排版|调用)", l)
+    ]
+    return "\n".join(lines).strip()
+
+
+def _extract_html_fallback(text: str) -> str | None:
+    """从大模型生成的文本、markdown 代码块或 JSON 字符串中鲁棒提取 HTML 内容。"""
+    import re
+    if not text:
+        return None
+    # 1. 尝试匹配 ```html ... ```
+    m = re.search(r"```html\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # 2. 尝试从 JSON "html": "..." 中提取并反转义
+    html_m = re.search(r"\"(?:html|content|html_content)\"\s*:\s*\"((?:\\.|[^\"\\])*)", text)
+    if html_m:
+        raw_html = html_m.group(1)
+        return raw_html.replace(r"\"", "\"").replace(r"\n", "\n").replace(r"\t", "\t").replace(r"\/", "/")
+    m = re.search(r"(<(?:section|div|article|html|!DOCTYPE)\s+[\s\S]*?(?:</(?:section|div|article|html)>|\Z))", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def _extract_article_info(history: list[dict] | None, current_text: str) -> tuple[str, str, str]:
+    """从历史消息或当前文本中提取最近一次生成的文章标题、摘要与完整 HTML。"""
+    import re
+    all_texts: list[str] = []
+    if history:
+        for h in reversed(history):
+            content = h.get("content") or ""
+            if "<section" in content or "```html" in content or "【标题】" in content or "文章标题" in content:
+                all_texts.append(content)
+    all_texts.append(current_text)
+
+    combined = "\n\n".join(all_texts)
+    html = _extract_html_fallback(combined) or ""
+
+    title = "微信公众号文章"
+    title_patterns = [
+        r"(?:\d+\.\s*)?\*{0,2}文章标题\*{0,2}[：:]\s*([^\n\r]+)",
+        r"(?:\d+\.\s*)?\*{0,2}标题\*{0,2}[：:]\s*([^\n\r]+)",
+        r"【标题】\s*([^\n\r]+)",
+        r"<h1[^>]*>([^<]+)</h1>",
+        r"<title>([^<]+)</title>",
+        r"(?:^|\n)#\s+([^\n\r]+)",
+    ]
+    for p in title_patterns:
+        m = re.search(p, combined, re.IGNORECASE)
+        if m:
+            t = re.sub(r"[*_#`]+", "", m.group(1)).strip()
+            if t and len(t) < 80:
+                title = t
+                break
+
+    digest = "点击阅读全文"
+    digest_patterns = [
+        r"(?:\d+\.\s*)?\*{0,2}(?:文章摘要|导语摘要|摘要)\*{0,2}[：:]\s*([^\n\r]+)",
+        r"【摘要】\s*([^\n\r]+)",
+    ]
+    for p in digest_patterns:
+        m = re.search(p, combined, re.IGNORECASE)
+        if m:
+            d = re.sub(r"[*_#`]+", "", m.group(1)).strip()
+            if d and len(d) < 200:
+                digest = d
+                break
+
+    return title, digest, html
+
+
+def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list[ToolCall]:
+    """从模型输出的纯文本中兜底解析以 markdown code block、JSON 或函数签名格式输出的工具调用。"""
+    import re
+    import uuid
+    from agentplatform.core.llm.client import ToolCall
+
+    if not text:
+        return []
+
+    candidates: dict[str, str] = {"output_block": "output_block"}
+    for rid in resources:
+        candidates[rid] = rid
+        candidates[rid.replace(":", "__")] = rid
+        if ":" in rid:
+            candidates[rid.split(":", 1)[1]] = rid
+
+    extracted: list[ToolCall] = []
+
+    # 1. 尝试匹配 `skill:xxx`({...}) 或 skill__xxx({...}) 函数调用风格文本
+    fn_matches = re.findall(
+        r"`?((?:skill|tool)(?::|__)[a-zA-Z0-9_-]+|output_block)`?\s*\(\s*(\{[\s\S]*?\})\s*\)", text
+    )
+    for raw_name, arg_str in fn_matches:
+        matched_id = (
+            candidates.get(raw_name)
+            or candidates.get(raw_name.replace(":", "__"))
+            or candidates.get(raw_name.replace("__", ":"))
+        )
+        if matched_id:
+            try:
+                # 校验是否为合法 JSON
+                json.loads(arg_str)
+                extracted.append(
+                    ToolCall(
+                        id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                        name=matched_id.replace(":", "__"),
+                        arguments=arg_str,
+                    )
+                )
+            except Exception:
+                continue
+
+    # 1.5 尝试匹配截断或未闭合的函数/工具调用: <tool_call>tool:xxx({ ... 或 `tool__xxx`({ ...
+    trunc_m = re.search(
+        r"(?:<tool_call>\s*)?`?((?:tool|skill)(?::|__)[a-zA-Z0-9_-]+|writewx_preview)`?\s*\(\s*\{?([\s\S]*?)(?:\)\s*(?:</tool_call>)?|\Z)",
+        text,
+    )
+    if trunc_m:
+        raw_name = trunc_m.group(1).strip()
+        body = trunc_m.group(2)
+        matched_id = (
+            candidates.get(raw_name)
+            or candidates.get(raw_name.replace(":", "__"))
+            or candidates.get(raw_name.replace("__", ":"))
+        )
+        if matched_id:
+            args_trunc: dict = {}
+            html = _extract_html_fallback(body)
+            if html:
+                args_trunc["html"] = html
+                args_trunc["html_content"] = html
+            title_m = re.search(r"\"title\"\s*:\s*\"((?:\\.|[^\"\\])*)", body)
+            if title_m:
+                args_trunc["title"] = title_m.group(1).replace(r"\"", "\"")
+            else:
+                args_trunc["title"] = "公众号技术长文"
+            if args_trunc:
+                extracted.append(
+                    ToolCall(
+                        id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                        name=matched_id.replace(":", "__"),
+                        arguments=json.dumps(args_trunc, ensure_ascii=False),
+                    )
+                )
+
+    if extracted:
+        return extracted
+
+    # 2. 尝试匹配 XML / 标签调用: <function=skill:...>, <invoke name="...">, 多个连续 <tool_call> 等
+    tag_matches = re.finditer(
+        r"<(?:function|invoke|tool_call|action|tool)(?:\s+name=|=)[\"\x27]?([^\s\"\x27>]+)[\"\x27]?>([\s\S]*?)(?:</(?:function|invoke|tool_call|action|tool)>|$)",
+        text,
+        re.IGNORECASE,
+    )
+    for m in tag_matches:
+        raw_name = m.group(1).strip()
+        inner = m.group(2)
+        params = re.findall(
+            r"<parameter(?:\s+name=|=)[\"\x27]?([^\s\"\x27>]+)[\"\x27]?>([\s\S]*?)</parameter>",
+            inner,
+            re.IGNORECASE,
+        )
+        param_dict = {k.strip(): v.strip() for k, v in params}
+        if raw_name.lower() in ("skill", "tool", "function", "action", "tool_call"):
+            raw_name = param_dict.pop("name", "") or param_dict.pop("id", "") or param_dict.pop("func", "")
+
+        if raw_name:
+            matched_id = (
+                candidates.get(raw_name)
+                or candidates.get(raw_name.replace(":", "__"))
+                or candidates.get(raw_name.replace("__", ":"))
+            )
+            if matched_id:
+                if "title" in param_dict and "topic" not in param_dict:
+                    param_dict["topic"] = param_dict["title"]
+                extracted.append(
+                    ToolCall(
+                        id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                        name=matched_id.replace(":", "__"),
+                        arguments=json.dumps(param_dict, ensure_ascii=False),
+                    )
+                )
+
+    # 3. 尝试匹配 <tool_call>skill:name\n{json}\n</tool_call> 风格
+    tool_tag_matches = re.findall(
+        r"<tool_call>\s*([a-zA-Z0-9_:-]+)\s*(\{[\s\S]*?\})(?:\s*</tool_call>)?",
+        text,
+    )
+    for raw_name, arg_str in tool_tag_matches:
+        matched_id = (
+            candidates.get(raw_name)
+            or candidates.get(raw_name.replace(":", "__"))
+            or candidates.get(raw_name.replace("__", ":"))
+        )
+        if matched_id:
+            try:
+                data_obj = json.loads(arg_str)
+                extracted.append(
+                    ToolCall(
+                        id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                        name=matched_id.replace(":", "__"),
+                        arguments=arg_str if isinstance(data_obj, dict) else "{}",
+                    )
+                )
+            except Exception:
+                continue
+
+    if extracted:
+        return extracted
+
+    # 4. 尝试匹配 JSON 数组或对象 (包括 markdown 块与裸 JSON)
+    json_blocks = re.findall(
+        r"```(?:json|tool_call|tool|function|action|python)?\s*([\s\S]*?)\s*```",
+        text,
+        re.IGNORECASE,
+    )
+    if not json_blocks:
+        json_blocks = re.findall(
+            r"(\[\s*\{[\s\S]*?\}\s*\]|\{\s*\"(?:type|name|function|tool|action|tool_calls)\"[\s\S]*?\})",
+            text,
+        )
+
+    for blk in json_blocks:
+        try:
+            data = json.loads(blk.strip())
+            if isinstance(data, dict) and "tool_calls" in data and isinstance(data["tool_calls"], list):
+                items = data["tool_calls"]
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = [data]
+            for it in items:
+                if isinstance(it, dict):
+                    if "function" in it and isinstance(it["function"], dict):
+                        fn = it["function"]
+                        raw_name = fn.get("name") or fn.get("func")
+                        args = fn.get("arguments") or fn.get("parameters") or fn.get("args") or {}
+                    else:
+                        raw_name = it.get("name") or it.get("func") or it.get("tool") or it.get("action") or it.get("function")
+                        args = (
+                            it.get("args")
+                            or it.get("input")
+                            or it.get("arguments")
+                            or it.get("parameters")
+                            or {}
+                        )
+                    if isinstance(raw_name, str):
+                        matched_id = (
+                            candidates.get(raw_name)
+                            or candidates.get(raw_name.replace(":", "__"))
+                            or candidates.get(raw_name.replace("__", ":"))
+                        )
+                        if matched_id:
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except Exception:
+                                    pass
+                            if isinstance(args, dict):
+                                if "content" in args and "html" not in args:
+                                    args["html"] = args["content"]
+                                if "content" in args and "html_content" not in args:
+                                    args["html_content"] = args["content"]
+                            arg_str = json.dumps(args, ensure_ascii=False) if isinstance(args, dict) else str(args)
+                            extracted.append(
+                                ToolCall(
+                                    id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                                    name=matched_id.replace(":", "__"),
+                                    arguments=arg_str,
+                                )
+                            )
+        except Exception:
+            continue
+
+    if extracted:
+        return extracted
+
+    # 5. 兜底策略: 如果模型输出了裸参数 JSON (无 name / tool 字段)，按参数与挂载资源的 schema 属性重合度自动推断
+    raw_json_objs = re.findall(r"(\{[\s\S]*?\})", text)
+    for obj_str in raw_json_objs:
+        try:
+            data = json.loads(obj_str.strip())
+            if isinstance(data, dict) and not any(
+                k in data for k in ("name", "tool", "action", "function", "tool_calls")
+            ):
+                data_keys = set(data.keys())
+                best_id = None
+                max_overlap = 0
+                for rid, res in resources.items():
+                    schema = getattr(res, "schema_", {}) or {}
+                    props = schema.get("properties") or {}
+                    schema_props = set(props.keys()) if isinstance(props, dict) else set()
+                    overlap = len(data_keys & schema_props)
+                    if overlap > max_overlap:
+                        max_overlap = overlap
+                        best_id = rid
+                if best_id and max_overlap >= 1:
+                    extracted.append(
+                        ToolCall(
+                            id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                            name=best_id.replace(":", "__"),
+                            arguments=json.dumps(data, ensure_ascii=False),
+                        )
+                    )
+        except Exception:
+            continue
+
+    if not extracted:
+        # 6. 自然语言意图兜底: 如果模型口头承诺 "调用写作技能" / "马上调用 skill:writewx_write" / "正在调用技能" 等
+        nl_match = re.search(r"(?:调用|使用|执行)\s*(?:写作技能|[`']?(?:skill:)?writewx_write[`']?)", text)
+        if nl_match and any("writewx_write" in rid for rid in resources):
+            target_res = next((rid for rid in resources if "writewx_write" in rid), "skill:writewx_write")
+            extracted.append(
+                ToolCall(
+                    id=f"call_nl_{uuid.uuid4().hex[:8]}",
+                    name=target_res.replace(":", "__"),
+                    arguments=json.dumps({"topic": text}, ensure_ascii=False),
+                )
+            )
+
+        # 7. 自然语言草稿箱注入意图兜底: 如果模型口头提到调用草稿箱注入，或声称"注入成功"，或用户指令确认注入
+        nl_draft = re.search(
+            r"(?:调用|使用|重新调用|执行|发起)\s*[`']?(?:tool:)?(?:browser_wechat_draft|草稿箱注入)[`']?|(?:将文章|正在将文章|开始)?注入.*微信.*草稿箱|草稿箱.*注入成功",
+            text,
+        )
+        if nl_draft and any("browser_wechat_draft" in rid for rid in resources):
+            target_res = next((rid for rid in resources if "browser_wechat_draft" in rid), "tool:browser_wechat_draft")
+            extracted.append(
+                ToolCall(
+                    id=f"call_draft_{uuid.uuid4().hex[:8]}",
+                    name=target_res.replace(":", "__"),
+                    arguments="{}",
+                )
+            )
+
+    return extracted
+

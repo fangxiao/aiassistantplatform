@@ -7,7 +7,8 @@ export interface ContentBlock {
 }
 
 export interface ToolCallInfo {
-  kind: string;
+  id?: string;
+  kind?: string;
   name: string;
   args: unknown;
   result: string;
@@ -19,6 +20,7 @@ export interface ChatMessage {
   text: string;
   blocks?: ContentBlock[];
   toolCalls?: ToolCallInfo[];
+  reasoning?: string;   // 模型深度思考内容（流式，展示为思考进度指示器）
   created_at?: string;
 }
 
@@ -33,6 +35,7 @@ export interface SessionInfo {
 export interface AssistantInfo {
   id: string;
   name: string;
+  display_name?: string | null;
   version: string;
   description: string | null;
   author: string | null;
@@ -45,6 +48,7 @@ export interface AssistantInfo {
 export interface PluginInfo {
   id: string;
   name: string;
+  display_name?: string | null;
   version: string;
   status: "active" | "disabled";
   owner_id: string | null;

@@ -33,23 +33,46 @@ def resource_ids_from_plugin(plugin: Plugin) -> list[str]:
 
 async def make_llm_client(session: AsyncSession, model: str | None) -> OpenAIClient:
     """按模型解析端点并构造客户端;无可用端点回退到 .env 配置，均无抛 ChatError。"""
-    endpoint = await resolve_endpoint(session, model or "")
-    if endpoint is None:
-        from agentplatform.config import settings
-        from agentplatform.core.llm import crypto
-        from agentplatform.core.llm.model import LlmEndpoint
+    fallbacks: list[LlmEndpoint] = []
+    from agentplatform.config import settings
+    from agentplatform.core.llm import crypto
+    from agentplatform.core.llm.model import LlmEndpoint
 
-        if settings.openai_base_url and settings.openai_api_key:
-            endpoint = LlmEndpoint(
-                name="default_env",
-                base_url=settings.openai_base_url,
-                model=model or settings.default_model,
-                api_key_enc=crypto.encrypt(settings.openai_api_key),
-                is_default=True,
+    if settings.openai_base_url and settings.openai_api_key:
+        endpoint = LlmEndpoint(
+            name="default_env",
+            base_url=settings.openai_base_url,
+            model=model or settings.default_model,
+            api_key_enc=crypto.encrypt(settings.openai_api_key),
+            is_default=True,
+        )
+    else:
+        endpoint = await resolve_endpoint(session, model or "")
+        if endpoint is None:
+            if settings.fallback_openai_base_url and settings.fallback_openai_api_key:
+                endpoint = LlmEndpoint(
+                    name="fallback_env_primary",
+                    base_url=settings.fallback_openai_base_url,
+                    model=settings.fallback_default_model,
+                    api_key_enc=crypto.encrypt(settings.fallback_openai_api_key),
+                    is_default=True,
+                )
+            else:
+                raise ChatError(f"未配置可用 LLM 端点(模型: {model or '默认'})")
+
+    if settings.fallback_openai_base_url and settings.fallback_openai_api_key:
+        if endpoint.base_url.rstrip("/") != settings.fallback_openai_base_url.rstrip("/"):
+            fallbacks.append(
+                LlmEndpoint(
+                    name="fallback_env",
+                    base_url=settings.fallback_openai_base_url,
+                    model=settings.fallback_default_model,
+                    api_key_enc=crypto.encrypt(settings.fallback_openai_api_key),
+                    is_default=False,
+                )
             )
-        else:
-            raise ChatError(f"未配置可用 LLM 端点(模型: {model or '默认'})")
-    return OpenAIClient(endpoint)
+
+    return OpenAIClient(endpoint, fallback_endpoints=fallbacks)
 
 
 
@@ -85,5 +108,6 @@ async def agent_stream_for_session(
         user_message=user_message,
         history=prior,
         owner_id=str(sess.user_id) if sess.user_id else None,
+        plugin_desc=(plugin.manifest or {}).get("description") if plugin else None,
     ):
         yield ev

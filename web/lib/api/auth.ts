@@ -24,10 +24,28 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+export function broadcastAuthSync(token?: string | null, user?: AuthUser | null): void {
+  if (typeof window === "undefined") return;
+  const currentToken = token !== undefined ? token : getToken();
+  const currentUser = user !== undefined ? user : getUser();
+  window.postMessage(
+    {
+      type: "AGENTPLATFORM_AUTH_SYNC",
+      source: "agentplatform-web",
+      token: currentToken,
+      apiUrl: process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api",
+      tunnelUrl: "ws://localhost:8000/api/browser/tunnel",
+      user: currentUser,
+    },
+    "*"
+  );
+}
+
 export function setToken(token: string | null): void {
   if (typeof window === "undefined") return;
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+  broadcastAuthSync(token);
 }
 
 export function getUser(): AuthUser | null {
@@ -45,6 +63,7 @@ export function setUser(user: AuthUser | null): void {
   if (typeof window === "undefined") return;
   if (user) localStorage.setItem("agentplatform_user", JSON.stringify(user));
   else localStorage.removeItem("agentplatform_user");
+  broadcastAuthSync(undefined, user);
 }
 
 export function isAuthed(): boolean {
@@ -63,6 +82,7 @@ export async function login(email: string, password: string): Promise<LoginResul
   const result = await apiPost<LoginResult>("/auth/login", { email, password });
   setToken(result.token);
   setUser(result.user);
+  broadcastAuthSync(result.token, result.user);
   return result;
 }
 
@@ -73,4 +93,5 @@ export async function me(): Promise<AuthUser> {
 export function logout(): void {
   setToken(null);
   setUser(null);
+  broadcastAuthSync(null, null);
 }

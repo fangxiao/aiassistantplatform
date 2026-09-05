@@ -5,6 +5,10 @@
 """
 
 from agentplatform.core.registry.builtin import (
+    browser_action,
+    browser_extract_dom,
+    browser_list_tabs,
+    browser_wechat_draft,
     cross_document_compare,
     html_cleaner,
     pdf_parse,
@@ -16,6 +20,10 @@ from agentplatform.core.registry.builtin.meta import ResourceMeta
 __all__ = [
     "ALL",
     "ResourceMeta",
+    "browser_action",
+    "browser_extract_dom",
+    "browser_list_tabs",
+    "browser_wechat_draft",
     "cross_document_compare",
     "html_cleaner",
     "pdf_parse",
@@ -30,4 +38,8 @@ ALL: tuple[ResourceMeta, ...] = (
     pdf_parse.RESOURCE,
     summarize.RESOURCE,
     structured_output.RESOURCE,
+    browser_wechat_draft.RESOURCE,
+    browser_extract_dom.RESOURCE,
+    browser_action.RESOURCE,
+    browser_list_tabs.RESOURCE,
 )

@@ -35,14 +35,45 @@ OUTPUT_BLOCK_TOOL = {
 }
 
 
+def _sanitize_schema(schema: dict) -> dict:
+    """递归确保 schema 中所有 properties / items 的 description 均为非空字符串，避免网关 Pydantic 校验失败。"""
+    if not isinstance(schema, dict):
+        return schema
+    res = {}
+    for k, v in schema.items():
+        if k == "properties" and isinstance(v, dict):
+            new_props = {}
+            for pk, pv in v.items():
+                if isinstance(pv, dict):
+                    sanitized_pv = _sanitize_schema(pv)
+                    if not sanitized_pv.get("description"):
+                        sanitized_pv["description"] = f"{pk} 字段"
+                    new_props[pk] = sanitized_pv
+                else:
+                    new_props[pk] = pv
+            res[k] = new_props
+        elif k == "items" and isinstance(v, dict):
+            res[k] = _sanitize_schema(v)
+        else:
+            res[k] = _sanitize_schema(v) if isinstance(v, dict) else v
+    return res
+
+
 def to_function_schema(row: SkillTool) -> dict:
     """注册表行 -> OpenAI function 定义。"""
-    params = (row.schema_ or {}).get("parameters", {"type": "object"})
+    schema = row.schema_ or {}
+    if "properties" in schema or schema.get("type") == "object":
+        params = schema
+    else:
+        params = schema.get("parameters") or {"type": "object", "properties": {}}
+    params = _sanitize_schema(params)
+    desc = row.description or f"Skill or Tool: {row.name or row.id}"
+    safe_name = row.id.replace(":", "__")
     return {
         "type": "function",
         "function": {
-            "name": row.id,
-            "description": row.description or "",
+            "name": safe_name,
+            "description": desc,
             "parameters": params,
         },
     }

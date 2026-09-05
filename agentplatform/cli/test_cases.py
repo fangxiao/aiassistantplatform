@@ -15,6 +15,10 @@ from agentplatform.cli.validate import validate_project
 
 
 def run_tests(root: Path) -> int:
+    from agentplatform.core.plugin.env import setup_plugin_env
+
+    setup_plugin_env(root)
+
     results: list[dict] = []
     cases_dir = root / "test"
     if not cases_dir.exists():

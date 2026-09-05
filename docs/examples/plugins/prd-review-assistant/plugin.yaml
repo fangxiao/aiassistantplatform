@@ -1,6 +1,7 @@
 # 示例插件:PRD 文档评审助手(006 §2 清单格式)
 # 依赖平台内置 pdf_parse tool + summarize skill(002 §4 复用协议)
 name: prd-review-assistant
+display_name: PRD 文档评审专家
 version: 0.1.0
 description: PRD 文档评审专家助手，支持文档解析、智能评审与多维度评分
 author: PlatformDemo

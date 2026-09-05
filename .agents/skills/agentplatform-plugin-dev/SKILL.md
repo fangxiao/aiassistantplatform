@@ -31,6 +31,42 @@ description: Comprehensive development guide, shared skill/tool catalog, and 22 
 
 ---
 
+## 💾 插件持久化数据目录与环境变量约定
+1. **专属稳定目录**：
+   - 路径约定：`~/.agentplatform/plugins/<plugin_name>/data/`
+   - 生命周期：与插件工程代码解耦，覆盖重新部署与版本升级时配置文件不丢失。
+2. **环境变量与 SDK 访问**：
+   - `AGENTPLATFORM_PLUGIN_DATA_DIR`：指向该持久化目录绝对路径。
+   - `AGENTPLATFORM_BASE_URL`：指向平台服务根地址（默认 `http://localhost:8000`）。
+   - Python 代码访问：
+     ```python
+     from agentplatform.sdk import get_plugin_data_dir, get_base_url
+     data_dir = get_plugin_data_dir()
+     base_url = get_base_url()
+     ```
+
+---
+
+## 🌐 端侧真机工具契约规范 (tool:browser_wechat_draft)
+1. **架构与零凭据设计**：
+   - 属于端侧真机自动化工具，底层通过 WebSocket 隧道经本地 Chrome 扩展（BrowserAgent）直接复用用户在浏览器中当前已登录的公众平台 (`mp.weixin.qq.com`) 会话。
+   - 插件侧与服务端**零凭据**，无需配置或持久化任何 AppID、AppSecret、Cookie、账号密码或隧道连接配置。
+2. **调用参数契约**：
+   - `title`: 图文标题 (必填)
+   - `html_content`: 100% 全内联样式排版 HTML 正文 (必填)
+   - `author`: 作者 (可选)
+   - `digest`: 120 字摘要 (可选)
+   - `theme`: 主题风格 (可选)
+
+---
+
+## 🏷️ 插件中文展示名称约定 (display_name)
+- **清单声明**：在 `plugin.yaml` 中推荐声明 `display_name`（如 `display_name: 微信公众号写作助手`）。
+- **用户呈现**：平台在助手广场、聊天页面顶部和会话抽屉列表中将优先展示友好的中文名称，同时在副标或角标呈现英文技术标识 `name`。
+- **智能兼容**：若未显式指定，平台服务端将智能从 `description` 前缀推导或安全回退到英文 `name`。
+
+---
+
 ## 🛠️ 常用开发命令
 - **查阅公共技能与工具**：`agentplatform registry`
 - **查阅 22 种富交互控件**：`agentplatform widgets`
