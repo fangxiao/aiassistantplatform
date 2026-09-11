@@ -22,21 +22,32 @@ router = APIRouter(prefix="/browser", tags=["browser"])
 
 
 def _authenticate(token: str) -> str | None:
-    """校验隧道令牌(?token=JWT),返回 user_id;无效/缺失返回 None(支持 dev/local 与开发环境过期宽容降级)。"""
+    """校验隧道令牌(?token=JWT),返回 user_id;无效/缺失返回 None。
+
+    dev 短令牌照样接受与过期 token 宽容提取仅在显式开启 browser_dev_route_any
+    的本地联调环境生效;生产默认只接受合法 JWT(旧逻辑以 secret_key 默认值推断,
+    生产漏配密钥即放开认证,属安全隐患)。
+    """
     if not token:
         return None
-    if token in ("dev", "dev_token", "default_user", "local", "anonymous"):
+    if settings.browser_dev_route_any and token in (
+        "dev",
+        "dev_token",
+        "default_user",
+        "local",
+        "anonymous",
+    ):
         return "default_user"
     try:
         claims = decode_access_token(token)
-        return claims.get("sub") or "default_user"
+        return claims.get("sub")
     except Exception:  # noqa: BLE001
-        # 开发单机环境: 若 token 仅为过期但结构有效，宽容提取 sub 用户 ID，避免断开本地浏览器
-        if settings.secret_key == "dev-secret-change-me":
+        # 本地联调: token 仅过期但结构有效时宽容提取 sub,避免断开本地浏览器
+        if settings.browser_dev_route_any:
             try:
                 from jose import jwt
                 unverified = jwt.get_unverified_claims(token)
-                return unverified.get("sub") or "default_user"
+                return unverified.get("sub")
             except Exception:
                 return None
         return None

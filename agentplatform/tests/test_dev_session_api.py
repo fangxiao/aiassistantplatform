@@ -160,7 +160,8 @@ class TestSendMessage:
         frames = parse_sse(resp.text)
         events = [e for e, _ in frames]
         assert "tool_call" in events
-        tc = next(data for e, data in frames if e == "tool_call")
+        # loop 对本地工具先发执行开始事件(result="")再发完成事件,断言以最后一个为准
+        tc = [data for e, data in frames if e == "tool_call"][-1]
         assert tc["name"] == "tool:dev_echo"
         # tool 执行成功(临时文件被 resolve_impl 加载)
         assert tc["result"] == '{"status": "success", "echo": "hi"}'

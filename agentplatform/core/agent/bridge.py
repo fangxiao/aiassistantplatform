@@ -71,7 +71,7 @@ class BrowserBridge:
         """该用户是否至少有一个活跃浏览器连接。"""
         if bool(self._sessions.get(user_id)):
             return True
-        if settings.secret_key == "dev-secret-change-me":
+        if settings.browser_dev_route_any:
             return bool(self._sessions.get("default_user") or self._sessions)
         return False
 
@@ -81,7 +81,7 @@ class BrowserBridge:
     def _active_session(self, user_id: str) -> BrowserSession | None:
         """取该用户最近活跃的连接(多窗口时路由到最活跃那个)。"""
         sessions = self._sessions.get(user_id)
-        if not sessions and settings.secret_key == "dev-secret-change-me":
+        if not sessions and settings.browser_dev_route_any:
             sessions = self._sessions.get("default_user")
             if not sessions and self._sessions:
                 # 提取任意第一个在线连接的会话列表

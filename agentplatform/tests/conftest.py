@@ -23,6 +23,7 @@ from agentplatform.core.message.model import Message  # noqa: F401
 from agentplatform.core.plugin.model import Plugin  # noqa: F401
 from agentplatform.core.registry.model import SkillTool  # noqa: F401
 from agentplatform.core.session.model import Session as ChatSession  # noqa: F401
+from agentplatform.config import settings
 from agentplatform.main import app
 
 ADMIN_URL = "postgresql+asyncpg://agentplatform:agentplatform@localhost:5432/agentplatform"
@@ -48,6 +49,17 @@ async def _ensure_test_db() -> None:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     finally:
         await test_admin.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dev_settings() -> "object":
+    """强制本机开发开关在测试中关闭,隔离开发者 ~/.agentplatform/.env 的污染。
+
+    例如 BROWSER_DEV_ROUTE_ANY=true 会让 BrowserBridge 跨用户回退路由,
+    导致 bridge/tunnel 的严格鉴权单测随本机配置飘移。
+    """
+    settings.browser_dev_route_any = False
+    yield
 
 
 @pytest.fixture(scope="session")

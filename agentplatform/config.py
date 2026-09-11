@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     browser_tunnel_heartbeat: int = 30  # 服务端心跳探测间隔(秒)
     browser_tunnel_timeout: int = 15  # 心跳探测超时(秒),超时断开
     browser_route_timeout: int = 120  # 端侧动作最长等待(秒)
+    # 本地联调用:允许任意登录用户的端侧动作路由到 dev token 注册的浏览器连接。
+    # 生产环境必须保持 False——旧逻辑以 secret_key 是否为默认值推断,生产漏配密钥时
+    # 会静默跨用户路由,属安全隐患,故改为显式开关。
+    browser_dev_route_any: bool = False
 
     # 远程调试会话(Remote Dev / 设计 007)
     dev_session_ttl: int = 1800  # 调试会话 TTL(秒),默认 30 分钟

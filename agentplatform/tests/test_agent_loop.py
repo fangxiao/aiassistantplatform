@@ -78,9 +78,10 @@ class TestToolLoop:
         assert trace.result == "HI"  # fixture 实现大写
 
         # 编排:tools 参数带 echo 的 function 定义
+        # 注意:function 名经合法字符清洗,":" -> "__"(OpenAI 函数名不允许冒号)
         _, tools = fake.calls[0]
         assert tools is not None
-        assert any(t["function"]["name"] == "tool:echo" for t in tools)
+        assert any(t["function"]["name"] == "tool__echo" for t in tools)
         # 回填:第二次调用消息含 assistant tool_calls + tool 结果
 
         messages = fake.calls[1][0]

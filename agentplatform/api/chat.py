@@ -191,6 +191,10 @@ async def send_message(
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """发送消息,返回 SSE 流(响应消息生成)。"""
+    # 流前校验:会话不存在/无权访问必须以 HTTP 状态码快速失败,
+    # 而非进入 SSE 后只在流内发 error 事件(设计 005 §错误契约)。
+    await _ensure_session_owned(session, sid, user.id)
+
     async def event_stream():
         text_parts: list[str] = []
         blocks: list[dict] = []

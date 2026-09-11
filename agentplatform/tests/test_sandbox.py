@@ -30,8 +30,10 @@ def test_sandbox_config_defaults():
     assert settings.sandbox_timeout_seconds == 30
 
 
-def test_policy_generation_includes_plugin_data_dir():
+def test_policy_generation_includes_plugin_data_dir(monkeypatch: pytest.MonkeyPatch):
     """验证沙箱策略自动包含插件专属数据目录与安全禁止规则。"""
+    # 隔离其他测试经 setup_plugin_env 注入的 AGENTPLATFORM_PLUGIN_DATA_DIR
+    monkeypatch.delenv("AGENTPLATFORM_PLUGIN_DATA_DIR", raising=False)
     policy = generate_sandbox_policy(plugin_name="writewx")
     policy_dict = policy.to_dict()
 

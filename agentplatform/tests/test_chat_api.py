@@ -133,7 +133,8 @@ class TestSendMessageSSE:
         frames = parse_sse(resp.text)
         events = [e for e, _ in frames]
         assert "tool_call" in events
-        tc = next(data for e, data in frames if e == "tool_call")
+        # loop 对本地工具先发执行开始事件(result="")再发完成事件,断言以最后一个为准
+        tc = [data for e, data in frames if e == "tool_call"][-1]
         assert tc["name"] == "tool:echo"
         assert tc["result"] == "HI"
         assert "delta" in events and "done" in events

@@ -28,7 +28,16 @@ class TestListEndpoints:
         resp = await seeded_client.get("/api/registry/tools")
         assert resp.status_code == 200
         ids = {r["id"] for r in resp.json()}
-        assert ids == {"tool:pdf_parse", "tool:html_cleaner"}
+        # M11 起新增 browser.* 端侧工具与 html_cleaner;M12 新增 kb_search
+        assert ids == {
+            "tool:pdf_parse",
+            "tool:html_cleaner",
+            "tool:kb_search",
+            "tool:browser_action",
+            "tool:browser_list_tabs",
+            "tool:browser_extract_dom",
+            "tool:browser_wechat_draft",
+        }
 
     async def test_list_includes_schema_and_source(self, seeded_client: AsyncClient) -> None:
         resp = await seeded_client.get("/api/registry/skills")
