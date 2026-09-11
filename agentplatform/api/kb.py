@@ -6,9 +6,11 @@ publish:公共库版本发布,事务内登记 skill_tools(kind=kb,ADR 0005)。
 
 import json
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import get_current_user
@@ -50,6 +52,7 @@ class KbOut(BaseModel):
     doc_count: int
     chunk_count: int
     size_bytes: int
+    can_write: bool = False  # 服务端计算(设计 008 §11.2),前端渲染收藏目标
 
 
 class KbDocOut(BaseModel):
@@ -62,6 +65,10 @@ class KbDocOut(BaseModel):
     size_bytes: int
     status: str
     error: str | None
+    origin: str = "upload"
+    source_app: str | None = None
+    source_session_id: str | None = None
+    source_message_id: str | None = None
 
 
 class KbSearchIn(BaseModel):
@@ -73,6 +80,42 @@ class KbPublishIn(BaseModel):
     version: str | None = None  # 缺省自动 bump patch
 
 
+class KbMemberAddIn(BaseModel):
+    """按 email 添加成员(008 §12.3),避免暴露用户目录。"""
+
+    email: str = Field(min_length=3, max_length=254)
+
+
+class KbMemberOut(BaseModel):
+    user_id: str
+    email: str | None = None
+    role: str = "member"
+    created_at: datetime | None = None
+
+
+class KbDocSource(BaseModel):
+    """消费无关溯源;app 为自由字符串,平台不枚举消费方。"""
+
+    app: str = Field(min_length=1, max_length=64)
+    session_id: str | None = Field(default=None, max_length=128)
+    message_id: str | None = Field(default=None, max_length=128)  # 同库幂等键
+
+
+class KbDocFromTextIn(BaseModel):
+    """文本直存(设计 008 §11.2):会话产出物收藏。"""
+
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=5_000_000)
+    mime: str = "text/markdown"  # text/markdown / text/plain / text/html
+    source: KbDocSource | None = None
+
+
+async def _kb_out(db: AsyncSession, kb: KnowledgeBase, user: User) -> KbOut:
+    out = KbOut.model_validate(kb)
+    out.can_write = await kb_service.can_write(db, kb, user)
+    return out
+
+
 def _http_error(exc: kb_service.KbError) -> HTTPException:
     return HTTPException(status_code=400, detail={"code": "kb_error", "message": str(exc)})
 
@@ -81,7 +124,7 @@ async def _get_visible_kb(
     kb_id: uuid.UUID, db: AsyncSession, user: User
 ) -> KnowledgeBase:
     kb = await kb_service.get_kb(db, kb_id)
-    if kb is None or not kb_service.can_read(kb, str(user.id)):
+    if kb is None or not await kb_service.can_read(db, kb, str(user.id)):
         raise HTTPException(
             status_code=404, detail={"code": "not_found", "message": "知识库不存在"}
         )
@@ -95,7 +138,7 @@ async def list_kbs(
 ) -> list[KbOut]:
     """当前用户可见库(private 自己 + public)。"""
     rows = await kb_service.list_visible_kbs(db, str(user.id))
-    return [KbOut.model_validate(r) for r in rows]
+    return [await _kb_out(db, r, user) for r in rows]
 
 
 @router.post("/kbs", response_model=KbOut, status_code=201)
@@ -117,7 +160,7 @@ async def create_kb(
     except kb_service.KbError as exc:
         raise _http_error(exc) from exc
     await db.commit()
-    return KbOut.model_validate(kb)
+    return await _kb_out(db, kb, user)
 
 
 @router.patch("/kbs/{kb_id}", response_model=KbOut)
@@ -134,7 +177,7 @@ async def update_kb(
     except kb_service.KbError as exc:
         raise _http_error(exc) from exc
     await db.commit()
-    return KbOut.model_validate(kb)
+    return await _kb_out(db, kb, user)
 
 
 @router.delete("/kbs/{kb_id}")
@@ -169,6 +212,30 @@ async def upload_document(
             filename=file.filename or "untitled.txt",
             mime=file.content_type or "application/octet-stream",
             content=content,
+        )
+    except kb_service.KbError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    kb_pipeline.enqueue_document(doc.id)  # 落库后入队,worker 消费
+    return KbDocOut.model_validate(doc)
+
+
+@router.post("/kbs/{kb_id}/documents/from-text", response_model=KbDocOut, status_code=201)
+async def create_document_from_text(
+    kb_id: uuid.UUID,
+    payload: KbDocFromTextIn,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> KbDocOut:
+    """文本直存(设计 008 §11):会话产出物收藏,复用 pipeline;source 消息级幂等。"""
+    kb = await _get_visible_kb(kb_id, db, user)
+    try:
+        doc = await kb_service.add_document_from_text(
+            db, kb, user,
+            title=payload.title,
+            content=payload.content,
+            mime=payload.mime,
+            source=payload.source.model_dump() if payload.source else None,
         )
     except kb_service.KbError as exc:
         raise _http_error(exc) from exc
@@ -243,6 +310,68 @@ async def search_kb(
     return json.loads(raw)
 
 
+@router.get("/kbs/{kb_id}/members", response_model=list[KbMemberOut])
+async def list_kb_members(
+    kb_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[KbMemberOut]:
+    """成员列表(owner/成员可见,008 §12.3)。"""
+    kb = await _get_visible_kb(kb_id, db, user)
+    rows = await kb_service.list_members(db, kb.id)
+    out = []
+    for row in rows:
+        member_user = await db.get(User, uuid.UUID(row.user_id))
+        out.append(
+            KbMemberOut(
+                user_id=row.user_id,
+                email=member_user.email if member_user else None,
+                role=row.role,
+                created_at=row.created_at,
+            )
+        )
+    return out
+
+
+@router.post("/kbs/{kb_id}/members", response_model=KbMemberOut, status_code=201)
+async def add_kb_member(
+    kb_id: uuid.UUID,
+    payload: KbMemberAddIn,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> KbMemberOut:
+    """添加成员(仅 owner;按 email 解析用户,008 §12.3)。"""
+    kb = await _get_visible_kb(kb_id, db, user)
+    member_user = await db.scalar(select(User).where(User.email == payload.email.lower().strip()))
+    if member_user is None:
+        raise HTTPException(
+            status_code=400, detail={"code": "kb_error", "message": f"用户不存在: {payload.email}"}
+        )
+    try:
+        row = await kb_service.add_member(db, kb, user, member=member_user)
+    except kb_service.KbError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return KbMemberOut(user_id=row.user_id, email=member_user.email, role=row.role, created_at=row.created_at)
+
+
+@router.delete("/kbs/{kb_id}/members/{member_user_id}")
+async def remove_kb_member(
+    kb_id: uuid.UUID,
+    member_user_id: str,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """移除成员(仅 owner,008 §12.3)。"""
+    kb = await _get_visible_kb(kb_id, db, user)
+    try:
+        await kb_service.remove_member(db, kb, user, member_user_id=member_user_id)
+    except kb_service.KbError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/kbs/{kb_id}/publish", response_model=KbOut)
 async def publish_kb(
     kb_id: uuid.UUID,
@@ -252,6 +381,12 @@ async def publish_kb(
 ) -> KbOut:
     """发布公共库版本(仅 developer 角色;bump semver + 登记 skill_tools kind=kb)。"""
     kb = await _get_visible_kb(kb_id, db, user)
+    if kb.visibility == KbVisibility.shared:
+        # shared 是团队资产,不进注册表(008 §12.1);防止误操作把团队库公开
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "kb_error", "message": "共享库不参与发布;如需公开请新建 public 库迁移内容"},
+        )
     if user.role != UserRole.developer:
         raise HTTPException(
             status_code=403, detail={"code": "forbidden", "message": "仅 developer 角色可发布公共知识库"}
@@ -278,7 +413,7 @@ async def publish_kb(
     )
     kb.version = new_version
     await db.commit()
-    return KbOut.model_validate(kb)
+    return await _kb_out(db, kb, user)
 
 
 def _bump_version(version: str) -> str:

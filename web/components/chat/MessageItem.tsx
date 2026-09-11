@@ -11,6 +11,7 @@ interface MessageItemProps {
   isStreaming?: boolean;
   isLast?: boolean;
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
+  onSaveToKb?: (content: string) => void;
 }
 
 export default function MessageItem({
@@ -18,6 +19,7 @@ export default function MessageItem({
   isStreaming = false,
   isLast = false,
   onInteract,
+  onSaveToKb,
 }: MessageItemProps) {
   if (message.role === "user") {
     return (
@@ -42,6 +44,8 @@ export default function MessageItem({
   const runningTool = message.toolCalls?.find((tc) => !tc.result);
   const hasRunningTool = Boolean(runningTool);
   const runningToolName = runningTool?.name || runningTool?.id || "公共技能";
+  // 收藏到知识库入口(设计 008 §11.4):有正文且非流式中
+  const canSaveToKb = Boolean(onSaveToKb && message.text && message.text.trim() && !(isStreaming && isLast));
 
   /** 将技术名称映射为对用户友好的中文描述 */
   function friendlyLabel(rawName: string): { icon: string; name: string } {
@@ -59,8 +63,18 @@ export default function MessageItem({
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[90%] rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+    <div className="group flex justify-start">
+      <div className="relative max-w-[90%] rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+        {canSaveToKb && (
+          <button
+            type="button"
+            title="收藏到知识库"
+            onClick={() => onSaveToKb?.(message.text ?? "")}
+            className="absolute -top-2.5 right-3 hidden rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-xs transition hover:border-indigo-300 hover:text-indigo-600 group-hover:block"
+          >
+            📚 收藏
+          </button>
+        )}
         {/* 工具执行进度条（用户友好视图，隐藏技术实现细节） */}
         {hasToolCalls && (
           <div className="mb-3 flex flex-col gap-1.5 border-b border-slate-100 pb-3">

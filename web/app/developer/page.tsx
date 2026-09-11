@@ -49,6 +49,7 @@ export default function DeveloperPage() {
     model: "",
     api_key: "",
     is_default: true,
+    endpoint_type: "chat" as "chat" | "embedding",
   });
 
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +131,7 @@ export default function DeveloperPage() {
     try {
       await apiPost("/admin/llm-endpoints", llmForm);
       setShowAddLlm(false);
-      setLlmForm({ name: "", base_url: "", model: "", api_key: "", is_default: true });
+      setLlmForm({ name: "", base_url: "", model: "", api_key: "", is_default: true, endpoint_type: "chat" });
       await loadData();
     } catch (err) {
       alert(`创建端点失败: ${err instanceof Error ? err.message : err}`);
@@ -920,6 +921,17 @@ export default function DeveloperPage() {
                         className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 focus:border-indigo-500 focus:outline-hidden"
                       />
                     </div>
+                    <div>
+                      <label className="block text-slate-600 mb-1">端点类型</label>
+                      <select
+                        value={llmForm.endpoint_type}
+                        onChange={(e) => setLlmForm({ ...llmForm, endpoint_type: e.target.value as "chat" | "embedding" })}
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 focus:border-indigo-500 focus:outline-hidden"
+                      >
+                        <option value="chat">chat（对话模型）</option>
+                        <option value="embedding">embedding（向量化，知识库用）</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="flex items-center justify-end gap-2 pt-2">
                     <button
@@ -954,6 +966,7 @@ export default function DeveloperPage() {
                       <th className="px-4 py-3">标识</th>
                       <th className="px-4 py-3">Model</th>
                       <th className="px-4 py-3">Base URL</th>
+                      <th className="px-4 py-3">类型</th>
                       <th className="px-4 py-3">默认端点</th>
                       <th className="px-4 py-3 text-right">操作</th>
                     </tr>
@@ -964,6 +977,17 @@ export default function DeveloperPage() {
                         <td className="px-4 py-3 font-semibold text-slate-900">{ep.name}</td>
                         <td className="px-4 py-3 font-mono text-slate-600">{ep.model}</td>
                         <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">{ep.base_url}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              ep.endpoint_type === "embedding"
+                                ? "bg-purple-50 text-purple-700 border-purple-200"
+                                : "bg-blue-50 text-blue-700 border-blue-200"
+                            }`}
+                          >
+                            {ep.endpoint_type === "embedding" ? "embedding" : "chat"}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           {ep.is_default ? (
                             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">

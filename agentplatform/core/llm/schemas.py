@@ -4,6 +4,7 @@ api_key 仅入站接收明文(创建/更新时),响应中永不返回明文。
 """
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,6 +15,7 @@ class LlmEndpointCreate(BaseModel):
     model: str
     api_key: str
     is_default: bool = False
+    endpoint_type: Literal["chat", "embedding"] = "chat"  # M12: kb 向量化端点
 
 
 class LlmEndpointUpdate(BaseModel):
@@ -22,6 +24,7 @@ class LlmEndpointUpdate(BaseModel):
     model: str | None = None
     api_key: str | None = None
     is_default: bool | None = None
+    endpoint_type: Literal["chat", "embedding"] | None = None
 
 
 class LlmEndpointOut(BaseModel):
@@ -32,3 +35,4 @@ class LlmEndpointOut(BaseModel):
     base_url: str
     model: str
     is_default: bool
+    endpoint_type: str

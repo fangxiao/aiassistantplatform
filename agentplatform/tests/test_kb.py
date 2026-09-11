@@ -66,8 +66,114 @@ async def test_create_kb_slug_and_visibility(session, dev_user, normal_user):
 
 async def test_can_read_private_isolated(session, dev_user, normal_user):
     kb = await _make_kb(session, dev_user)
-    assert kb_service.can_read(kb, str(dev_user.id))
-    assert not kb_service.can_read(kb, str(normal_user.id))  # 验收 3:他人 private 不可读
+    assert await kb_service.can_read(session, kb, str(dev_user.id))
+    assert not await kb_service.can_read(session, kb, str(normal_user.id))  # 验收 3:他人 private 不可读
+
+
+async def test_shared_kb_member_permissions(session, dev_user, normal_user):
+    """shared 可见性权限矩阵(设计 008 §12.2):成员可读写、非成员不可见、管理仅 owner。"""
+
+    kb = await _make_kb(session, dev_user, slug=f"sh_{uuid.uuid4().hex[:8]}", visibility="shared")
+    outsider = await create_user(
+        session, f"o-{uuid.uuid4()}@test.dev", "password123", UserRole.user
+    )
+
+    # 非成员:不可读、不可写
+    assert not await kb_service.can_read(session, kb, str(normal_user.id))
+    assert not await kb_service.can_write(session, kb, normal_user)
+    assert str(kb.id) not in [
+        str(r.id) for r in await kb_service.list_visible_kbs(session, str(normal_user.id))
+    ]
+
+    # owner 添加成员后:可读、可写、可见;仍不可管理(改名/成员/删库)
+    await kb_service.add_member(session, kb, dev_user, member=normal_user)
+    assert await kb_service.is_member(session, kb.id, str(normal_user.id))
+    assert await kb_service.can_read(session, kb, str(normal_user.id))
+    assert await kb_service.can_write(session, kb, normal_user)
+    assert str(kb.id) in [
+        str(r.id) for r in await kb_service.list_visible_kbs(session, str(normal_user.id))
+    ]
+    assert not kb_service.can_manage(kb, normal_user)
+    with pytest.raises(kb_service.KbError):
+        await kb_service.update_kb(session, kb, normal_user, name="hack")
+    with pytest.raises(kb_service.KbError):
+        await kb_service.add_member(session, kb, normal_user, member=outsider)
+
+    # 成员写入文档走 can_write 链路
+    doc = await kb_service.add_document(
+        db=session, kb=kb, user=normal_user,
+        filename="member.md", mime="text/markdown", content=b"from member",
+    )
+    assert doc.status == KbDocumentStatus.pending
+
+    # 重复加入 / owner 本身加入 / 非成员移除,均拒绝;owner 移除成员成功后权限收回
+    with pytest.raises(kb_service.KbError):
+        await kb_service.add_member(session, kb, dev_user, member=normal_user)
+    with pytest.raises(kb_service.KbError):
+        await kb_service.add_member(session, kb, dev_user, member=dev_user)
+    await kb_service.remove_member(session, kb, dev_user, member_user_id=str(normal_user.id))
+    assert not await kb_service.can_read(session, kb, str(normal_user.id))
+
+
+def _act_as(client, user) -> None:
+    """切换 client 的当前身份(client fixture 覆盖了 get_current_user)。"""
+    from agentplatform.core.auth.dependencies import get_current_user
+    from agentplatform.main import app
+
+    app.dependency_overrides[get_current_user] = lambda: user
+
+
+async def test_shared_kb_not_publishable_and_public_manage_by_developer(session, client, dev_user, normal_user):
+    """shared 库不进注册表(§12.1):publish 拒绝;public 库管理权在 developer。"""
+    _act_as(client, dev_user)
+    kb = await _make_kb(session, dev_user, slug=f"shp_{uuid.uuid4().hex[:8]}", visibility="shared")
+    resp = await client.post(f"/api/kb/kbs/{kb.id}/publish")
+    assert resp.status_code == 400
+
+
+async def test_api_member_flow_by_email(session, client, dev_user, normal_user):
+    """成员 API(§12.3):按 email 添加、列表带 email、重复/不存在拒绝、非 owner 400。"""
+    _act_as(client, dev_user)
+    kb = await _make_kb(session, dev_user, slug=f"mem_{uuid.uuid4().hex[:8]}", visibility="shared")
+
+    # 不存在的 email → 400
+    resp = await client.post(
+        f"/api/kb/kbs/{kb.id}/members",
+        json={"email": "ghost@test.dev"},
+    )
+    assert resp.status_code == 400
+
+    # 添加成功 → 列表带 email
+    resp = await client.post(
+        f"/api/kb/kbs/{kb.id}/members",
+        json={"email": normal_user.email},
+    )
+    assert resp.status_code == 201
+    member_id = resp.json()["user_id"]
+    assert resp.json()["email"] == normal_user.email
+
+    resp = await client.get(f"/api/kb/kbs/{kb.id}/members")
+    assert resp.status_code == 200
+    assert [m["user_id"] for m in resp.json()] == [member_id]
+
+    # 重复添加 → 400
+    resp = await client.post(
+        f"/api/kb/kbs/{kb.id}/members",
+        json={"email": normal_user.email},
+    )
+    assert resp.status_code == 400
+
+    # 非 owner 调用管理接口 → 400(库可见但无管理权)
+    _act_as(client, normal_user)
+    resp = await client.delete(f"/api/kb/kbs/{kb.id}/members/{member_id}")
+    assert resp.status_code == 400
+
+    # owner 移除 → 200,成员列表清空
+    _act_as(client, dev_user)
+    resp = await client.delete(f"/api/kb/kbs/{kb.id}/members/{member_id}")
+    assert resp.status_code == 200
+    resp = await client.get(f"/api/kb/kbs/{kb.id}/members")
+    assert resp.json() == []
 
 
 async def test_upload_document_validation_and_dedupe(session, dev_user):
@@ -266,6 +372,98 @@ def _fake_vectors(texts, dim):
     return [[0.01 * (len(t) % 50)] * dim for t in texts]
 
 
+# ---------------------------------------------------------------- 会话产出入库(设计 008 §11)
+
+
+async def test_add_document_from_text_provenance_and_idempotent(session, dev_user):
+    """文本直存:溯源字段落库 + 同消息幂等 + hash 去重复用。"""
+    kb = await _make_kb(session, dev_user, slug="from_text_kb")
+    doc = await kb_service.add_document_from_text(
+        db=session, kb=kb, user=dev_user,
+        title="会话产出文章",
+        content="# 标题\n\n正文内容。",
+        source={"app": "swiftship", "session_id": "s-1", "message_id": "m-1"},
+    )
+    assert doc.origin == "session"
+    assert doc.source_app == "swiftship"
+    assert doc.source_message_id == "m-1"
+    assert doc.filename.endswith(".md")
+    assert kb.doc_count == 1
+    # 同库同 message_id 重复收藏拒绝(幂等)
+    with pytest.raises(kb_service.KbError, match="已收藏"):
+        await kb_service.add_document_from_text(
+            db=session, kb=kb, user=dev_user,
+            title="改标题再存", content="其他内容。",
+            source={"app": "swiftship", "message_id": "m-1"},
+        )
+    # 同内容(无 message_id)走 hash 去重
+    with pytest.raises(kb_service.KbError, match="内容重复"):
+        await kb_service.add_document_from_text(
+            db=session, kb=kb, user=dev_user,
+            title="会话产出文章", content="# 标题\n\n正文内容。",
+        )
+    # 空内容与非法 mime
+    with pytest.raises(kb_service.KbError, match="内容为空"):
+        await kb_service.add_document_from_text(
+            db=session, kb=kb, user=dev_user, title="t", content="  ",
+        )
+    with pytest.raises(kb_service.KbError, match="不支持的文本类型"):
+        await kb_service.add_document_from_text(
+            db=session, kb=kb, user=dev_user, title="t", content="x", mime="application/pdf",
+        )
+
+
+async def test_add_document_from_text_permission(session, dev_user, normal_user):
+    """写权限与上传一致:private 仅 owner。"""
+    kb = await _make_kb(session, dev_user, slug="perm_from_text")
+    with pytest.raises(kb_service.KbError, match="无权"):
+        await kb_service.add_document_from_text(
+            db=session, kb=kb, user=normal_user, title="t", content="x",
+        )
+
+
+async def test_from_text_pipeline_end_to_end(session, dev_user, monkeypatch):
+    """收藏的文本经 pipeline 向量化 ready;html 去标签。"""
+    kb = await _make_kb(session, dev_user, slug="ft_pipeline")
+    doc = await kb_service.add_document_from_text(
+        db=session, kb=kb, user=dev_user,
+        title="网页文章", content="<h2>要点</h2><p>关键结论在这里。</p><script>evil()</script>",
+        mime="text/html",
+    )
+    dim = settings.kb_embedding_dim
+
+    async def fake_embed(texts, endpoint):
+        return _fake_vectors(texts, dim)
+
+    monkeypatch.setattr(kb_pipeline, "embed_texts", fake_embed)
+
+    class FakeEndpoint:
+        base_url = "http://fake"
+        model = "fake"
+        api_key_enc = "k"
+
+    async def fake_resolve(db):
+        return FakeEndpoint()
+
+    monkeypatch.setattr(kb_pipeline, "resolve_embedding_endpoint", fake_resolve)
+    result = await kb_pipeline.process_document(session, doc.id)
+    assert result.status == KbDocumentStatus.ready
+    from sqlalchemy import select
+
+    from agentplatform.core.kb.model import KbChunk
+
+    chunks = (await session.scalars(select(KbChunk).where(KbChunk.document_id == doc.id))).all()
+    assert chunks and all("evil()" not in c.text and "<" not in c.text for c in chunks)
+    assert any("关键结论" in c.text for c in chunks)
+
+
+def test_html_to_text_strips_tags():
+    html = "<html><head><style>.x{}</style></head><body><h1>标题</h1><p>第一段<br>第二行</p><div>结尾</div></body></html>"
+    text = kb_pipeline._html_to_text(html)
+    assert "标题" in text and "第一段" in text and "第二行" in text and "结尾" in text
+    assert "<" not in text and ".x{}" not in text
+
+
 # ---------------------------------------------------------------- API 集成(验收 1/3 后半)
 
 
@@ -299,6 +497,60 @@ async def test_api_kb_flow_and_mount_isolation(session, client, dev_user, normal
     # client fixture 默认 user 角色,不可发布 public
     r5 = await client.post(f"/api/kb/kbs/{own_kb_id}/publish")
     assert r5.status_code == 403
+
+
+async def test_api_from_text_and_can_write(session, client, dev_user, normal_user):
+    """from-text API + can_write 标志(设计 008 §11.2):前端收藏入口依据。"""
+    # 他人 private 库对 client 不可见
+    kb = await _make_kb(session, dev_user, slug="api_ft_private")
+    r = await client.post(
+        f"/api/kb/kbs/{kb.id}/documents/from-text",
+        json={"title": "t", "content": "x"},
+    )
+    assert r.status_code == 404
+
+    # 自建库:from-text 成功,can_write=True,溯源回显
+    r2 = await client.post("/api/kb/kbs", json={"name": "ft", "slug": "api_ft_own"})
+    assert r2.status_code == 201, r2.text
+    own = r2.json()
+    assert own["can_write"] is True
+    r3 = await client.post(
+        f"/api/kb/kbs/{own['id']}/documents/from-text",
+        json={
+            "title": "会话文章",
+            "content": "正文。",
+            "source": {"app": "swiftship", "session_id": "s1", "message_id": "m1"},
+        },
+    )
+    assert r3.status_code == 201, r3.text
+    body = r3.json()
+    assert body["origin"] == "session" and body["source_app"] == "swiftship"
+    # 幂等:同 message_id 重复收藏 → 400
+    r4 = await client.post(
+        f"/api/kb/kbs/{own['id']}/documents/from-text",
+        json={"title": "再存", "content": "正文二。", "source": {"app": "swiftship", "message_id": "m1"}},
+    )
+    assert r4.status_code == 400 and "已收藏" in r4.text
+
+
+async def test_session_creation_default_shared_kb(session, client, dev_user, normal_user):
+    """新建会话默认挂载共享库(008 §11.3):public 可读即追加,不存在/不可读则跳过。"""
+    from agentplatform.config import settings
+
+    # 共享库不存在时不挂载
+    r = await client.post("/api/chat/sessions", json={})
+    assert r.status_code == 201, r.text
+    assert r.json()["mounted_kb_ids"] == []
+
+    await _make_kb(session, dev_user, slug=settings.kb_shared_workspace_slug, visibility="public")
+    # client 身份(user 角色)可读 public 共享库 → 默认挂载
+    r2 = await client.post("/api/chat/sessions", json={})
+    assert r2.status_code == 201, r2.text
+    assert len(r2.json()["mounted_kb_ids"]) == 1
+    # 显式挂载不重复
+    kb_id = r2.json()["mounted_kb_ids"][0]
+    r3 = await client.post("/api/chat/sessions", json={"mounted_kb_ids": [kb_id]})
+    assert r3.status_code == 201 and r3.json()["mounted_kb_ids"] == [kb_id]
 
 
 async def test_api_publish_and_registry_visible(session, client, session_user_dev):

@@ -6,6 +6,8 @@ import Composer from "../components/chat/Composer";
 import MessageList from "../components/chat/MessageList";
 import { Navbar } from "../components/layout/Navbar";
 import { SessionDrawer } from "../components/chat/SessionDrawer";
+import { KbMountModal } from "../components/chat/KbMountModal";
+import { SaveToKbModal } from "../components/chat/SaveToKbModal";
 import {
   createSession,
   deleteSession,
@@ -15,6 +17,7 @@ import {
   renameSession,
   sendFeedbackEvent,
   sendMessage,
+  updateSessionKbs,
 } from "../lib/api/chat";
 import { apiGet } from "../lib/api/client";
 import { isAuthed } from "../lib/api/auth";
@@ -41,6 +44,9 @@ function ChatHome() {
   const [streaming, setStreaming] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
   const [showAsstModal, setShowAsstModal] = useState(false);
+  const [showKbModal, setShowKbModal] = useState(false);
+  // 会话产出收藏(设计 008 §11):记录待收藏正文与来源
+  const [kbSaveTarget, setKbSaveTarget] = useState<{ content: string; source: { app: string; session_id?: string; message_id?: string } } | null>(null);
 
   // 门禁
   useEffect(() => {
@@ -216,6 +222,19 @@ function ChatHome() {
     [current, streaming, refreshSessions]
   );
 
+  // 保存会话挂载知识库 (M12, T12.13)
+  const handleSaveKbs = async (kbIds: string[]) => {
+    if (!current) return;
+    try {
+      await updateSessionKbs(current.id, kbIds);
+      setCurrent((prev) => (prev ? { ...prev, mounted_kb_ids: kbIds } : null));
+      setShowKbModal(false);
+      void refreshSessions();
+    } catch (err) {
+      alert(`保存挂载失败: ${err instanceof Error ? err.message : err}`);
+    }
+  };
+
   // 交互回传处理器 (003 v2.0 §9)
   const handleInteract = async (
     action: string,
@@ -328,6 +347,21 @@ function ChatHome() {
             </div>
 
             <div className="text-[11px] text-slate-400 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowKbModal(true)}
+                title="管理当前会话挂载的知识库"
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-medium transition ${
+                  (current?.mounted_kb_ids?.length ?? 0) > 0
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                <span>📚</span>
+                <span>
+                  知识库 {(current?.mounted_kb_ids?.length ?? 0) > 0 ? `(${current?.mounted_kb_ids?.length})` : "未挂载"}
+                </span>
+              </button>
               {streaming ? (
                 <span className="inline-flex items-center gap-1.5 text-indigo-600 font-medium animate-pulse">
                   <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping" />
@@ -342,10 +376,32 @@ function ChatHome() {
             </div>
           </div>
 
-          <MessageList messages={messages} streaming={streaming} onInteract={handleInteract} />
+          <MessageList
+            messages={messages}
+            streaming={streaming}
+            onInteract={handleInteract}
+            onSaveToKb={(content) =>
+              setKbSaveTarget({ content, source: { app: "platform", session_id: current?.id } })
+            }
+          />
           <Composer onSend={handleSend} disabled={streaming} />
         </main>
       </div>
+
+      {/* Session KB Mount Modal (M12) */}
+      {showKbModal && current && (
+        <KbMountModal
+          sessionId={current.id}
+          currentKbIds={current.mounted_kb_ids ?? []}
+          onClose={() => setShowKbModal(false)}
+          onSave={handleSaveKbs}
+        />
+      )}
+
+      {/* Save Assistant Message to KB (M12 增补, 设计 008 §11) */}
+      {kbSaveTarget && (
+        <SaveToKbModal content={kbSaveTarget.content} source={kbSaveTarget.source} onClose={() => setKbSaveTarget(null)} />
+      )}
 
       {/* Assistant Details Modal */}
       {showAsstModal && currentAssistant && (

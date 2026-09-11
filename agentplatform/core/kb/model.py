@@ -10,7 +10,17 @@ from datetime import datetime
 from enum import Enum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, Text, Uuid, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,9 +30,10 @@ from agentplatform.core.db.base import Base
 
 
 class KbVisibility(str, Enum):
-    """库可见性(需求 005 §F6):private 仅 owner;public 全员可读。"""
+    """库可见性(需求 005 §F6;§12 增补 shared):private 仅 owner;shared owner+成员;public 全员可读。"""
 
     private = "private"
+    shared = "shared"
     public = "public"
 
 
@@ -35,6 +46,23 @@ class KbDocumentStatus(str, Enum):
     ready = "ready"
     failed = "failed"
     deleted = "deleted"  # 软删:检索过滤,行保留
+
+
+class KbMember(Base):
+    """库成员关系(设计 008 §12);owner 不入库,以 knowledge_bases.owner_id 为准。"""
+
+    __tablename__ = "kb_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    kb_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="member")  # 预留角色扩展
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    __table_args__ = (UniqueConstraint("kb_id", "user_id", name="uq_kb_members_kb_user"),)
 
 
 class KnowledgeBase(Base):
@@ -83,6 +111,12 @@ class KbDocument(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)  # 同库去重
     uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 溯源(设计 008 §11):origin=upload(页面上传)/ session(会话产出);
+    # source_* 消费无关,app 为自由字符串,平台不感知具体消费方
+    origin: Mapped[str] = mapped_column(Text, nullable=False, default="upload")
+    source_app: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # 同库幂等键
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -114,4 +148,7 @@ class KbChunk(Base):
 Index("ix_kb_chunks_kb_id", KbChunk.kb_id)
 Index("ix_kb_chunks_doc_id", KbChunk.document_id)
 Index("ix_kb_documents_kb_id", KbDocument.kb_id)
+Index("ix_kb_documents_source_message", KbDocument.kb_id, KbDocument.source_message_id)
+Index("ix_kb_members_kb_id", KbMember.kb_id)
+Index("ix_kb_members_user_id", KbMember.user_id)
 Index("ix_knowledge_bases_owner", KnowledgeBase.owner_id)

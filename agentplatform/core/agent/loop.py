@@ -411,6 +411,10 @@ async def stream_agent(
 
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
+        # 工具执行会开启事务(如 kb_search 的检索查询);在下一轮长流式前提交释放,
+        # 避免 idle-in-transaction 超时被 PG 断连,导致流结束后的消息落库失败。
+        await session.commit()
+
     # 4. 自动落盘兜底:如果模型直接生成了 HTML 但未显式调用 preview 工具
     preview_res = next((res for rid, res in resources.items() if "preview" in rid), None)
     if preview_res:
@@ -613,6 +617,41 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
             except Exception:
                 continue
 
+    # 1.2 尝试匹配函数签名风格: kb_search(query="...") / tool:kb_search(query="...", top_k=3)
+    # (部分模型以 Python kwargs 形式书写;仅当函数名命中已知资源时才解析,避免误伤普通文本。
+    #  精确匹配优先于 1.5 的截断启发式,故命中即返回。)
+    import ast as _ast
+
+    sig_matches = re.finditer(
+        r"`?\b([a-zA-Z][a-zA-Z0-9_]*(?::[a-zA-Z0-9_-]+)?)\s*\(\s*([a-zA-Z_][\w]*\s*=)", text
+    )
+    for m in sig_matches:
+        raw_name = m.group(1)
+        probe = candidates.get(raw_name) or candidates.get(raw_name.replace(":", "__")) or candidates.get(
+            raw_name.replace("__", ":")
+        )
+        if not probe:
+            continue
+        # 从 kwargs 起点到配对右括号,交由 ast 安全解析字面量
+        start = m.start(2)
+        end = text.find(")", start)
+        if end == -1:
+            continue
+        try:
+            call = _ast.parse(f"_f({text[start:end]})").body[0].value  # type: ignore[attr-defined]
+            kwargs = {kw.arg: _ast.literal_eval(kw.value) for kw in call.keywords if kw.arg}
+        except Exception:
+            continue
+        extracted.append(
+            ToolCall(
+                id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                name=probe.replace(":", "__"),
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+        )
+    if extracted:
+        return extracted
+
     # 1.5 尝试匹配截断或未闭合的函数/工具调用: <tool_call>tool:xxx({ ... 或 `tool__xxx`({ ...
     trunc_m = re.search(
         r"(?:<tool_call>\s*)?`?((?:tool|skill)(?::|__)[a-zA-Z0-9_-]+|writewx_preview)`?\s*\(\s*\{?([\s\S]*?)(?:\)\s*(?:</tool_call>)?|\Z)",
@@ -667,6 +706,27 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
         if raw_name.lower() in ("skill", "tool", "function", "action", "tool_call"):
             raw_name = param_dict.pop("name", "") or param_dict.pop("id", "") or param_dict.pop("func", "")
 
+        # 无参数名的 <parameter>值</parameter>(部分模型风格):唯一无名参数绑定到
+        # 目标函数唯一必填参数(kb_search 即 query),避免参数丢失导致调用必败。
+        if not param_dict and raw_name:
+            unnamed_vals = [
+                m.group(2).strip()
+                for m in re.finditer(r"<parameter([^>]*)>([\s\S]*?)</parameter>", inner, re.IGNORECASE)
+                if "name" not in m.group(1) and m.group(2).strip()
+            ]
+            probe_id = candidates.get(raw_name) or candidates.get(raw_name.replace(":", "__")) or candidates.get(
+                raw_name.replace("__", ":")
+            )
+            row = resources.get(probe_id or "")
+            required: list[str] = []
+            if row is not None:
+                schema_params = (row.schema_ or {}).get("parameters") or row.schema_ or {}
+                required = schema_params.get("required") or []
+                if not required:
+                    required = list((schema_params.get("properties") or {}).keys())
+            if len(unnamed_vals) == 1 and required:
+                param_dict[required[0]] = unnamed_vals[0]
+
         if raw_name:
             matched_id = (
                 candidates.get(raw_name)
@@ -708,10 +768,43 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
             except Exception:
                 continue
 
+    # 3.5 尝试匹配 <tool_call>{"name": "xxx", "arguments": {...}}</tool_call> 对象风格(Qwen 等)
+    # 用 raw_decode 从各 <tool_call> 内的首个 { 做真实 JSON 解码:嵌套与字符串内
+    # 花括号都天然正确,连续多块逐个取到。
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"<tool_call>\s*", text):
+        brace = text.find("{", m.end())
+        if brace == -1:
+            continue
+        try:
+            data_obj, _ = decoder.raw_decode(text, brace)
+        except Exception:
+            continue
+        if not isinstance(data_obj, dict) or "name" not in data_obj:
+            continue
+        raw_name = str(data_obj.get("name") or data_obj.get("function", {}).get("name") or "").strip()
+        args_obj = data_obj.get("arguments", {})
+        if isinstance(args_obj, str):
+            try:
+                args_obj = json.loads(args_obj)
+            except Exception:
+                args_obj = {}
+        matched_id = (
+            candidates.get(raw_name)
+            or candidates.get(raw_name.replace(":", "__"))
+            or candidates.get(raw_name.replace("__", ":"))
+        )
+        if matched_id:
+            extracted.append(
+                ToolCall(
+                    id=f"call_txt_{uuid.uuid4().hex[:8]}",
+                    name=matched_id.replace(":", "__"),
+                    arguments=json.dumps(args_obj, ensure_ascii=False),
+                )
+            )
+
     if extracted:
         return extracted
-
-    # 4. 尝试匹配 JSON 数组或对象 (包括 markdown 块与裸 JSON)
     json_blocks = re.findall(
         r"```(?:json|tool_call|tool|function|action|python)?\s*([\s\S]*?)\s*```",
         text,

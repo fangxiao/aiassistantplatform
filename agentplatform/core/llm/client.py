@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from agentplatform.core.llm.http_client import make_http_client
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.llm.service import get_api_key
 
@@ -91,7 +92,7 @@ class OpenAIClient:
             )
             try:
                 async with (
-                    httpx.AsyncClient(timeout=client_timeout, transport=self._transport) as c,
+                    make_http_client(timeout=client_timeout, transport=self._transport) as c,
                     c.stream(
                         "POST", f"{ep_base_url}/chat/completions", json=payload, headers=headers
                     ) as resp,

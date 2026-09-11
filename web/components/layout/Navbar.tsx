@@ -35,6 +35,7 @@ export function Navbar() {
   const navLinks = [
     { href: "/", label: "💬 对话工作台" },
     { href: "/assistants", label: "🧩 助手广场" },
+    { href: "/kb", label: "📚 知识库" },
     { href: "/developer", label: "🛠️ 开发者中心" },
   ];
 

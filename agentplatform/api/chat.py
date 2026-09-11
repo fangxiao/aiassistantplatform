@@ -73,12 +73,31 @@ async def _validate_mounted_kbs(
 
     for kid in kb_ids:
         kb = await kb_service.get_kb(session, kid)
-        if kb is None or not kb_service.can_read(kb, str(user.id)):
+        if kb is None or not await kb_service.can_read(session, kb, str(user.id)):
             raise HTTPException(
                 status_code=404,
                 detail={"code": "not_found", "message": "挂载的知识库不存在或不可读"},
             )
     return kb_ids
+
+
+async def _with_default_shared_kb(
+    session: AsyncSession, kb_ids: list[uuid.UUID], user: User
+) -> list[uuid.UUID]:
+    """新建会话默认挂载跨项目共享库(008 §11.3;slug 见 settings.kb_shared_workspace_slug,置空禁用)。"""
+    from sqlalchemy import select as _select
+
+    from agentplatform.config import settings
+    from agentplatform.core.kb import service as kb_service
+    from agentplatform.core.kb.model import KnowledgeBase
+
+    slug = settings.kb_shared_workspace_slug
+    if not slug:
+        return kb_ids
+    shared = await session.scalar(_select(KnowledgeBase).where(KnowledgeBase.slug == slug))
+    if shared is None or not await kb_service.can_read(session, shared, str(user.id)):
+        return kb_ids
+    return kb_ids + [shared.id] if shared.id not in kb_ids else kb_ids
 
 
 @router.post("/sessions", response_model=SessionOut, status_code=201)
@@ -89,6 +108,7 @@ async def create_chat_session(
 ) -> SessionOut:
     """创建会话(关联插件助手);response_model 负责序列化。"""
     mounted = await _validate_mounted_kbs(session, payload.mounted_kb_ids, user)
+    mounted = await _with_default_shared_kb(session, mounted, user)
     row = await create_session(
         session, plugin_id=payload.plugin_id, user_id=str(user.id), mounted_kb_ids=mounted
     )

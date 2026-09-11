@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.config import settings
 from agentplatform.core.llm.crypto import encrypt
+from agentplatform.core.llm.http_client import make_http_client
 from agentplatform.core.llm.model import EndpointType, LlmEndpoint
 from agentplatform.core.llm.service import get_api_key
 
@@ -55,7 +56,7 @@ async def embed_texts(
 ) -> list[list[float]]:
     """批量向量化(自动分批);返回与输入等长的向量列表。"""
     vectors: list[list[float]] = []
-    async with httpx.AsyncClient(timeout=60.0, transport=transport) as client:
+    async with make_http_client(timeout=60.0, transport=transport) as client:
         for i in range(0, len(texts), EMBED_BATCH_SIZE):
             batch = texts[i : i + EMBED_BATCH_SIZE]
             vectors.extend(await _embed_batch(batch, endpoint, client))
@@ -102,7 +103,7 @@ async def embed_with_concurrency(
     sem = asyncio.Semaphore(4)
 
     async def run(batch: list[str]) -> list[list[float]]:
-        async with sem, httpx.AsyncClient(timeout=60.0) as client:
+        async with sem, make_http_client(timeout=60.0) as client:
             return await _embed_batch(batch, endpoint, client)
 
     results = await asyncio.gather(*[run(b) for b in batches])

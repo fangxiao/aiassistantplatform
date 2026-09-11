@@ -8,7 +8,9 @@ MVP 单进程 asyncio.Queue 串行消费;启动时扫描非 ready 文档重新�
 import asyncio
 import logging
 import uuid
+from html.parser import HTMLParser
 from pathlib import Path
+from typing import ClassVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +20,6 @@ from agentplatform.core.db.engine import SessionLocal
 from agentplatform.core.kb.model import KbChunk, KbDocument, KbDocumentStatus, KnowledgeBase
 from agentplatform.core.kb.service import kb_storage_dir
 from agentplatform.core.llm.embeddings import (
-    EmbeddingError,
     embed_texts,
     estimate_tokens,
     resolve_embedding_endpoint,
@@ -97,7 +98,7 @@ async def _worker() -> None:
 
 
 def parse_document(mime: str, path: Path) -> str:
-    """提取纯文本;pdf 走 pypdf(与 tool:pdf_parse 同源),md/txt 直读。"""
+    """提取纯文本;pdf 走 pypdf(与 tool:pdf_parse 同源),md/txt 直读,html 去标签。"""
     if mime == "application/pdf":
         try:
             from pypdf import PdfReader  # type: ignore[import-not-found]
@@ -107,7 +108,51 @@ def parse_document(mime: str, path: Path) -> str:
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     if mime in ("text/markdown", "text/plain"):
         return path.read_text(encoding="utf-8", errors="replace")
+    if mime == "text/html":
+        return _html_to_text(path.read_text(encoding="utf-8", errors="replace"))
     raise ValueError(f"不支持的 mime: {mime}")
+
+
+# ---------------------------------------------------------------- html 去标签
+
+
+class _TextExtractor(HTMLParser):
+    """块级标签断行、忽略 script/style,提取纯文本(设计 008 §11.1)。"""
+
+    _BLOCK_TAGS: ClassVar[set[str]] = {
+        "p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
+        "section", "article", "header", "footer", "blockquote", "pre",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._pieces: list[str] = []
+        self._skip_depth = 0  # script/style 嵌套深度
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in ("script", "style"):
+            self._skip_depth += 1
+        elif tag in self._BLOCK_TAGS:
+            self._pieces.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._skip_depth > 0:
+            self._skip_depth -= 1
+        elif tag in self._BLOCK_TAGS:
+            self._pieces.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._pieces.append(data)
+
+    def text(self) -> str:
+        return "\n".join(line.strip() for line in "".join(self._pieces).splitlines()).strip()
+
+
+def _html_to_text(html: str) -> str:
+    extractor = _TextExtractor()
+    extractor.feed(html)
+    return extractor.text()
 
 
 def chunk_text(
@@ -230,7 +275,7 @@ async def process_document(db: AsyncSession, doc_id: uuid.UUID) -> KbDocument:
         kb.chunk_count = len(chunk_texts)
         await db.commit()
         return doc
-    except (EmbeddingError, ValueError, RuntimeError, OSError) as exc:
+    except Exception as exc:  # noqa: BLE001  兜底:任何异常都必须落终态,文档不得滞留中间态
         await db.rollback()
         doc = await db.get(KbDocument, doc_id)
         assert doc is not None

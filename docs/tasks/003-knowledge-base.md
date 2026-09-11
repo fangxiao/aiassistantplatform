@@ -36,8 +36,8 @@ M12(知识库)
 ├─ T12.9 公共库发布 + skill_tools kind=kb 登记 ───────── P0,依赖 T12.3, M2
 ├─ T12.10 会话挂载 sessions.mounted_kb_ids ───────────── P0,依赖 T12.3
 ├─ T12.11 CLI validate kb: 依赖校验 ─────────────────── P0,依赖 T12.9
-├─ T12.12 WebUI 知识库管理页 ─────────────────────────── P1,依赖 T12.8, M8
-├─ T12.13 WebUI 会话挂载入口 ─────────────────────────── P1,依赖 T12.10, M8
+├─ T12.12 WebUI 知识库管理页 ✅ ──────────────────────── P1,依赖 T12.8, M8
+├─ T12.13 WebUI 会话挂载入口 ✅ ──────────────────────── P1,依赖 T12.10, M8
 └─ T12.14 测试:单测 + 5 条验收集成 ──────────────────── P0,依赖 T12.7
 ```
 
@@ -60,9 +60,11 @@ M12(知识库)
 | T12.9 | **公共库发布**:`POST /api/kbs/{id}/publish`(管理员,bump semver);事务内登记 `skill_tools(id=kb:<slug>, kind=kb, source=shared, schema={embedding_model, chunk_size})`;`registry` 输出 kb 行文案 | T12.3, M2 | P0 |
 | T12.10 | **会话挂载**:`POST/PATCH /api/sessions` 支持 `mounted_kb_ids`;服务端校验每个 id 对当前用户可读;与插件依赖去重 | T12.3, M6 | P0 |
 | T12.11 | **CLI validate**:`kb:` 依赖必须带版本约束的校验项;错误提示结构化 | T12.9, M9 | P0 |
-| T12.12 | **WebUI 知识库管理页**:库列表(个人+公共)、新建、文档列表(状态/错误/重试/删除)、上传、检索测试框 | T12.8, M8 | P1 |
-| T12.13 | **WebUI 会话挂载入口**:会话侧栏勾选可读库,写入 mounted_kb_ids | T12.10, M8 | P1 |
+| T12.12 ✅ | **WebUI 知识库管理页**:库列表(个人+公共)、新建、文档列表(状态/错误/重试/删除)、上传、检索测试框 | T12.8, M8 | P1 |
+| T12.13 ✅ | **WebUI 会话挂载入口**:会话侧栏勾选可读库,写入 mounted_kb_ids | T12.10, M8 | P1 |
 | T12.14 | **测试**:service 鉴权/配额、pipeline 状态机与重试、retriever 过滤、search_tool 权限交集(含跨用户 private 拒绝)、validate;集成测试覆盖需求 005 §5 五条验收(真实 PG,不可达 skip) | T12.7 | P0 |
+| T12.15 ✅ | **会话产出入库**(设计 008 §11 增补):kb_documents 溯源字段(origin/source_app/source_session_id/source_message_id);`POST /documents/from-text` 文本直存 + 消息级幂等;pipeline 支持 text/html 去标签;KbOut.can_write;WebUI 助手消息「收藏到知识库」;跨项目消费方(SwiftShip)走用户 token 绑定 | T12.3, T12.5, T12.8 | P1 |
+| T12.16 ✅ | **shared 可见性与成员管理**(设计 008 §12 增补):kb_visibility 增加 shared(团队资产,不进注册表,publish 拒绝);kb_members 表 + 成员 API(按 email 添加/列表/移除,仅 owner);权限矩阵 async 化 can_read/can_write/can_manage;list_visible_kbs 含成员库;WebUI 建库三态可见性、共享库 👥 徽标与成员管理弹窗、挂载弹窗图标;迁移 e5a8b1c3d726 | T12.15 | P1 |
 
 ### 实施顺序建议
 
@@ -71,7 +73,7 @@ T12.1 → T12.2 → T12.3 ─┬─> T12.8 ─┐
               └> T12.4 ─┼─> T12.5 ─┤
                         └─> T12.6 ─┴─> T12.7 → T12.14
 T12.3 → T12.9 → T12.11;T12.3 → T12.10
-P1:T12.12 / T12.13 在 P0 验收后
+P1:T12.12 / T12.13 在 P0 验收后(已于 M12 P0 验收后完成)
 ```
 
 ### 关键落点备忘

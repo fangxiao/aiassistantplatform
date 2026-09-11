@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.llm.crypto import decrypt, encrypt
-from agentplatform.core.llm.model import LlmEndpoint
+from agentplatform.core.llm.model import EndpointType, LlmEndpoint
 
 
 async def list_endpoints(session: AsyncSession) -> list[LlmEndpoint]:
@@ -29,6 +29,7 @@ async def create_endpoint(
     model: str,
     api_key: str,
     is_default: bool = False,
+    endpoint_type: EndpointType | str = EndpointType.chat,
 ) -> LlmEndpoint:
     """新增端点;设默认时先清除其他默认。"""
     if is_default:
@@ -39,6 +40,7 @@ async def create_endpoint(
         model=model,
         api_key_enc=encrypt(api_key),
         is_default=is_default,
+        endpoint_type=EndpointType(endpoint_type),
     )
     session.add(endpoint)
     await session.flush()
@@ -54,6 +56,7 @@ async def update_endpoint(
     model: str | None = None,
     api_key: str | None = None,
     is_default: bool | None = None,
+    endpoint_type: EndpointType | None = None,
 ) -> LlmEndpoint | None:
     """按需更新字段;不存在返回 None。设默认时先清除其他默认。"""
     endpoint = await get_endpoint(session, endpoint_id)
@@ -67,6 +70,8 @@ async def update_endpoint(
         endpoint.model = model
     if api_key is not None:
         endpoint.api_key_enc = encrypt(api_key)
+    if endpoint_type is not None:
+        endpoint.endpoint_type = EndpointType(endpoint_type)
     if is_default is True:
         await _clear_default(session)
         endpoint.is_default = True

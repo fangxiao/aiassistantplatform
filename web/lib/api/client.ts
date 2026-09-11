@@ -78,6 +78,23 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return (await resp.json()) as T;
 }
 
+// multipart 文件上传(kb 文档上传等);不设置 Content-Type,由浏览器补 boundary
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: form,
+  });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  return (await resp.json()) as T;
+}
+
 
 // 流式 POST,逐条产出 SSE 事件(对应后端 event: X\ndata: {...}\n\n 帧)
 export async function* streamSse(

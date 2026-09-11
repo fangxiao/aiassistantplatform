@@ -9,8 +9,12 @@ export async function listSessions(): Promise<SessionInfo[]> {
 
 export async function createSession(
   pluginId: string | null = null,
+  mountedKbIds: string[] = [],
 ): Promise<SessionInfo> {
-  return apiPost<SessionInfo>("/chat/sessions", { plugin_id: pluginId });
+  return apiPost<SessionInfo>("/chat/sessions", {
+    plugin_id: pluginId,
+    mounted_kb_ids: mountedKbIds,
+  });
 }
 
 export async function deleteSession(sid: string): Promise<{ ok: boolean }> {
@@ -22,6 +26,14 @@ export async function renameSession(
   title: string,
 ): Promise<SessionInfo> {
   return apiPatch<SessionInfo>(`/chat/sessions/${sid}`, { title });
+}
+
+// 更新会话挂载知识库 (M12);kbIds 传 [] 表示清空挂载
+export async function updateSessionKbs(
+  sid: string,
+  kbIds: string[],
+): Promise<SessionInfo> {
+  return apiPatch<SessionInfo>(`/chat/sessions/${sid}`, { mounted_kb_ids: kbIds });
 }
 
 export async function getHistory(sid: string): Promise<ChatMessage[]> {

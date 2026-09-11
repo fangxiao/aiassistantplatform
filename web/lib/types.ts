@@ -28,6 +28,7 @@ export interface SessionInfo {
   id: string;
   plugin_id: string | null;
   title: string | null;
+  mounted_kb_ids?: string[]; // 会话挂载知识库 (M12)
   created_at?: string;
   updated_at?: string;
 }
@@ -62,6 +63,7 @@ export interface LlmEndpointInfo {
   base_url: string;
   model: string;
   is_default: boolean;
+  endpoint_type?: "chat" | "embedding"; // M12: kb 向量化端点
 }
 
 export interface BuiltinResourceInfo {
@@ -94,5 +96,60 @@ export interface CapabilitiesInfo {
   builtin_skills: BuiltinResourceInfo[];
   builtin_tools: BuiltinResourceInfo[];
   content_blocks: ContentBlockDef[];
+}
+
+// ===== 知识库 (M12) =====
+
+export interface KbInfo {
+  id: string;
+  name: string;
+  slug: string;
+  visibility: "private" | "shared" | "public";
+  version: string;
+  description: string | null;
+  status: string;
+  doc_count: number;
+  chunk_count: number;
+  size_bytes: number;
+  can_write: boolean; // 服务端计算:private=owner / shared=owner+成员 / public=developer(设计 008 §11.2/§12.2)
+}
+
+export interface KbMemberInfo {
+  user_id: string;
+  email: string | null;
+  role: string;
+  created_at: string | null;
+}
+
+export type KbDocStatus = "pending" | "parsing" | "embedding" | "ready" | "failed" | "deleted";
+
+export interface KbDocumentInfo {
+  id: string;
+  kb_id: string;
+  filename: string;
+  mime: string;
+  size_bytes: number;
+  status: KbDocStatus;
+  error: string | null;
+  origin?: "upload" | "session";
+  source_app?: string | null;
+  source_session_id?: string | null;
+  source_message_id?: string | null;
+}
+
+export interface KbSearchHit {
+  kb_id: string;
+  kb_name: string;
+  document_id: string;
+  document_name: string;
+  chunk_index: number;
+  score: number;
+  text: string;
+  source_span: { start: number; end: number };
+}
+
+export interface KbSearchResponse {
+  results: KbSearchHit[];
+  hint?: string | null;
 }
 

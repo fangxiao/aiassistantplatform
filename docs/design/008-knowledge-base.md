@@ -1,6 +1,6 @@
 # 008 · 知识库设计
 
-- 文档版本:v0.1(草案)
+- 文档版本:v0.3(增补 §12 shared 可见性与成员管理)
 - 日期:2026-09-05
 - 流程阶段:阶段 2 · 设计
 - 对应需求:[../requirements/005-knowledge-base.md](../requirements/005-knowledge-base.md)
@@ -234,3 +234,107 @@ POST /api/kbs/{id}/documents(multipart)
 1. embedding 模型更换导致全量向量重算 → 迁移策略:skill_tools 行的 schema 记录 `embedding_model`,模型变更 = 发布新 kb 版本 + 重跑 pipeline;
 2. pgvector 规模上限 → NFR-3 收口,预留 Qdrant 后端切换点;
 3. 间接提示注入 → §9 包裹声明 + 溯源可见,三期可加检索结果净化(复用 html_cleaner 思路)。
+
+## 11. 会话产出入库(增补 · v0.2)
+
+会话中产生的文章/报告等输出,用户可选择存入知识库。**核心思路:产出物物化为标准 KbDocument,完全复用既有 pipeline(解析/切分/向量化),不引入新链路。**
+
+### 11.1 数据模型增补(kb_documents 溯源字段)
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| origin | text, default `upload` | 文档来源:`upload`(页面上传)/ `session`(会话产出) |
+| source_app | text, nullable | 消费方应用标识,消费无关:`platform` / `swiftship` / …(自由字符串,不做枚举,平台不感知具体消费方) |
+| source_session_id | text, nullable | 产出该内容的会话 id(消费方侧的会话标识) |
+| source_message_id | text, nullable | 产出该内容的具体消息 id;**幂等键**:`(kb_id, source_message_id)` 重复收藏拒绝 |
+
+- 纯文本入库不需要 pdf 扩展名白名单,mime 允许 `text/markdown` / `text/plain` / `text/html`;
+- HTML 文章(SwiftShip 富文本输出)在 pipeline `parse_document` 增加 `text/html` 分支,去标签转纯文本(标准库 `html.parser`,不引第三方依赖)。
+
+### 11.2 API
+
+`POST /api/kb/kbs/{kb_id}/documents/from-text`
+
+```json
+{
+  "title": "文章标题",
+  "content": "正文(纯文本或 HTML)",
+  "mime": "text/markdown",
+  "source": {"app": "swiftship", "session_id": "...", "message_id": "..."}
+}
+```
+
+- `source` 可缺省(等价 origin=upload 的文本直存);
+- 校验链复用 `add_document`:can_write → 大小上限 → 单库文档数 → content_hash 去重;新增 source_message_id 幂等(同库同消息重复收藏返回 400);
+- `KbOut` 增加 `can_write: bool`(服务端计算),前端据此渲染「可收藏」目标库;`KbDocOut` 暴露 origin/source 字段供列表展示。
+
+### 11.3 跨项目复用(平台为服务,SwiftShip 为消费方)
+
+平台提供知识库 HTTP 服务,SwiftShip 作为第一个外部消费方接入:
+
+- **鉴权:方案 A · 用户级 token 绑定**(已确认)。SwiftShip 前端复用 BrowserAgent「插件连接」的 token 模式:用户在平台获取个人 token,粘贴进 SwiftShip 存 localStorage;SwiftShip 后端携 token 调平台 REST,平台按 token 对应用户执行 can_read/can_write——权限语义与平台内完全一致,SwiftShip 无需自建授权映射;
+- **写权限**:收藏走 can_write(private=owner / public=developer),与平台内一致;
+- **消费无关溯源**:source.app 记录 `swiftship`,平台不枚举不校验消费方清单,后续任意应用可复用同一接口;
+- **后续演进(非本期)**:平台侧提供 MCP server 包装 REST(`kb_search` / `kb_save`),SwiftShip 的 Claude Code agent 可原生 function-calling 收藏/检索,替代前后端转调;
+- SwiftShip 侧接入规范由平台经 Agent-Hub 发 swiftship agent,不在本文档展开。
+
+### 11.4 WebUI(平台侧 P1)
+
+助手消息卡片增加「收藏到知识库」入口(悬浮按钮)→ 弹窗:标题可编辑、正文预览、仅列 can_write 的库 → from-text 保存。Markdown 内容直接以 `text/markdown` 入库。
+
+## 12. shared 可见性与成员管理(增补 · v0.3)
+
+背景:SwiftShip 团队空间需要多成员共用一个库(都能读、都能写),private(仅 owner)与 public(全员可读、写入限 developer)均不适用。落实一期预留的 visibility=shared。
+
+### 12.1 数据模型
+
+- `kb_visibility` 枚举增加 `shared`(ALTER TYPE ADD VALUE,不可回滚,一次到位);
+- 新表 **kb_members**(成员关系;owner 不重复记录,以 knowledge_bases.owner_id 为准):
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | uuid pk | |
+| kb_id | fk knowledge_bases (cascade) | |
+| user_id | text | 成员用户 id |
+| role | text, default `member` | 预留角色扩展(owner 由 owner_id 表达) |
+| created_at | timestamptz | |
+
+- 唯一约束 `(kb_id, user_id)`;索引 kb_id / user_id。
+
+### 12.2 权限矩阵(修订 §3.3 / can_read、can_write)
+
+| 操作 | private | shared | public |
+|---|---|---|---|
+| 读 | owner | **owner ∪ 成员** | 全员(active) |
+| 写文档 | owner | **owner ∪ 成员** | developer 角色 |
+| 管理成员 / 删库 / 发布 | owner | **owner** | developer 角色 |
+
+- shared 库**不进注册表**(团队资产,非公共复用资源,`kb:` 依赖仍仅指向 public 发布库);
+- 会话挂载、检索范围组装零改动:can_read 语义扩展后自动生效;
+- list_visible_kbs:public(active)∪ 自己 private ∪ 自己为 owner 或成员的 shared。
+
+### 12.3 API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/kb/kbs/{id}/members` | 成员列表(owner/成员可见;回显 email) |
+| POST | `/api/kb/kbs/{id}/members` | 加成员(owner;按 email 解析用户,重复/不存在 → 400) |
+| DELETE | `/api/kb/kbs/{id}/members/{user_id}` | 移除成员(owner) |
+
+### 12.4 WebUI
+
+- 建库表单:可见性三选(private 🔒 / shared 👥 / public 🌐,public 仍限 developer);
+- shared 库卡片增加「成员」入口 → 弹窗(列表 / 按 email 添加 / 移除);
+- 挂载与收藏弹窗零改动(依赖 listKbs + can_write)。
+
+### 12.5 SwiftShip 团队空间映射
+
+- `空间 ↔ 库` 关联由 SwiftShip 本地存储;空间绑定 shared 库 = 绑定用户为该库成员;
+- 成员入空间 → 空间 owner(或 SwiftShip 后端)调 POST members 把平台账号加入;检索/收藏以各成员自己的 token 调用,权限由平台判定。
+
+## 13. 分期与任务
+
+- P1(本期):§11.1 迁移与模型、§11.2 API、§11.4 WebUI 收藏入口、单测;
+- P1 增补:§12 shared 可见性与成员管理(迁移 + 权限扩展 + 成员 API + WebUI 成员管理);
+- P2:`tool:kb_save` 内置工具(agent 确认卡片交互,会话内由 agent 主动发起收藏);
+- 三期:MCP server。

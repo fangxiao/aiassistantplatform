@@ -7,7 +7,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 from agentplatform.core.agent.loop import AgentEvent, stream_agent
-from agentplatform.core.kb.search_tool import resolve_allowed_kb_ids
+from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, resolve_allowed_kb_ids
 from agentplatform.core.llm.client import OpenAIClient
 from agentplatform.core.llm.router import resolve_endpoint
 from agentplatform.core.message.service import build_history, save_user_message
@@ -102,6 +102,9 @@ async def agent_stream_for_session(
         mounted_kb_ids=[uuid.UUID(k) for k in (sess.mounted_kb_ids or [])],
         plugin_manifest=manifest,
     )
+    # 挂载了知识库则下发显式检索工具(builtin tool:kb_search,设计 008 §4.1)
+    if allowed_kb_ids and KB_SEARCH_TOOL_ID not in resource_ids:
+        resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
 
     history = await build_history(session, session_id)
     # history 末尾是刚保存的用户消息,拆出作为 user_message,其余作为前文

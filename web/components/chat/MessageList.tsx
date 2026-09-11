@@ -10,12 +10,14 @@ interface MessageListProps {
   messages: ChatMessage[];
   streaming?: boolean;
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
+  onSaveToKb?: (content: string) => void;
 }
 
 export default function MessageList({
   messages,
   streaming = false,
   onInteract,
+  onSaveToKb,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -39,6 +41,7 @@ export default function MessageList({
           isStreaming={streaming}
           isLast={index === messages.length - 1}
           onInteract={onInteract}
+          onSaveToKb={onSaveToKb}
         />
       ))}
       <div ref={bottomRef} />

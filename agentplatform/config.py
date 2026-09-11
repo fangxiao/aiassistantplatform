@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     kb_chunk_tokens: int = 512  # 切分目标长度
     kb_chunk_overlap_tokens: int = 50  # 切分重叠
     kb_search_top_k: int = 5  # kb_search 默认返回条数
+    kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 
 settings = Settings()
