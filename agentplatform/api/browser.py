@@ -12,13 +12,22 @@ Wire 协议(JSON,camelCase,遵循 RFC 契约):
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from agentplatform.config import settings
 from agentplatform.core.agent.bridge import BrowserSession, bridge
+from agentplatform.core.auth.dependencies import get_current_user
+from agentplatform.core.auth.model import User
 from agentplatform.core.auth.service import decode_access_token
 
 router = APIRouter(prefix="/browser", tags=["browser"])
+
+
+@router.get("/sessions")
+async def list_browser_sessions(user: User = Depends(get_current_user)) -> dict:
+    """当前用户的浏览器扩展连接自省(设备/活跃 Tab/空闲秒数),供前端排障。"""
+    return {"connected": bridge.is_connected(str(user.id)),
+            "connections": bridge.sessions_info(str(user.id))}
 
 
 def _authenticate(token: str) -> str | None:
@@ -65,11 +74,19 @@ async def _route_message(
     elif kind == "TAB_UPDATE":
         bridge.set_active_tab(user_id, sess, msg.get("tab"))
     elif kind == "TOOL_RESULT":
-        bridge.deliver_result(msg.get("callId"), msg.get("result"))
+        # 带 user_id 校验归属,拒绝跨用户伪造他人在途动作的结果
+        accepted = bridge.deliver_result(
+            msg.get("callId"), msg.get("result"), user_id=user_id
+        )
+        if not accepted:
+            await websocket.send_json(
+                {"type": "ERROR", "message": f"未知或无权回传的 callId: {msg.get('callId')}"}
+            )
     elif kind in ("STEP_UPDATE", "TOOL_PROGRESS", "PROGRESS"):
         bridge.deliver_step_update(
             msg.get("callId"),
             msg.get("progress") or msg.get("step") or msg.get("data") or msg,
+            user_id=user_id,
         )
     # 其余消息忽略(未知协议,留待后续版本)
 
@@ -84,7 +101,8 @@ async def browser_tunnel(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
-    sess = bridge.register(user_id, send=websocket.send_json)
+    device_id = websocket.query_params.get("device_id") or websocket.query_params.get("deviceId")
+    sess = bridge.register(user_id, send=websocket.send_json, device_id=device_id)
     try:
         while True:
             try:
@@ -92,15 +110,20 @@ async def browser_tunnel(websocket: WebSocket) -> None:
                     websocket.receive_json(), timeout=settings.browser_tunnel_heartbeat
                 )
             except TimeoutError:
-                # 心跳探测:发 PING,再等一个窗口;仍无消息则判定对端失联
+                # 静默窗口到期:主动 PING 探活;下一窗口内收到的任何消息都照常分发
+                # (旧实现直接 continue 会把 PONG/TOOL_RESULT 丢弃,导致路由假性超时)
+                await websocket.send_json({"type": "PING"})
                 try:
-                    await websocket.send_json({"type": "PING"})
-                    await asyncio.wait_for(
+                    msg = await asyncio.wait_for(
                         websocket.receive_json(), timeout=settings.browser_tunnel_timeout
                     )
                 except TimeoutError:
                     await websocket.close(code=1001)
                     return
+            except WebSocketDisconnect:
+                raise
+            except Exception:  # noqa: BLE001  单条非法 JSON 不杀连接
+                await websocket.send_json({"type": "ERROR", "message": "invalid json message"})
                 continue
             await _route_message(websocket, sess, user_id, msg)
     except WebSocketDisconnect:

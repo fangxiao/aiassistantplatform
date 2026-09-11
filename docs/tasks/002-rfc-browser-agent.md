@@ -101,7 +101,7 @@ M11(端云协同)
 
 | ID | 任务 | 依赖 | 优先级 |
 |----|------|------|--------|
-| T11.10 | **`depends_on` 可选依赖语义**:新增可选依赖语法(如 `tool:html_cleaner@^1.0?`);`check_dependencies` 解析时"有则用平台版、无则回退插件本地同名实现" | T2.2, T4.2 | P2 |
+| T11.10 ✅ | **`depends_on` 可选依赖语义**(2026-09 完成):可选语法 `tool:html_cleaner@^1.0?`;`parse_dependency` 识别 `?`;必选依赖仅公共资源(builtin/shared)可满足,可选缺失不阻断部署;`resolve()` 运行时"公共优先、私有回退";本地回退实现与公共资源同 id+version 撞键拒绝;CLI validate 兼容 | T2.2, T4.2 | P2 |
 
 ---
 
@@ -109,7 +109,7 @@ M11(端云协同)
 
 | ID | 任务 | 依赖 | 优先级 | 状态 |
 |----|------|------|--------|------|
-| T11.11 | **`/api/browser/tunnel` WebSocket 网关**:长连接 + 身份认证/配对 + 心跳保活 + 活跃 Tab 广播;对接 RFC-0 的 `core/agent/bridge.py` 通道路由 | T11.6 | P2 | ✅ POC 已实现 |
+| T11.11 ✅ | **`/api/browser/tunnel` WebSocket 网关**:长连接 + 身份认证/配对 + 心跳保活 + 活跃 Tab 广播;对接 RFC-0 的 `core/agent/bridge.py` 通道路由。2026-09 生产化加固:TOOL_RESULT/PROGRESS 按 user 归属校验(防跨用户伪造)、device_id 配对识别、修复心跳窗口消息被丢弃导致的假性超时、非法 JSON 不杀连接、`GET /api/browser/sessions` 连接自省 | T11.6 | P2 | ✅ POC→生产化 |
 
 > 降级为优化项:WebSocket 只解决延迟,不解决能力;RFC-0 的 SSE 下行 + interact 上行已能闭环(见 RFC-2026-001 §RFC-0 论证)。
 
@@ -118,7 +118,7 @@ M11(端云协同)
 - 新增 `agentplatform/api/browser.py`:`/api/browser/tunnel` WebSocket 端点。**身份认证**:`?token=<JWT>` 查询参数(浏览器无法设置 header),复用 `decode_access_token`;**心跳保活**:应用层 PING/PONG + 超时断开;**活跃 Tab 广播**:`TAB_UPDATE` 记录并广播给同用户其他连接。
 - `core/agent/loop.py` 端侧工具分支改造:**浏览器已连接 → 经 bridge `route_to_endpoint` 等待结果回填并继续推理**;未连接 → 降级为既有 `await_external` SSE + 暂停(向后兼容)。`stream_agent`/`run_agent` 新增 `owner_id` 参数,由 `agent_stream_for_session` 透传会话用户。
 - 配置:`browser_tunnel_heartbeat`(30s)/ `browser_tunnel_timeout`(15s)/ `browser_route_timeout`(120s)。
-- 已知限制:bridge 为进程内存单例(多 worker 各实例独立);**配对**复用用户 JWT(POC),专用短时浏览器令牌留作后续;`endpoint:` 前缀约定代替 T11.1 建议的 `impl_kind` 列(未做迁移)。
+- 已知限制:bridge 为进程内存单例(多 worker 各实例独立,跨 worker 路由需 Redis pub/sub,留待规模化阶段);**配对**复用用户 JWT + device_id 多设备识别,专用短时浏览器令牌留作后续;`endpoint:` 前缀约定代替 T11.1 建议的 `impl_kind` 列(未做迁移)。
 
 ---
 

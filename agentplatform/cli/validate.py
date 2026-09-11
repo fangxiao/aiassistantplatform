@@ -48,13 +48,14 @@ def validate_project(root: Path) -> dict:
                 if not res.get("file"):
                     errors.append(f"{section} 资源缺 file 属性: {rid!r}")
 
-        # depends_on 格式校验
+        # depends_on 格式校验(T11.10: 末尾 '?' 表示可选依赖,平台缺失时回退本地实现)
         for dep in raw.get("depends_on", []) or []:
             if not isinstance(dep, str) or "@" not in dep:
                 errors.append(f"depends_on 依赖项格式错误(建议带版本约束如 tool:pdf_parse@^1.0): {dep!r}")
                 continue
+            constraint_part = dep.split("@", 1)[1].removesuffix("?").strip()
             # kb: 资源为版本化公共库(ADR 0005),必须带版本约束(设计 008 §4.1)
-            if dep.startswith("kb:") and dep.split("@", 1)[1].strip() == "":
+            if dep.startswith("kb:") and constraint_part == "":
                 errors.append(f"kb: 依赖必须带版本约束(如 kb:product_docs@^1.0): {dep!r}")
 
         # 从代码提取资源元信息(含 schema)

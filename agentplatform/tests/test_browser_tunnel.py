@@ -50,6 +50,18 @@ class TestTunnelAuth:
             pass
         assert exc_info.value.code == 1008
 
+    def test_invalid_json_does_not_kill_connection(self) -> None:
+        """T11.11:单条非法 JSON 回 ERROR 后连接仍存活,PING/PONG 正常。"""
+        token = _valid_token()
+        with client.websocket_connect(
+            f"/api/browser/tunnel?token={token}&device_id=dev-1"
+        ) as ws:
+            ws.send_text("{not-json")
+            err = ws.receive_json()
+            assert err["type"] == "ERROR"
+            ws.send_json({"type": "PING"})
+            assert ws.receive_json() == {"type": "PONG"}
+
 
 class TestTunnelTabBroadcast:
     """活跃 Tab 广播:同用户两连接,TAB_UPDATE 从 A 广播到 B。"""

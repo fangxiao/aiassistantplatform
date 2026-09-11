@@ -15,7 +15,7 @@ from agentplatform.core.plugin.loader import (
 )
 from agentplatform.core.plugin.manifest import PluginManifest, ResourceDef
 from agentplatform.core.registry.model import SkillTool, SkillToolSource
-from agentplatform.core.registry.service import seed_builtin
+from agentplatform.core.registry.service import resolve, seed_builtin
 
 
 def _manifest(**overrides: Any) -> PluginManifest:
@@ -86,6 +86,51 @@ class TestDeployPlugin:
                 session, _manifest(depends_on=["tool:pdf_parse@^2.0", "skill:nope@^1.0"])
             )
         assert exc_info.value.missing == ["tool:pdf_parse@^2.0", "skill:nope@^1.0"]
+
+    async def test_optional_dependency_falls_back_to_local(
+        self, session: AsyncSession
+    ) -> None:
+        """T11.10:可选依赖平台缺失不阻断部署,运行时回退插件本地同名实现。"""
+        await seed_builtin(session)
+        manifest = _manifest(
+            depends_on=["tool:fallback_demo@^1.0?"],
+            tools=[
+                ResourceDef(
+                    id="tool:fallback_demo",
+                    file="./tools/fallback_demo.py",
+                    schema={"parameters": {"type": "object"}},
+                )
+            ],
+        )
+        plugin = await deploy_plugin(session, manifest)
+        await session.commit()
+        assert plugin.name == "prd-review-assistant"
+
+        # 平台无公共版,resolve(与 build_tools 一致不带版本约束)回退到私有实现
+        resolved = await resolve(session, "tool:fallback_demo")
+        assert resolved is not None
+        assert resolved.source == SkillToolSource.private
+        assert resolved.owner_id == "prd-review-assistant"
+
+    async def test_local_resource_colliding_public_id_version_rejected(
+        self, session: AsyncSession
+    ) -> None:
+        """T11.10:本地回退实现与平台公共资源同 id+version 会覆盖公共行,必须拒绝。"""
+        await seed_builtin(session)
+        manifest = _manifest(
+            name="greedy-plugin",
+            version="1.0.0",  # 与 tool:pdf_parse 公共版本撞键
+            depends_on=[],
+            tools=[
+                ResourceDef(
+                    id="tool:pdf_parse",
+                    file="./tools/pdf_parse.py",
+                    schema={"parameters": {"type": "object"}},
+                )
+            ],
+        )
+        with pytest.raises(PluginValidationError, match="撞 id\\+version"):
+            await deploy_plugin(session, manifest)
 
     async def test_uninstall_removes_plugin_and_resources(self, session: AsyncSession) -> None:
         await seed_builtin(session)

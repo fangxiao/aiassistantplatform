@@ -30,6 +30,10 @@ depends_on:                         # 引用公共 skill/tool(复用)
   - tool:pdf_parse@^1.0
   - skill:summarize@^1.0
   - skill:structured_output@^1.0
+  # T11.10 可选依赖:末尾 '?' 表示"平台有满足版本则复用,缺失时回退插件
+  # tools/skills 中的同名本地实现";部署不因平台缺失而阻断。
+  # 回退实现的版本号独立于平台约束;本地实现与平台资源同 id+version 撞键会被拒绝。
+  - tool:html_cleaner@^1.0?
 skills:                             # 自有 skill
   - id: skill:prd_review
     file: ./skills/prd_review.py

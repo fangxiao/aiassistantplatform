@@ -4,6 +4,8 @@
 插件部署时的 depends_on 校验;内置资源种子与插件部署共用 register()。
 """
 
+from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,19 @@ from agentplatform.core.registry.model import (
 from agentplatform.core.registry.version import parse, resolve_highest
 
 PUBLIC_SOURCES = (SkillToolSource.builtin, SkillToolSource.shared)
+
+
+@dataclass(frozen=True)
+class ParsedDependency:
+    """depends_on 单项解析结果(T11.10)。
+
+    optional=True 对应 'tool:html_cleaner@^1.0?' 语法:平台有满足版本则用
+    平台版,缺失时回退插件本地同名实现,部署不因平台缺失而阻断。
+    """
+
+    resource_id: str
+    constraint: str | None
+    optional: bool
 
 
 async def list_public(
@@ -47,10 +62,32 @@ async def get_versions(session: AsyncSession, resource_id: str) -> list[SkillToo
 async def resolve(
     session: AsyncSession, resource_id: str, constraint: str | None = None
 ) -> SkillTool | None:
-    """解析资源:无约束取最高版本;有约束取满足 ^ / ~ 的最高版本,无匹配返回 None。"""
+    """运行时解析资源:公共资源(builtin/shared)优先,其次插件私有实现。
+
+    无约束取最高版本;有约束取满足 ^ / ~ 的最高版本,无匹配返回 None。
+    公共优先是 T11.10 可选依赖回退的基础:同名时平台版胜出,平台缺失才用
+    插件本地实现;同时避免插件私有高版本号"顶掉"平台内置资源。
+    """
     rows = await get_versions(session, resource_id)
     if not rows:
         return None
+    public = [r for r in rows if r.source in PUBLIC_SOURCES]
+    for candidates in (public, rows):
+        best = resolve_highest([r.version for r in candidates], constraint)
+        if best is not None:
+            return next(r for r in candidates if r.version == best)
+    return None
+
+
+async def resolve_public(
+    session: AsyncSession, resource_id: str, constraint: str | None = None
+) -> SkillTool | None:
+    """只在公共资源(builtin/shared)中解析;部署依赖校验用,私有资源不算满足。"""
+    rows = [
+        r
+        for r in await get_versions(session, resource_id)
+        if r.source in PUBLIC_SOURCES
+    ]
     best = resolve_highest([r.version for r in rows], constraint)
     if best is None:
         return None
@@ -58,19 +95,35 @@ async def resolve(
 
 
 def split_dependency(dep: str) -> tuple[str, str | None]:
-    """'tool:pdf_parse@^1.0' -> ('tool:pdf_parse', '^1.0')。"""
+    """'tool:pdf_parse@^1.0' -> ('tool:pdf_parse', '^1.0');兼容可选后缀 '?'。"""
+    if dep.endswith("?"):
+        dep = dep[:-1]
     if "@" in dep:
         resource_id, _, constraint = dep.partition("@")
         return resource_id, constraint
     return dep, None
 
 
+def parse_dependency(dep: str) -> ParsedDependency:
+    """解析 depends_on 单项,识别可选依赖后缀 '?'(T11.10)。"""
+    optional = dep.endswith("?")
+    resource_id, constraint = split_dependency(dep)
+    return ParsedDependency(resource_id, constraint, optional)
+
+
 async def check_dependencies(session: AsyncSession, deps: list[str]) -> list[str]:
-    """校验插件 depends_on:返回未满足的依赖(空列表 = 全部满足)。"""
+    """校验插件 depends_on:返回未满足的必选依赖(空列表 = 校验通过)。
+
+    - 必选依赖:平台公共资源必须存在且满足版本约束;其他插件的私有资源不算满足。
+    - 可选依赖(以 '?' 结尾,如 tool:html_cleaner@^1.0?):平台缺失时回退插件
+      本地同名实现,不阻断部署(T11.10)。
+    """
     missing: list[str] = []
     for dep in deps:
-        resource_id, constraint = split_dependency(dep)
-        if await resolve(session, resource_id, constraint) is None:
+        parsed = parse_dependency(dep)
+        if parsed.optional:
+            continue
+        if await resolve_public(session, parsed.resource_id, parsed.constraint) is None:
             missing.append(dep)
     return missing
 

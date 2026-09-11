@@ -50,9 +50,11 @@ class BrowserBridge:
         self._progress_listeners: dict[str, Callable[[dict], Awaitable[None]]] = {}
 
     # ------------------------------------------------------------------ 连接管理
-    def register(self, user_id: str, send: Send) -> BrowserSession:
-        """登记一个浏览器连接,返回会话句柄。"""
-        sess = BrowserSession(user_id=user_id, send=send)
+    def register(
+        self, user_id: str, send: Send, device_id: str | None = None
+    ) -> BrowserSession:
+        """登记一个浏览器连接,返回会话句柄。device_id 用于多设备配对识别。"""
+        sess = BrowserSession(user_id=user_id, send=send, device_id=device_id)
         self._sessions[user_id].append(sess)
         return sess
 
@@ -137,8 +139,19 @@ class BrowserBridge:
             return raw
         return json.dumps(raw, ensure_ascii=False)
 
-    def deliver_step_update(self, call_id: str, step_data: Any) -> None:
-        """端侧 STEP_UPDATE / TOOL_PROGRESS 回传:通知进度监听者。"""
+    def deliver_step_update(
+        self, call_id: str, step_data: Any, *, user_id: str | None = None
+    ) -> bool:
+        """端侧 STEP_UPDATE / TOOL_PROGRESS 回传:通知进度监听者。
+
+        user_id 给定时校验该在途调用归属(防跨用户伪造进度);返回是否受理。
+        """
+        entry = self._pending.get(call_id)
+        if entry is None:
+            return False
+        owner, _ = entry
+        if user_id is not None and owner != user_id:
+            return False
         cb = self._progress_listeners.get(call_id)
         if cb is not None:
             if isinstance(step_data, str):
@@ -148,15 +161,37 @@ class BrowserBridge:
             else:
                 step_obj = {"data": step_data}
             _spawn(cb(step_obj))
+        return True
 
-    def deliver_result(self, call_id: str, result: Any) -> None:
-        """端侧 TOOL_RESULT 回传:解析对应 future(未知 call_id 忽略)。"""
+    def deliver_result(
+        self, call_id: str, result: Any, *, user_id: str | None = None
+    ) -> bool:
+        """端侧 TOOL_RESULT 回传:解析对应 future。
+
+        未知 call_id 忽略;user_id 给定时校验归属,跨用户回传直接丢弃,
+        防止已连接的浏览器伪造他人在途动作的结果。返回是否受理。
+        """
         entry = self._pending.get(call_id)
         if entry is None:
-            return
-        _, fut = entry
+            return False
+        owner, fut = entry
+        if user_id is not None and owner != user_id:
+            return False
         if not fut.done():
             fut.set_result(result)
+        return True
+
+    def sessions_info(self, user_id: str) -> list[dict[str, Any]]:
+        """该用户当前浏览器连接自省(device/活跃 Tab/最近 seen),供排障端点使用。"""
+        now = time.monotonic()
+        return [
+            {
+                "device_id": s.device_id,
+                "active_tab": s.active_tab,
+                "idle_seconds": round(now - s.last_seen, 1),
+            }
+            for s in self._sessions.get(user_id, ())
+        ]
 
     # ------------------------------------------------------------------ 活跃 Tab
     def set_active_tab(self, user_id: str, sess: BrowserSession, tab: dict | None) -> None:

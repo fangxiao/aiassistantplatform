@@ -23,13 +23,17 @@ class ChatError(Exception):
 
 
 def resource_ids_from_plugin(plugin: Plugin) -> list[str]:
-    """插件可调用的资源 id:depends_on(取 id 部分)+ 自有 skills/tools。"""
+    """插件可调用的资源 id:depends_on(取 id 部分)+ 自有 skills/tools。
+
+    去重保序:可选依赖(T11.10,dep 以 '?' 结尾)与插件本地同名回退实现
+    指向同一 id,resolve() 按"公共优先、私有回退"选出实际执行版本。
+    """
     m = plugin.manifest or {}
     ids = [split_dependency(d)[0] for d in m.get("depends_on", [])]
     for section in ("skills", "tools"):
         for r in m.get(section, []):
             ids.append(r["id"])
-    return ids
+    return list(dict.fromkeys(ids))
 
 
 async def make_llm_client(session: AsyncSession, model: str | None) -> OpenAIClient:

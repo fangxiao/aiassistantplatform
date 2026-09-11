@@ -12,8 +12,10 @@ from agentplatform.core.registry.service import (
     check_dependencies,
     latest_of_each,
     list_public,
+    parse_dependency,
     register,
     resolve,
+    resolve_public,
     split_dependency,
 )
 
@@ -149,3 +151,90 @@ class TestDependencies:
     def test_split_dependency(self) -> None:
         assert split_dependency("tool:pdf_parse@^1.0") == ("tool:pdf_parse", "^1.0")
         assert split_dependency("tool:pdf_parse") == ("tool:pdf_parse", None)
+
+    def test_parse_optional_dependency(self) -> None:
+        parsed = parse_dependency("tool:html_cleaner@^1.0?")
+        assert parsed.resource_id == "tool:html_cleaner"
+        assert parsed.constraint == "^1.0"
+        assert parsed.optional is True
+        assert split_dependency("tool:html_cleaner@^1.0?") == (
+            "tool:html_cleaner",
+            "^1.0",
+        )
+        assert parse_dependency("tool:pdf_parse@^1.0").optional is False
+
+    async def test_optional_missing_does_not_block(self, session: AsyncSession) -> None:
+        await _seed(session)
+        # 可选依赖平台缺失 + 一个必选依赖满足 → 不报缺失
+        missing = await check_dependencies(
+            session,
+            ["tool:pdf_parse@^1.0", "tool:html_cleaner@^1.0?"],
+        )
+        assert missing == []
+
+    async def test_private_resource_does_not_satisfy_required(self, session: AsyncSession) -> None:
+        await register(
+            session,
+            resource_id="tool:only_private",
+            kind=K.tool,
+            name="only_private",
+            version="2.0.0",
+            source=S.private,
+            schema_={"parameters": {"type": "object"}},
+            description="他人插件私有工具",
+        )
+        await session.commit()
+        # 必选依赖:其他插件的私有资源不算满足
+        missing = await check_dependencies(session, ["tool:only_private@^2.0"])
+        assert missing == ["tool:only_private@^2.0"]
+        assert await resolve_public(session, "tool:only_private") is None
+
+    async def test_resolve_prefers_public_over_higher_private(
+        self, session: AsyncSession
+    ) -> None:
+        """同名资源:平台公共版优先,即使私有实现版本号更高(T11.10 回退基础)。"""
+        await register(
+            session,
+            resource_id="tool:html_cleaner",
+            kind=K.tool,
+            name="html_cleaner",
+            version="1.0.0",
+            source=S.builtin,
+            schema_={"parameters": {"type": "object"}},
+            description="平台版",
+        )
+        await register(
+            session,
+            resource_id="tool:html_cleaner",
+            kind=K.tool,
+            name="html_cleaner",
+            version="2.5.0",
+            source=S.private,
+            schema_={"parameters": {"type": "object"}},
+            description="插件本地回退实现(更高版本号也不能顶掉平台版)",
+        )
+        await session.commit()
+        resolved = await resolve(session, "tool:html_cleaner")
+        assert resolved is not None
+        assert resolved.source == S.builtin
+        assert resolved.version == "1.0.0"
+
+    async def test_resolve_falls_back_to_private_when_public_absent(
+        self, session: AsyncSession
+    ) -> None:
+        """平台无公共版时,resolve 回退到插件本地同名实现。"""
+        await register(
+            session,
+            resource_id="tool:html_cleaner",
+            kind=K.tool,
+            name="html_cleaner",
+            version="0.9.0",
+            source=S.private,
+            schema_={"parameters": {"type": "object"}},
+            description="插件本地回退实现",
+        )
+        await session.commit()
+        resolved = await resolve(session, "tool:html_cleaner", "^0.9")
+        assert resolved is not None
+        assert resolved.source == S.private
+        assert resolved.version == "0.9.0"

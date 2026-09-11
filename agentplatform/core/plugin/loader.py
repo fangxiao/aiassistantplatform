@@ -89,6 +89,18 @@ async def _register_resource(
         target_file.write_text(res.code, encoding="utf-8")
         impl_path = str(target_file.resolve())
 
+    # T11.10:本地回退实现允许与可选依赖同 id(不同版本共存,运行时公共优先解析),
+    # 但同 (id, version) 撞键会经 register() 覆盖平台公共资源,必须提前拒绝。
+    existing_pk = await session.get(SkillTool, (res.id, manifest.version))
+    if existing_pk is not None and existing_pk.source in (
+        SkillToolSource.builtin,
+        SkillToolSource.shared,
+    ):
+        raise PluginValidationError(
+            f"自有资源 {res.id}@{manifest.version} 与平台公共资源撞 id+version,"
+            "回退实现请使用插件自身版本号"
+        )
+
     await register(
         session,
         resource_id=res.id,

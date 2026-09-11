@@ -58,6 +58,72 @@ class TestRegistry:
         bridge.unregister("user-1", sb)
         assert not bridge.is_connected("user-1")
 
+    async def test_register_with_device_id_and_sessions_info(self) -> None:
+        bridge = BrowserBridge()
+
+        async def fake_send(msg: dict) -> None:
+            pass
+
+        sess = bridge.register("user-1", fake_send, device_id="dev-42")
+        assert sess.device_id == "dev-42"
+        info = bridge.sessions_info("user-1")
+        assert len(info) == 1
+        assert info[0]["device_id"] == "dev-42"
+        assert "active_tab" in info[0] and "idle_seconds" in info[0]
+        assert bridge.sessions_info("user-unknown") == []
+
+
+class TestDeliveryAuth:
+    """T11.11:TOOL_RESULT/PROGRESS 回传的跨用户归属校验。"""
+
+    async def test_deliver_result_rejects_cross_user(self) -> None:
+        bridge = BrowserBridge()
+
+        async def fake_send(msg: dict) -> None:
+            pass
+
+        bridge.register("user-1", fake_send)
+        call_id = "call_auth_1"
+        route_task = asyncio.create_task(
+            bridge.route_to_endpoint("user-1", SAMPLE_ACTION, {}, call_id=call_id, timeout=2)
+        )
+        await asyncio.sleep(0.02)  # 等待 TOOL_CALL 下发、pending 登记
+
+        # 另一用户的浏览器试图伪造该在途调用的结果 → 拒绝
+        assert bridge.deliver_result(call_id, {"fake": True}, user_id="user-2") is False
+        # 属主正常回传 → 受理
+        assert bridge.deliver_result(call_id, {"ok": True}, user_id="user-1") is True
+        result = await route_task
+        assert json.loads(result) == {"ok": True}
+
+    async def test_deliver_step_update_rejects_cross_user(self) -> None:
+        bridge = BrowserBridge()
+        received: list[dict] = []
+
+        async def on_step(data: dict) -> None:
+            received.append(data)
+
+        async def fake_send(msg: dict) -> None:
+            pass
+
+        bridge.register("user-1", fake_send)
+        call_id = "call_step_1"
+        route_task = asyncio.create_task(
+            bridge.route_to_endpoint(
+                "user-1", SAMPLE_ACTION, {}, call_id=call_id, timeout=2, on_progress=on_step
+            )
+        )
+        await asyncio.sleep(0.02)
+        assert bridge.deliver_step_update(
+            call_id, {"message": "spam"}, user_id="user-2"
+        ) is False
+        assert bridge.deliver_step_update(
+            call_id, {"message": "reading"}, user_id="user-1"
+        ) is True
+        bridge.deliver_result(call_id, {"ok": True}, user_id="user-1")
+        await route_task
+        assert received == [{"message": "reading"}]
+
 
 class TestRouting:
     """route_to_endpoint / deliver_result"""
