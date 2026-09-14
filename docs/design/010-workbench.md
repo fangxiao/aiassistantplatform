@@ -40,9 +40,10 @@ page.tsx(ChatHome)
 
 - **待办卡**(TodoCard):localStorage `workbench_todos`,纯本地,UI 资产与业务资产分离的
   首个落地——本地不作为业务权威,迁云端表零包袱(需求 §数据分域原则)。
-- **简报卡**(BriefingCard):按钮触发;前端聚合 kb 规模/连接器状态注入 prompt →
-  createSession + sendMessage 流式生成;产出可「存入知识库」(source.app=workbench)
-  或「继续追问」(跳对话视图,简报会话保留可续)。非定时推送,主动唤醒留 P2。
+- **简报卡**(BriefingCard):按钮触发;前端聚合 kb 规模/连接器状态/**未完成待办**
+  (T14.5 联动,TodoCard 云端化后同源可读)注入 prompt → createSession + sendMessage
+  流式生成;产出可「存入知识库」(source.app=workbench)或「继续追问」(跳对话视图,
+  简报会话保留可续)。非定时推送,主动唤醒留 P2。
 
 ## 3.1 待办云端化与 AI 联动(P1.5 · 2026-09-14)
 

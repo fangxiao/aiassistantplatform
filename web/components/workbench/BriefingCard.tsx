@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { apiGet } from "../../lib/api/client";
 import { createSession, sendMessage } from "../../lib/api/chat";
 import { listKbs, listSources, type DataSourceInfo } from "../../lib/api/kb";
 import type { KbInfo } from "../../lib/types";
@@ -38,6 +39,16 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
           }
         })
       );
+      // 待办(T14.5 联动):未完成事项注入简报,提醒用户
+      let pending: { count: number; items: string[] } = { count: 0, items: [] };
+      try {
+        const todos = await apiGet<{ id: string; text: string; done: boolean }[]>("/workbench/todos");
+        const open = todos.filter((t) => !t.done);
+        pending = { count: open.length, items: open.slice(0, 5).map((t) => t.text) };
+      } catch {
+        /* 待办拉取失败不阻断简报 */
+      }
+
       const payload = {
         date: new Date().toLocaleDateString("zh-CN"),
         kbs: kbs.map((k) => ({ name: k.name, docs: k.doc_count, chunks: k.chunk_count })),
@@ -47,14 +58,16 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
           last_sync_at: s.last_sync_at,
           error: s.last_error,
         })),
+        pending_todos: pending,
       };
 
       // 2. 复用会话链路:新建会话(默认助手)发送聚合 prompt,流式接收
       const session = await createSession();
       setSid(session.id);
       const prompt =
-        `你是平台工作台助手。请根据以下平台动态数据生成一段中文每日简报(150 字以内),` +
-        `包含:①知识库概览;②需要关注的异常(同步失败/部分失败,指出是哪个源与原因);③1-2 条行动建议。` +
+        `你是平台工作台助手。请根据以下平台动态数据生成一段中文每日简报(180 字以内),` +
+        `包含:①知识库概览;②需要关注的异常(同步失败/部分失败,指出是哪个源与原因);` +
+        `③未完成待办提醒(pending_todos,有则点出最紧要的 1-2 条);④1-2 条行动建议。` +
         `直接输出简报正文,不要开场白。数据:\n${JSON.stringify(payload)}`;
 
       let acc = "";
