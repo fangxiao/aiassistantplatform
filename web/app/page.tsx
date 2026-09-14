@@ -6,6 +6,7 @@ import Composer from "../components/chat/Composer";
 import MessageList from "../components/chat/MessageList";
 import { Navbar } from "../components/layout/Navbar";
 import { WorkbenchView } from "../components/workbench/WorkbenchView";
+import { NewSessionModal } from "../components/workbench/NewSessionModal";
 import { SessionDrawer } from "../components/chat/SessionDrawer";
 import { KbMountModal } from "../components/chat/KbMountModal";
 import { SaveToKbModal } from "../components/chat/SaveToKbModal";
@@ -45,6 +46,8 @@ function ChatHome() {
   const [streaming, setStreaming] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
   const [showAsstModal, setShowAsstModal] = useState(false);
+  // M14:"新会话"是选择意图而非制造记录——无明确助手时弹选择器,取消不留垃圾会话
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   // M14 双视图:工作台 | 对话;两视图常驻挂载(hidden 切换),对话流式不因切换中断
   const [view, setView] = useState<"workbench" | "chat">(() => {
     if (typeof window === "undefined") return "workbench";
@@ -307,8 +310,19 @@ function ChatHome() {
           assistants={assistants}
           sessions={sessions}
           onNewSession={(assistantId) => {
-            void handleCreateSession(assistantId ?? null);
-            switchView("chat");
+            if (assistantId) {
+              // 助手卡直达:语境已明确,无需再选
+              void handleCreateSession(assistantId);
+              switchView("chat");
+              return;
+            }
+            if (assistants.length <= 1) {
+              // 助手少时不弹层,别为一个选择多一次点击
+              void handleCreateSession(assistants[0]?.id ?? null);
+              switchView("chat");
+              return;
+            }
+            setShowNewSessionModal(true);
           }}
           onContinue={(sessionId) => {
             const s = sessions.find((x) => x.id === sessionId);
@@ -440,6 +454,19 @@ function ChatHome() {
           <Composer onSend={handleSend} disabled={streaming} />
         </main>
       </div>
+
+      {/* 新会话助手选择器(M14) */}
+      {showNewSessionModal && (
+        <NewSessionModal
+          assistants={assistants}
+          onPick={(assistantId) => {
+            setShowNewSessionModal(false);
+            void handleCreateSession(assistantId);
+            switchView("chat");
+          }}
+          onClose={() => setShowNewSessionModal(false)}
+        />
+      )}
 
       {/* Session KB Mount Modal (M12) */}
       {showKbModal && current && (
