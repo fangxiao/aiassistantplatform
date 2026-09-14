@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Composer from "../components/chat/Composer";
 import MessageList from "../components/chat/MessageList";
 import { Navbar } from "../components/layout/Navbar";
+import { WorkbenchView } from "../components/workbench/WorkbenchView";
 import { SessionDrawer } from "../components/chat/SessionDrawer";
 import { KbMountModal } from "../components/chat/KbMountModal";
 import { SaveToKbModal } from "../components/chat/SaveToKbModal";
@@ -44,6 +45,15 @@ function ChatHome() {
   const [streaming, setStreaming] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
   const [showAsstModal, setShowAsstModal] = useState(false);
+  // M14 双视图:工作台 | 对话;两视图常驻挂载(hidden 切换),对话流式不因切换中断
+  const [view, setView] = useState<"workbench" | "chat">(() => {
+    if (typeof window === "undefined") return "workbench";
+    return (localStorage.getItem("workbench_view") as "workbench" | "chat") || "workbench";
+  });
+  const switchView = (v: "workbench" | "chat") => {
+    setView(v);
+    localStorage.setItem("workbench_view", v);
+  };
   const [showKbModal, setShowKbModal] = useState(false);
   // 会话产出收藏(设计 008 §11):记录待收藏正文与来源
   const [kbSaveTarget, setKbSaveTarget] = useState<{ content: string; source: { app: string; session_id?: string; message_id?: string } } | null>(null);
@@ -270,7 +280,47 @@ function ChatHome() {
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navbar />
 
-      <div className="flex flex-1 overflow-hidden">
+      {/* M14 视图切换条 */}
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-slate-200 bg-white px-4">
+        {(
+          [
+            { key: "workbench", label: "🏠 工作台" },
+            { key: "chat", label: "💬 对话" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => switchView(t.key)}
+            className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
+              view === t.key ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 工作台视图(常驻挂载,hidden 切换) */}
+      <div className={view === "workbench" ? "flex-1 overflow-hidden" : "hidden"}>
+        <WorkbenchView
+          assistants={assistants}
+          sessions={sessions}
+          onNewSession={(assistantId) => {
+            void handleCreateSession(assistantId ?? null);
+            switchView("chat");
+          }}
+          onContinue={(sessionId) => {
+            const s = sessions.find((x) => x.id === sessionId);
+            if (s) void selectSession(s);
+            switchView("chat");
+          }}
+          onOpenKb={() => router.push("/kb")}
+        />
+      </div>
+
+      {/* 对话视图(常驻挂载,hidden 切换) */}
+      <div className={view === "chat" ? "flex flex-1 overflow-hidden" : "hidden"}>
         {/* 左侧会话抽屉 */}
         <SessionDrawer
           sessions={sessions}
