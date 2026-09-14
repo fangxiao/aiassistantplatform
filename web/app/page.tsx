@@ -316,6 +316,9 @@ function ChatHome() {
             switchView("chat");
           }}
           onOpenKb={() => router.push("/kb")}
+          onSaveToKb={(content) =>
+            setKbSaveTarget({ content, source: { app: "workbench", session_id: undefined } })
+          }
         />
       </div>
 

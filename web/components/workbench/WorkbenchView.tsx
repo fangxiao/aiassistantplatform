@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { listKbs, listSources, type DataSourceInfo } from "../../lib/api/kb";
+import { TodoCard } from "./TodoCard";
+import { BriefingCard } from "./BriefingCard";
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
 
 /** 个人工作台视图(M14 · 设计 010):今日概览 dashboard。
@@ -13,6 +15,7 @@ interface Props {
   onNewSession: (assistantId?: string) => void;
   onContinue: (sessionId: string) => void;
   onOpenKb: () => void;
+  onSaveToKb: (content: string) => void;
 }
 
 function greeting(): string {
@@ -32,7 +35,7 @@ const SYNC_META: Record<string, { label: string; dot: string }> = {
   failed: { label: "同步失败", dot: "bg-rose-500" },
 };
 
-export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, onOpenKb }: Props) {
+export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, onOpenKb, onSaveToKb }: Props) {
   return (
     <div className="h-full overflow-y-auto bg-slate-50">
       <div className="mx-auto max-w-5xl px-6 py-8">
@@ -55,6 +58,10 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
+          {/* 我的待办(P1) + 每日简报(P1) */}
+          <TodoCard />
+          <BriefingCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
+
           {/* 我的助手 */}
           <Card title="🤖 我的助手" action={{ label: "新会话", onClick: () => onNewSession() }}>
             {assistants.length === 0 ? (

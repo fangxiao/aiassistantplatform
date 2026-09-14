@@ -36,7 +36,15 @@ page.tsx(ChatHome)
 - 每卡片独立 loading/error,互不阻塞(需求 NFR);
 - 知识库动态轮询复用 2.5s 仅当存在 running 同步或中间态文档。
 
-## 3. 不做的事(P0 红线)
+## 3. P1 实现(2026-09-14)
+
+- **待办卡**(TodoCard):localStorage `workbench_todos`,纯本地,UI 资产与业务资产分离的
+  首个落地——本地不作为业务权威,迁云端表零包袱(需求 §数据分域原则)。
+- **简报卡**(BriefingCard):按钮触发;前端聚合 kb 规模/连接器状态注入 prompt →
+  createSession + sendMessage 流式生成;产出可「存入知识库」(source.app=workbench)
+  或「继续追问」(跳对话视图,简报会话保留可续)。非定时推送,主动唤醒留 P2。
+
+## 4. 不做的事(P0/P1 红线)
 
 - 零后端改动;零新表;待办/简报留 P1(本地存储/按钮触发);
 - 对话视图内部逻辑一律不动。
