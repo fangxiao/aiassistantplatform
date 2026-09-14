@@ -318,6 +318,36 @@ async def test_resolve_allowed_plugin_public_dep_only(session, dev_user, normal_
     assert allowed2 == []
 
 
+async def test_resolve_allowed_plugin_mounted_published(session, dev_user, normal_user):
+    """T12.17 助手运行时挂载:已发布 public 进 allowed;事后转 private 自动失效。"""
+    from agentplatform.core.kb.model import KbVisibility
+
+    pub = await kb_service.create_kb(
+        session, name="plug_pub", slug="plug_pub", owner=dev_user,
+        visibility=KbVisibility.public,
+    )
+    await register(
+        session, resource_id="kb:plug_pub", kind=SkillToolKind.kb,
+        name="plug_pub", version="1.0.0", source=SkillToolSource.shared,
+        schema_={}, impl_path=None, description="",
+    )
+
+    allowed = await resolve_allowed_kb_ids(
+        session, mounted_kb_ids=[], plugin_manifest=None,
+        plugin_mounted_kb_ids=[pub.id],
+    )
+    assert allowed == [pub.id]
+
+    # 库被转为 private:助手挂载不享受会话挂载的"可读豁免",全部助手会话立即失效
+    pub.visibility = KbVisibility.private
+    await session.flush()
+    allowed2 = await resolve_allowed_kb_ids(
+        session, mounted_kb_ids=[], plugin_manifest=None,
+        plugin_mounted_kb_ids=[pub.id],
+    )
+    assert allowed2 == []
+
+
 # ---------------------------------------------------------------- pipeline(验收 1 前半)
 
 
@@ -579,3 +609,63 @@ async def session_user_dev(session, client):
     row.role = UserRole.developer
     await session.commit()
     return row
+
+
+async def test_api_plugin_mounted_kbs_flow(session, client, dev_user, normal_user):
+    """T12.17 助手挂载全链路:仅 public 可挂(不需发布登记)、developer 鉴权、重部署保留。"""
+    _act_as(client, dev_user)
+
+    # 1. 部署助手
+    name = f"kb-mount-{uuid.uuid4().hex[:8]}"
+    manifest = {
+        "name": name, "version": "0.1.0", "description": "挂载测试助手",
+        "model": "glm-5.3-flash", "depends_on": [], "skills": [], "tools": [],
+    }
+    r = await client.post("/api/plugins/deploy", json=manifest)
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["mounted_kb_ids"] == []
+
+    # 2. private 库(未发布)→ 404
+    priv = await _make_kb(session, dev_user, slug=f"priv_{uuid.uuid4().hex[:8]}")
+    r = await client.put(f"/api/plugins/{pid}/mounted-kbs", json={"kb_ids": [str(priv.id)]})
+    assert r.status_code == 404
+
+    # 3. public 但未发布(注册表无 kb: 行)同样可挂载——public 即全员可读
+    unpub = await kb_service.create_kb(
+        session, name="unpub", slug=f"unpub_{uuid.uuid4().hex[:8]}",
+        owner=dev_user, visibility=kb_service.KbVisibility.public,
+    )
+    r = await client.put(f"/api/plugins/{pid}/mounted-kbs", json={"kb_ids": [str(unpub.id)]})
+    assert r.status_code == 200, r.text
+    assert r.json()["mounted_kb_ids"] == [str(unpub.id)]
+
+    # 4. 已发布 public 库可挂载;助手详情/公共库列表均可见
+    pub = await kb_service.create_kb(
+        session, name="pubmount", slug=f"pub_{uuid.uuid4().hex[:8]}",
+        owner=dev_user, visibility=kb_service.KbVisibility.public,
+    )
+    assert (await client.post(f"/api/kb/kbs/{pub.id}/publish")).status_code == 200
+    r = await client.put(
+        f"/api/plugins/{pid}/mounted-kbs", json={"kb_ids": [str(pub.id), str(unpub.id)]}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["mounted_kb_ids"] == [str(pub.id), str(unpub.id)]
+    listed = await client.get("/api/assistants")
+    assert any(a["id"] == pid and a["mounted_kb_ids"] == [str(pub.id), str(unpub.id)]
+               for a in listed.json())
+    public_list = await client.get("/api/kb/public")
+    public_ids = {k["id"] for k in public_list.json()}
+    assert {str(pub.id), str(unpub.id)} <= public_ids
+
+    # 5. 普通用户无权挂载(403)
+    _act_as(client, normal_user)
+    r = await client.put(f"/api/plugins/{pid}/mounted-kbs", json={"kb_ids": []})
+    assert r.status_code == 403
+
+    # 6. ADR 0007 同名重部署保留 mounted_kb_ids
+    _act_as(client, dev_user)
+    r = await client.post("/api/plugins/deploy", json={**manifest, "version": "0.2.0"})
+    assert r.status_code == 201, r.text
+    assert r.json()["id"] == pid
+    assert r.json()["mounted_kb_ids"] == [str(pub.id), str(unpub.id)]

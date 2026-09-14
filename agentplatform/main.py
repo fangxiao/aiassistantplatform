@@ -49,7 +49,12 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
         logger.warning("内置资源补种跳过: %s", exc)
     await kb_pipeline.start_worker()
+    # M13:连接器轮询调度器(启动即扫一轮,重启恢复;设计 009 §6)
+    from agentplatform.core.kb.connectors import scheduler as connector_scheduler
+
+    connector_scheduler.start()
     yield
+    await connector_scheduler.stop()
     await kb_pipeline.stop_worker()
     reaper.cancel()
 

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "../../components/layout/Navbar";
 import { KbMembersModal } from "../../components/kb/KbMembersModal";
+import { DataSourcesPanel } from "../../components/kb/DataSourcesPanel";
 import { isAuthed, getUser } from "../../lib/api/auth";
 import {
   createKb,
@@ -432,6 +433,9 @@ export default function KbPage() {
               </div>
             ) : (
               <>
+                {/* 数据源(内容型连接器,M13) */}
+                <DataSourcesPanel kbId={selected.id} canManage={!!selected.can_manage} onChanged={() => void refreshKbs(selected.id)} />
+
                 {/* 文档列表 */}
                 <div className="rounded-2xl border border-slate-200 bg-white shadow-xs">
                   <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
@@ -475,6 +479,7 @@ export default function KbPage() {
                         <tr>
                           <th className="px-5 py-3">文件名</th>
                           <th className="px-4 py-3">大小</th>
+                          <th className="px-4 py-3">创建时间</th>
                           <th className="px-4 py-3">状态</th>
                           <th className="px-5 py-3 text-right">操作</th>
                         </tr>
@@ -495,6 +500,17 @@ export default function KbPage() {
                                       会话{doc.source_app ? `·${doc.source_app}` : ""}
                                     </span>
                                   )}
+                                  {doc.origin === "connector" && (
+                                    <a
+                                      href={doc.external_url ?? undefined}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="shrink-0 rounded bg-sky-50 border border-sky-200 px-1.5 py-0.2 text-[9px] font-medium text-sky-700 hover:bg-sky-100"
+                                      title={doc.external_url ? `来自数据源 ${doc.source_app ?? ""}，点击打开原文` : "连接器同步"}
+                                    >
+                                      🔗{doc.source_app ?? "连接器"}
+                                    </a>
+                                  )}
                                 </div>
                                 <div className="font-mono text-[10px] text-slate-400">{doc.mime}</div>
                                 {doc.status === "failed" && doc.error && (
@@ -504,8 +520,26 @@ export default function KbPage() {
                                 )}
                               </td>
                               <td className="px-4 py-3 text-slate-500">{fmtSize(doc.size_bytes)}</td>
+                              <td className="px-4 py-3 text-slate-500 text-[11px]">
+                                {doc.created_at ? new Date(doc.created_at).toLocaleString("zh-CN") : "-"}
+                              </td>
                               <td className="px-4 py-3">
-                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}
+                                  title={
+                                    doc.status === "ready"
+                                      ? "解析、切分、向量化均已完成，可被智能体检索引用"
+                                      : doc.status === "pending"
+                                        ? "已入库，等待后台处理"
+                                        : doc.status === "parsing"
+                                          ? "正在解析原文"
+                                          : doc.status === "embedding"
+                                            ? "正在调用 embedding 模型向量化"
+                                            : doc.status === "failed"
+                                              ? "处理失败，可重试"
+                                              : undefined
+                                  }
+                                >
                                   {meta.label}
                                 </span>
                               </td>

@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     kb_chunk_tokens: int = 512  # 切分目标长度
     kb_chunk_overlap_tokens: int = 50  # 切分重叠
     kb_search_top_k: int = 5  # kb_search 默认返回条数
+    # 内容型连接器(M13,设计 009):网页抓取边界与调度节奏
+    connector_fetch_timeout_s: int = 15  # 单页请求超时
+    connector_max_page_bytes: int = 5 * 1024 * 1024  # 单页正文上限
+    connector_max_pages: int = 200  # 单次同步页数上限(配置可调小,不可超此硬顶)
+    connector_concurrency: int = 4  # 单源同步并发抓取数
+    connector_user_agent: str = "AgentPlatformConnector/0.1 (+https://ailearning.top/bot)"
+    connector_scheduler_tick_seconds: int = 60  # 调度器扫描间隔
     kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 

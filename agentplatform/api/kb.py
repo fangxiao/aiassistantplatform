@@ -8,7 +8,7 @@ import json
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,13 @@ from agentplatform.core.auth.model import User, UserRole
 from agentplatform.core.db.session import get_session
 from agentplatform.core.kb import pipeline as kb_pipeline
 from agentplatform.core.kb import service as kb_service
-from agentplatform.core.kb.model import KbDocument, KbVisibility, KnowledgeBase
+from agentplatform.core.kb.connectors import service as connector_service
+from agentplatform.core.kb.model import (
+    KbDataSource,
+    KbDocument,
+    KbVisibility,
+    KnowledgeBase,
+)
 from agentplatform.core.kb.search_tool import run_kb_search
 from agentplatform.core.llm.embeddings import resolve_embedding_endpoint
 from agentplatform.core.registry.model import SkillToolKind, SkillToolSource
@@ -53,6 +59,7 @@ class KbOut(BaseModel):
     chunk_count: int
     size_bytes: int
     can_write: bool = False  # 服务端计算(设计 008 §11.2),前端渲染收藏目标
+    can_manage: bool = False  # 服务端计算(§12.2),数据源/成员等管理入口渲染用
 
 
 class KbDocOut(BaseModel):
@@ -69,6 +76,8 @@ class KbDocOut(BaseModel):
     source_app: str | None = None
     source_session_id: str | None = None
     source_message_id: str | None = None
+    external_url: str | None = None  # 连接器文档的原文链接(设计 009)
+    created_at: datetime | None = None
 
 
 class KbSearchIn(BaseModel):
@@ -78,6 +87,56 @@ class KbSearchIn(BaseModel):
 
 class KbPublishIn(BaseModel):
     version: str | None = None  # 缺省自动 bump patch
+
+
+class DataSourceCreate(BaseModel):
+    """新建数据源(连接器;设计 009 §7)。credentials 仅请求时可见,响应不回显。"""
+
+    type: str
+    name: str = Field(min_length=1, max_length=100)
+    config: dict = {}
+    credentials: dict | None = None
+    poll_interval_minutes: int | None = Field(default=None, ge=1)
+
+
+class DataSourceUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    config: dict | None = None
+    credentials: dict | None = None  # 传入则整体替换;不传保持不变
+    poll_interval_minutes: int | None = Field(default=None, ge=1)
+    status: str | None = None  # active / disabled
+
+
+class DataSourceOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    kb_id: uuid.UUID
+    type: str
+    name: str
+    config: dict
+    poll_interval_minutes: int | None
+    status: str
+    last_sync_at: datetime | None
+    last_status: str
+    last_error: str | None
+    created_at: datetime
+
+
+class SyncRunOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    data_source_id: uuid.UUID
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    added: int
+    updated: int
+    deleted: int
+    skipped: int
+    failed_docs: int
+    error: str | None
 
 
 class KbMemberAddIn(BaseModel):
@@ -113,6 +172,7 @@ class KbDocFromTextIn(BaseModel):
 async def _kb_out(db: AsyncSession, kb: KnowledgeBase, user: User) -> KbOut:
     out = KbOut.model_validate(kb)
     out.can_write = await kb_service.can_write(db, kb, user)
+    out.can_manage = kb_service.can_manage(kb, user)
     return out
 
 
@@ -138,6 +198,16 @@ async def list_kbs(
 ) -> list[KbOut]:
     """当前用户可见库(private 自己 + public)。"""
     rows = await kb_service.list_visible_kbs(db, str(user.id))
+    return [await _kb_out(db, r, user) for r in rows]
+
+
+@router.get("/public", response_model=list[KbOut])
+async def list_public(
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[KbOut]:
+    """全员可读的公共库清单(助手挂载弹窗候选项;设计 008 §4.3)。"""
+    rows = await kb_service.list_public_kbs(db)
     return [await _kb_out(db, r, user) for r in rows]
 
 
@@ -424,3 +494,165 @@ def _bump_version(version: str) -> str:
         return ".".join(str(p) for p in parts)
     except ValueError:
         return "0.0.1"
+
+
+# ---------------------------------------------------------------- 数据源(连接器,设计 009 §7)
+
+
+async def _get_manageable_kb(
+    kb_id: uuid.UUID, db: AsyncSession, user: User
+) -> KnowledgeBase:
+    """数据源管理鉴权:库须存在且当前用户有管理权(private/shared=owner,public=developer)。"""
+    kb = await kb_service.get_kb(db, kb_id)
+    if kb is None or not kb_service.can_manage(kb, user):
+        raise HTTPException(
+            status_code=404, detail={"code": "not_found", "message": "知识库不存在或无管理权"}
+        )
+    return kb
+
+
+async def _get_source(
+    kb_id: uuid.UUID, source_id: uuid.UUID, db: AsyncSession, user: User
+) -> tuple[KnowledgeBase, KbDataSource]:
+    kb = await _get_manageable_kb(kb_id, db, user)
+    source = await connector_service.get_source(db, kb_id, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "not_found", "message": "数据源不存在"}
+        )
+    return kb, source
+
+
+def _source_out(source: KbDataSource) -> DataSourceOut:
+    """enum -> value 手动序列化(避免 str-subclass enum 序列化歧义);不回显凭据。"""
+    return DataSourceOut(
+        id=source.id,
+        kb_id=source.kb_id,
+        type=source.type.value,
+        name=source.name,
+        config=source.config or {},
+        poll_interval_minutes=source.poll_interval_minutes,
+        status=source.status,
+        last_sync_at=source.last_sync_at,
+        last_status=source.last_status.value,
+        last_error=source.last_error,
+        created_at=source.created_at,
+    )
+
+
+@router.post("/kbs/{kb_id}/sources", response_model=DataSourceOut, status_code=201)
+async def create_source(
+    kb_id: uuid.UUID,
+    payload: DataSourceCreate,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> DataSourceOut:
+    """新建数据源(连接器);type 白名单与配置校验在 service 层。"""
+    kb = await _get_manageable_kb(kb_id, db, user)
+    try:
+        source = await connector_service.create_source(
+            db,
+            kb.id,
+            source_type=payload.type,
+            name=payload.name,
+            config=payload.config,
+            credentials=payload.credentials,
+            poll_interval_minutes=payload.poll_interval_minutes,
+        )
+    except kb_service.KbError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return _source_out(source)
+
+
+@router.get("/kbs/{kb_id}/sources", response_model=list[DataSourceOut])
+async def list_sources(
+    kb_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[DataSourceOut]:
+    """数据源列表(可读者即可见,管理权只在写操作校验)。"""
+    kb = await _get_visible_kb(kb_id, db, user)
+    return [_source_out(s) for s in await connector_service.list_sources(db, kb.id)]
+
+
+@router.patch("/kbs/{kb_id}/sources/{source_id}", response_model=DataSourceOut)
+async def update_source(
+    kb_id: uuid.UUID,
+    source_id: uuid.UUID,
+    payload: DataSourceUpdate,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> DataSourceOut:
+    """改配置/启停;config 变更整体替换并重新校验。"""
+    _kb, source = await _get_source(kb_id, source_id, db, user)
+    if payload.name is not None:
+        source.name = payload.name.strip() or source.name
+    if payload.config is not None:
+        try:
+            connector_service.validate_config(source.type.value, payload.config)
+        except kb_service.KbError as exc:
+            raise _http_error(exc) from exc
+        source.config = payload.config
+    if payload.credentials is not None:
+        source.credentials_enc = connector_service._encrypt_credentials(payload.credentials)
+    if payload.poll_interval_minutes is not None or "poll_interval_minutes" in payload.model_fields_set:
+        source.poll_interval_minutes = payload.poll_interval_minutes
+    if payload.status is not None:
+        if payload.status not in ("active", "disabled"):
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": "status 仅支持 active/disabled"},
+            )
+        source.status = payload.status
+    await db.commit()
+    return _source_out(source)
+
+
+@router.delete("/kbs/{kb_id}/sources/{source_id}", status_code=204)
+async def delete_source(
+    kb_id: uuid.UUID,
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """删除数据源(已同步文档保留为库资产,需求 U8)。"""
+    _kb, source = await _get_source(kb_id, source_id, db, user)
+    await db.delete(source)
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/kbs/{kb_id}/sources/{source_id}/sync", status_code=202)
+async def sync_source(
+    kb_id: uuid.UUID,
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """立即同步(后台执行,轮询 runs 获取结果);正在同步时 400。"""
+    _kb, source = await _get_source(kb_id, source_id, db, user)
+    try:
+        run = await connector_service.trigger_sync(db, source)
+    except kb_service.KbError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return {"run_id": str(run.id), "status": run.status.value}
+
+
+@router.get("/kbs/{kb_id}/sources/{source_id}/runs", response_model=list[SyncRunOut])
+async def list_source_runs(
+    kb_id: uuid.UUID,
+    source_id: uuid.UUID,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[SyncRunOut]:
+    """同步运行记录(倒序,默认 10 条)。"""
+    _kb, source = await _get_source(kb_id, source_id, db, user)
+    return await sync_run_out_list(db, source.id, limit)
+
+
+async def sync_run_out_list(db: AsyncSession, source_id: uuid.UUID, limit: int) -> list[SyncRunOut]:
+    runs = await connector_service.list_runs(db, source_id, limit)
+    return [SyncRunOut.model_validate(r) for r in runs]

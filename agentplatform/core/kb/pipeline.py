@@ -252,12 +252,15 @@ async def process_document(db: AsyncSession, doc_id: uuid.UUID) -> KbDocument:
             raise ValueError("切分结果为空")
         chunk_texts = [text[s:e] for s, e in spans]
 
-        # 3. embedding + 写片段(重试时先清旧片段,幂等)
+        # 3. embedding + 写片段(重试时旧片段在写入前清除,幂等)。
+        # 注意:解析 endpoint 的 SELECT 会开启事务,必须在长时间 await embed_texts
+        # 之前 commit——否则事务空闲超时(idle_in_transaction_session_timeout)会杀掉连接。
+        endpoint = await resolve_embedding_endpoint(db)
+        await db.commit()
+        vectors = await embed_texts(chunk_texts, endpoint)
         from sqlalchemy import delete
 
         await db.execute(delete(KbChunk).where(KbChunk.document_id == doc.id))
-        endpoint = await resolve_embedding_endpoint(db)
-        vectors = await embed_texts(chunk_texts, endpoint)
         for i, (chunk, span) in enumerate(zip(chunk_texts, spans, strict=True)):
             db.add(
                 KbChunk(

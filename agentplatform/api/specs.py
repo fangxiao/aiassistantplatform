@@ -56,3 +56,36 @@ async def download_package() -> Response:
         headers={"Content-Disposition": "attachment; filename=agentplatform.tar.gz"},
     )
 
+
+INSTALL_SH_TEMPLATE = """\
+#!/bin/sh
+# AgentPlatform CLI 一键安装(curl -fsSL {target}/api/specs/install.sh | sh)
+# uv tool 安装:全局 agentplatform 命令、隔离环境、升级即重跑本脚本。
+set -e
+TARGET="${{AGENTPLATFORM_TARGET:-{target}}}"
+PKG="$TARGET/api/specs/package.tar.gz"
+
+if command -v uv >/dev/null 2>&1; then
+  # 清理代理变量,防止全局代理拦截对局域网平台的访问
+  exec env -u ALL_PROXY -u all_proxy -u HTTP_PROXY -u http_proxy \\
+       -u HTTPS_PROXY -u https_proxy uv tool install --force "$PKG"
+fi
+
+echo "未找到 uv;请先安装: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+echo "或使用 pipx: pipx install \\"$PKG\\"" >&2
+exit 1
+"""
+
+
+@router.get("/install.sh")
+async def install_script() -> Response:
+    """一键安装脚本:uv tool install 平台代码包,体验对齐 npx(一条命令,全局命令可用)。"""
+    from agentplatform.config import settings
+
+    target = str(settings.public_base_url).rstrip("/") if getattr(settings, "public_base_url", None) else "http://localhost:8000"
+    return Response(
+        content=INSTALL_SH_TEMPLATE.format(target=target),
+        media_type="text/x-shellscript",
+        headers={"Content-Disposition": "inline; filename=install.sh"},
+    )
+
