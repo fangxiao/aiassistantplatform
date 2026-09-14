@@ -585,7 +585,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     print(f"🚀 正在向平台服务部署插件 ({target}/api/plugins/deploy)...")
     try:
         resp = httpx.post(
-            f"{target}/api/plugins/deploy?overwrite=true",
+            f"{target}/api/plugins/deploy",
             json=manifest,
             timeout=30,
         )
@@ -636,8 +636,10 @@ def cmd_update(args: argparse.Namespace) -> int:
                     tmp_path = tf.name
 
                 installed = False
-                # 依次尝试 uv pip / python -m pip / pip
+                # 依次尝试:uv tool(本 CLI 若为 uv tool 安装,uv pip 找不到 venv)→ uv pip → python -m pip → pip
+                # uv tool 用已下载的本地包,避免 subprocess 里再走一次网络(可能被代理拦截)
                 for cmd in [
+                    ["uv", "tool", "install", "--force", tmp_path],
                     ["uv", "pip", "install", "--upgrade", tmp_path],
                     [sys.executable, "-m", "pip", "install", "--upgrade", tmp_path],
                     ["pip", "install", "--upgrade", tmp_path],

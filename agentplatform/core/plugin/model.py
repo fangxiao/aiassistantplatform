@@ -1,7 +1,10 @@
-"""插件 ORM 模型(设计 004 §plugins)。
+"""插件 ORM 模型(设计 004 §plugins / ADR 0007)。
 
 manifest 存完整插件清单(jsonb);插件即助手(001):model 字段在 manifest 内。
 owner_id 暂为 text,M1 引入 users 表后改 FK。
+
+ADR 0007:插件按 name 全局唯一,不保留历史版本;同名重部署原地覆盖
+(保留行 UUID 与历史会话),version 仅为最近部署版本的展示标签。
 """
 
 import uuid
@@ -28,7 +31,7 @@ class Plugin(Base):
 
     __tablename__ = "plugins"
     __table_args__ = (
-        UniqueConstraint("name", "version", name="uq_plugins_name_version"),
+        UniqueConstraint("name", name="uq_plugins_name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -43,6 +46,8 @@ class Plugin(Base):
         default=PluginStatus.active,
     )
     owner_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 助手运行时挂载的已发布知识库(uuid 字符串;设计 008 §4.3);重部署覆盖时保留
+    mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     deployed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

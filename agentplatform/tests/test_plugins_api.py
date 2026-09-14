@@ -53,11 +53,42 @@ class TestDeploy:
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "plugin_invalid"
 
-    async def test_deploy_duplicate_422(self, seeded_client: AsyncClient) -> None:
-        await seeded_client.post("/api/plugins/deploy", json=MANIFEST)
-        resp = await seeded_client.post("/api/plugins/deploy", json=MANIFEST)
-        assert resp.status_code == 422
-        assert resp.json()["error"]["code"] == "plugin_invalid"
+    async def test_redeploy_same_name_overwrites_in_place(
+        self, seeded_client: AsyncClient
+    ) -> None:
+        """ADR 0007:同名重部署原地覆盖,UUID 稳定,仅保留最新版本与最新资源。"""
+        first = (await seeded_client.post("/api/plugins/deploy", json=MANIFEST)).json()
+
+        v2 = {
+            **MANIFEST,
+            "version": "0.2.0",
+            "description": "PRD 评审助手 v2",
+            "skills": [
+                {
+                    "id": "skill:prd_review_v2",
+                    "file": "./skills/prd_review_v2.py",
+                    "schema": {"parameters": {"type": "object"}},
+                }
+            ],
+        }
+        resp = await seeded_client.post("/api/plugins/deploy", json=v2)
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["id"] == first["id"]  # 行 UUID 保留,历史会话不悬挂
+        assert body["version"] == "0.2.0"
+        assert body["description"] == "PRD 评审助手 v2"
+        assert body["status"] == "active"
+
+        # 列表中只剩一个插件行(无历史版本堆积)
+        listed = await seeded_client.get("/api/plugins")
+        assert len(listed.json()) == 1
+
+        # 旧私有资源(含旧版本)清除,新资源生效(私有资源走 resolve 详情端点)
+        new_res = await seeded_client.get("/api/registry/skill/prd_review_v2")
+        assert new_res.status_code == 200
+        assert new_res.json()["version"] == "0.2.0"
+        old_res = await seeded_client.get("/api/registry/skill/prd_review")
+        assert old_res.status_code == 404
 
 
 class TestManage:

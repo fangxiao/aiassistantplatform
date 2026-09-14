@@ -20,6 +20,7 @@ class PluginOut(BaseModel):
     status: PluginStatus
     description: str | None = None
     model: str | None = None
+    mounted_kb_ids: list[uuid.UUID] = []
     deployed_at: datetime
 
 
@@ -35,5 +36,6 @@ def to_out(plugin: Plugin) -> PluginOut:
         status=plugin.status,
         description=m.get("description"),
         model=m.get("model"),
+        mounted_kb_ids=[uuid.UUID(k) for k in (plugin.mounted_kb_ids or [])],
         deployed_at=plugin.deployed_at,
     )

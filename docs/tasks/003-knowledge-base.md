@@ -65,6 +65,7 @@ M12(知识库)
 | T12.14 | **测试**:service 鉴权/配额、pipeline 状态机与重试、retriever 过滤、search_tool 权限交集(含跨用户 private 拒绝)、validate;集成测试覆盖需求 005 §5 五条验收(真实 PG,不可达 skip) | T12.7 | P0 |
 | T12.15 ✅ | **会话产出入库**(设计 008 §11 增补):kb_documents 溯源字段(origin/source_app/source_session_id/source_message_id);`POST /documents/from-text` 文本直存 + 消息级幂等;pipeline 支持 text/html 去标签;KbOut.can_write;WebUI 助手消息「收藏到知识库」;跨项目消费方(SwiftShip)走用户 token 绑定 | T12.3, T12.5, T12.8 | P1 |
 | T12.16 ✅ | **shared 可见性与成员管理**(设计 008 §12 增补):kb_visibility 增加 shared(团队资产,不进注册表,publish 拒绝);kb_members 表 + 成员 API(按 email 添加/列表/移除,仅 owner);权限矩阵 async 化 can_read/can_write/can_manage;list_visible_kbs 含成员库;WebUI 建库三态可见性、共享库 👥 徽标与成员管理弹窗、挂载弹窗图标;迁移 e5a8b1c3d726 | T12.15 | P1 |
+| T12.17 ✅ | **助手运行时挂载公共库**(设计 008 §4.3):plugins.mounted_kb_ids jsonb + 迁移;`PUT /api/plugins/{id}/mounted-kbs`(developer,仅 public+active,不要求注册表发布行,全量覆盖)+ `GET /api/kb/public` 候选清单;resolve_allowed_kb_ids 授权并集(助手挂载走 public 防御分支,下架/转私有自动失效);ADR 0007 同名覆盖保留挂载;开发者工作台挂载弹窗 | T12.9, T12.10 | P1 |
 
 ### 实施顺序建议
 

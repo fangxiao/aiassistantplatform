@@ -100,11 +100,15 @@ async def agent_stream_for_session(
     model = (manifest or {}).get("model")
     resource_ids = resource_ids_from_plugin(plugin) if plugin else []
     client = await make_llm_client(session, model)
-    # 知识库检索允许范围(设计 008 §3.3):挂载 ∪ 插件依赖,唯一授权来源
+    # 知识库检索允许范围(设计 008 §3.3/§4.3):会话挂载 ∪ 插件静态依赖 ∪ 助手挂载,唯一授权来源
+    plugin_mounted = [
+        uuid.UUID(k) for k in (getattr(plugin, "mounted_kb_ids", None) or [])
+    ] if plugin else []
     allowed_kb_ids = await resolve_allowed_kb_ids(
         session,
         mounted_kb_ids=[uuid.UUID(k) for k in (sess.mounted_kb_ids or [])],
         plugin_manifest=manifest,
+        plugin_mounted_kb_ids=plugin_mounted,
     )
     # 挂载了知识库则下发显式检索工具(builtin tool:kb_search,设计 008 §4.1)
     if allowed_kb_ids and KB_SEARCH_TOOL_ID not in resource_ids:

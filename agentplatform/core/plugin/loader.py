@@ -1,11 +1,17 @@
-"""插件加载器(设计 006 / 004 §plugins / 002 §4)。
+"""插件加载器(设计 006 / 004 §plugins / 002 §4 / ADR 0007)。
 
 部署流程:清单校验 -> depends_on 依赖解析(注册表,复用 M2)
--> 登记插件 -> 登记插件自有 skill/tool(注册表 source=private)。
+-> 按 name 登记/覆盖插件 -> 登记插件自有 skill/tool(注册表 source=private)。
 skill/tool 代码加载与执行在 M5 引入;卸载时清理插件及其私有资源。
+
+ADR 0007:插件名全局唯一,同名重部署原地覆盖(保留行 UUID 与历史会话,
+清掉旧版本私有资源),不保留历史版本。
 """
 
+import shutil
 import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 
 import sqlalchemy as sa
 from sqlalchemy import select
@@ -22,9 +28,12 @@ async def deploy_plugin(
     session: AsyncSession,
     manifest: PluginManifest,
     owner_id: str | None = None,
-    overwrite: bool = False,
 ) -> Plugin:
-    """部署插件:校验 + 依赖解析 + 登记插件及其自有资源。"""
+    """部署插件:校验 + 依赖解析 + 按 name 登记或原地覆盖(ADR 0007)。
+
+    同名插件重部署时保留行 UUID(历史会话不悬挂)与首次部署者 owner_id,
+    替换清单/版本标签/部署时间,旧版本私有注册表资源在资源重登记前清除。
+    """
     validate_manifest(manifest)
 
     missing = await check_dependencies(session, manifest.depends_on)
@@ -32,28 +41,28 @@ async def deploy_plugin(
         raise DependencyError(missing)
 
     existing = await session.scalar(
-        select(Plugin).where(
-            Plugin.name == manifest.name, Plugin.version == manifest.version
-        )
+        select(Plugin).where(Plugin.name == manifest.name)
     )
-    if existing is not None and not overwrite:
-        raise PluginValidationError(
-            f"插件已存在: {manifest.name}@{manifest.version}(先卸载再重部署)"
+    if existing is not None:
+        # 原地覆盖:先删该插件名下全部私有资源(含旧版本),随后按新清单重登记
+        await purge_private_resources(session, manifest.name)
+        remove_plugin_storage(manifest.name)
+        existing.version = manifest.version
+        existing.manifest = manifest.model_dump()
+        existing.status = PluginStatus.active
+        existing.deployed_at = datetime.now(UTC)
+        plugin = existing
+        await session.flush()
+    else:
+        plugin = Plugin(
+            name=manifest.name,
+            version=manifest.version,
+            manifest=manifest.model_dump(),
+            status=PluginStatus.active,
+            owner_id=owner_id,
         )
-    if existing is not None and overwrite:
-        await uninstall_plugin(session, existing)
-
-
-
-    plugin = Plugin(
-        name=manifest.name,
-        version=manifest.version,
-        manifest=manifest.model_dump(),
-        status=PluginStatus.active,
-        owner_id=owner_id,
-    )
-    session.add(plugin)
-    await session.flush()
+        session.add(plugin)
+        await session.flush()
 
     for r in manifest.skills:
         await _register_resource(session, r, SkillToolKind.skill, manifest)
@@ -72,8 +81,6 @@ async def _register_resource(
     kind: SkillToolKind,
     manifest: PluginManifest,
 ) -> None:
-    from pathlib import Path
-
     impl_path = res.file
     if res.code:
         storage_dir = (
@@ -135,23 +142,27 @@ async def set_status(
     return plugin
 
 
-async def uninstall_plugin(session: AsyncSession, plugin: Plugin) -> None:
-    """删除插件及其私有 skill/tool(注册表 source=private)。"""
-    import shutil
-    from pathlib import Path
-
+async def purge_private_resources(session: AsyncSession, plugin_name: str) -> None:
+    """删除插件名下全部私有注册表资源(所有版本;owner_id 即插件名)。"""
     await session.execute(
         sa.delete(SkillTool).where(
-            SkillTool.owner_id == plugin.name,
-            SkillTool.version == plugin.version,
+            SkillTool.owner_id == plugin_name,
             SkillTool.source == SkillToolSource.private,
         )
     )
 
-    plugin_storage = Path.home() / ".agentplatform" / "installed_plugins" / plugin.name
+
+def remove_plugin_storage(plugin_name: str) -> None:
+    """删除插件代码存储目录(~/.agentplatform/installed_plugins/<name>)。"""
+    plugin_storage = Path.home() / ".agentplatform" / "installed_plugins" / plugin_name
     if plugin_storage.exists():
         shutil.rmtree(plugin_storage, ignore_errors=True)
 
+
+async def uninstall_plugin(session: AsyncSession, plugin: Plugin) -> None:
+    """删除插件及其私有 skill/tool(注册表 source=private)。"""
+    await purge_private_resources(session, plugin.name)
+    remove_plugin_storage(plugin.name)
     await session.delete(plugin)
     await session.flush()
 

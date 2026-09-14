@@ -73,11 +73,43 @@ class TestDeployPlugin:
         assert res[0].source == SkillToolSource.private
         assert res[0].version == "0.1.0"
 
-    async def test_duplicate_deploy_raises(self, session: AsyncSession) -> None:
+    async def test_redeploy_same_name_overwrites_in_place(
+        self, session: AsyncSession
+    ) -> None:
+        """ADR 0007:同名重部署原地覆盖——UUID 稳定,旧版本私有资源清除。"""
         await seed_builtin(session)
-        await deploy_plugin(session, _manifest())
-        with pytest.raises(PluginValidationError):
-            await deploy_plugin(session, _manifest())
+        first = await deploy_plugin(session, _manifest())
+        await session.commit()
+
+        v2 = _manifest(
+            version="0.2.0",
+            description="PRD 评审助手 v2",
+            skills=[
+                ResourceDef(
+                    id="skill:prd_review_v2",
+                    file="./skills/prd_review_v2.py",
+                    schema={"parameters": {"type": "object"}},
+                )
+            ],
+        )
+        updated = await deploy_plugin(session, v2)
+        await session.commit()
+
+        # 同一行:UUID 保留,版本标签与清单更新
+        assert updated.id == first.id
+        assert updated.version == "0.2.0"
+        assert updated.manifest["description"] == "PRD 评审助手 v2"
+
+        # 旧版本私有资源已清除,只余本次清单的资源
+        rows = await session.scalars(
+            select(SkillTool).where(SkillTool.owner_id == first.name)
+        )
+        res = list(rows)
+        assert {r.id for r in res} == {"skill:prd_review_v2"}
+        assert all(r.version == "0.2.0" for r in res)
+
+        # 历史会话按原 plugin_id 仍能取到插件(不悬挂,自动获得新版本)
+        assert (await get_plugin(session, first.id)) is updated
 
     async def test_missing_dependency_raises(self, session: AsyncSession) -> None:
         await seed_builtin(session)

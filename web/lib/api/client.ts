@@ -64,6 +64,20 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return (await resp.json()) as T;
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  return (await resp.json()) as T;
+}
+
 export async function apiDelete<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: "DELETE",

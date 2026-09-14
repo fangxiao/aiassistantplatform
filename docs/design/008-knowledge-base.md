@@ -1,7 +1,7 @@
 # 008 · 知识库设计
 
-- 文档版本:v0.3(增补 §12 shared 可见性与成员管理)
-- 日期:2026-09-05
+- 文档版本:v0.4(增补 §4.3 助手运行时挂载公共库)
+- 日期:2026-09-11
 - 流程阶段:阶段 2 · 设计
 - 对应需求:[../requirements/005-knowledge-base.md](../requirements/005-knowledge-base.md)
 - 关联 ADR:[0004-pgvector](../adr/0004-pgvector.md)、[0005-kb-registry-resource](../adr/0005-kb-registry-resource.md)
@@ -142,6 +142,26 @@ depends_on:
 - `POST /api/sessions` / `PATCH` 请求体增加 `mounted_kb_ids: [uuid]`;服务端校验每个 id 对当前用户可读。
 - WebUI 会话侧栏提供勾选入口(需求 F5.2)。
 - 与插件依赖重叠时按 id 去重(需求 F3.4)。
+
+### 4.3 助手运行时挂载公共库(增补 · v0.4)
+
+区别于 §4.1(写在 plugin.yaml、部署期解析、需重新部署才能改),平台侧可直接给
+**助手(插件)**挂/卸**公共(public)知识库**,运行期生效,对该助手的所有会话有效;不要求库走发布登记。
+
+- 数据:`plugins.mounted_kb_ids jsonb`(uuid 字符串数组,与 `sessions.mounted_kb_ids` 对称)。
+- 管理接口(developer 角色):
+  - `PUT /api/plugins/{id}/mounted-kbs`,请求体 `{"kb_ids": [uuid...]}` 全量覆盖;
+  - 写入侧校验:每个库存在、`status=active`、`visibility=public`;私有/共享库一律 404 拒绝。
+    理由:助手挂载对其全部使用者生效,不能带入仅挂载人可读的库。
+    **不要求注册表 `kb:<slug>` 发布行**——那行只服务于插件 `depends_on` 的版本依赖(§4.1);
+    直接建成 public 的库(如共享工作区)同样全员可读,应可挂载。
+  - `GET /api/kb/public`:公共库清单(挂载弹窗候选项)。
+- 授权并集(§3.3 红线不变):
+  `allowed = 会话挂载(可读即可,含私有/共享) ∪ 插件 depends_on 的 kb: 依赖 ∪ 助手挂载(仅 public)`。
+  助手挂载与静态依赖同走 **public + active 防御分支**(不进会话 mounted 集合):
+  库事后被下架或转私有时,全部助手会话自动失去访问权。
+- 重部署(ADR 0007 同名覆盖)保留 `mounted_kb_ids`,不随 manifest 覆盖。
+- WebUI:开发者工作台插件行「知识库」入口,弹窗复选公共库。
 
 ## 5. 检索工具协议(`tool:kb_search`)
 

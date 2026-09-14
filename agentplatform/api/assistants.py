@@ -34,6 +34,7 @@ class AssistantOut(BaseModel):
     author: str | None = None
     model: str | None = None
     depends_on: list[str] = []
+    mounted_kb_ids: list[uuid.UUID] = []
     deployed_at: datetime
     manifest: dict[str, Any]
 
@@ -50,6 +51,7 @@ def _plugin_to_assistant(p: Plugin) -> AssistantOut:
         author=manifest.get("author"),
         model=manifest.get("model"),
         depends_on=manifest.get("depends_on", []),
+        mounted_kb_ids=[uuid.UUID(k) for k in (p.mounted_kb_ids or [])],
         deployed_at=p.deployed_at,
         manifest=manifest,
     )
@@ -58,27 +60,16 @@ def _plugin_to_assistant(p: Plugin) -> AssistantOut:
 @router.get("", response_model=list[AssistantOut])
 async def list_assistants(
     query: str | None = Query(default=None, description="搜索关键词"),
-    all_versions: bool = Query(default=False, description="是否返回所有历史版本"),
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_current_user),
 ) -> list[AssistantOut]:
-    """获取可用助手列表(默认按插件名称去重，仅展示最新部署版本)。"""
+    """获取可用助手列表(ADR 0007:name 全局唯一,一个助手一行,version 为最近部署标签)。"""
     stmt = (
         select(Plugin)
         .where(Plugin.status == PluginStatus.active)
         .order_by(Plugin.deployed_at.desc())
     )
     rows = list((await session.scalars(stmt)).all())
-
-    if not all_versions:
-        seen: set[str] = set()
-        deduped: list[Plugin] = []
-        for p in rows:
-            key = f"{p.owner_id}:{p.name}"
-            if key not in seen:
-                seen.add(key)
-                deduped.append(p)
-        rows = deduped
 
     results = [_plugin_to_assistant(p) for p in rows]
     if query:

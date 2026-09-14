@@ -110,6 +110,37 @@ async def get_kb(db: AsyncSession, kb_id: uuid.UUID) -> KnowledgeBase | None:
     return await db.get(KnowledgeBase, kb_id)
 
 
+async def list_public_kbs(db: AsyncSession) -> list[KnowledgeBase]:
+    """全员可读的公共库(public + active);助手挂载候选(设计 008 §4.3)。
+
+    不要求注册表 kb:<slug> 行——那行只服务于插件 depends_on 版本依赖(publish);
+    直接建成 public 的库与共享工作区同样全员可读,应可挂载。
+    """
+    rows = await db.scalars(
+        select(KnowledgeBase)
+        .where(
+            KnowledgeBase.status == "active",
+            KnowledgeBase.visibility == KbVisibility.public,
+        )
+        .order_by(KnowledgeBase.updated_at.desc())
+    )
+    return list(rows)
+
+
+async def get_public_kb(
+    db: AsyncSession, kb_id: uuid.UUID
+) -> KnowledgeBase | None:
+    """按 id 取公共库;不存在/非 public/停用均返回 None(助手挂载写入侧校验)。"""
+    kb = await get_kb(db, kb_id)
+    if (
+        kb is None
+        or kb.status != "active"
+        or kb.visibility != KbVisibility.public
+    ):
+        return None
+    return kb
+
+
 async def list_visible_kbs(db: AsyncSession, user_id: str) -> list[KnowledgeBase]:
     """当前用户可见库:public(active)+ 自己的 private + 自己为 owner/成员的 shared(008 §12.2)。"""
     # 注意:不能用 ORM 实体 select 的 union——union 后 scalars() 只取首列(仅 id)。

@@ -7,6 +7,63 @@ export async function listKbs(): Promise<KbInfo[]> {
   return apiGet<KbInfo[]>("/kb/kbs");
 }
 
+export async function listPublicKbs(): Promise<KbInfo[]> {
+  return apiGet<KbInfo[]>("/kb/public");
+}
+
+// ---------------------------------------------------------------- 数据源(连接器, M13)
+
+export interface DataSourceInfo {
+  id: string;
+  kb_id: string;
+  type: string;
+  name: string;
+  config: Record<string, any>;
+  poll_interval_minutes: number | null;
+  status: string;
+  last_sync_at: string | null;
+  last_status: string;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface SyncRunInfo {
+  id: string;
+  data_source_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  added: number;
+  updated: number;
+  deleted: number;
+  skipped: number;
+  failed_docs: number;
+  error: string | null;
+}
+
+export async function listSources(kbId: string): Promise<DataSourceInfo[]> {
+  return apiGet<DataSourceInfo[]>(`/kb/kbs/${kbId}/sources`);
+}
+
+export async function createSource(
+  kbId: string,
+  payload: { type: string; name: string; config: Record<string, any>; poll_interval_minutes?: number | null }
+): Promise<DataSourceInfo> {
+  return apiPost<DataSourceInfo>(`/kb/kbs/${kbId}/sources`, payload);
+}
+
+export async function deleteSource(kbId: string, sourceId: string): Promise<{ ok: boolean }> {
+  return apiDelete(`/kb/kbs/${kbId}/sources/${sourceId}`);
+}
+
+export async function syncSource(kbId: string, sourceId: string): Promise<{ run_id: string; status: string }> {
+  return apiPost(`/kb/kbs/${kbId}/sources/${sourceId}/sync`, {});
+}
+
+export async function listSyncRuns(kbId: string, sourceId: string): Promise<SyncRunInfo[]> {
+  return apiGet<SyncRunInfo[]>(`/kb/kbs/${kbId}/sources/${sourceId}/runs`);
+}
+
 export interface KbCreatePayload {
   name: string;
   slug: string;

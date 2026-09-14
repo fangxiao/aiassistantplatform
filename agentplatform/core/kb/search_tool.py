@@ -64,17 +64,23 @@ async def resolve_allowed_kb_ids(
     *,
     mounted_kb_ids: list[uuid.UUID] | None,
     plugin_manifest: dict | None,
+    plugin_mounted_kb_ids: list[uuid.UUID] | None = None,
 ) -> list[uuid.UUID]:
-    """组装会话允许检索的库(设计 008 §3.3)。
+    """组装会话允许检索的库(设计 008 §3.3 / §4.3)。
 
     = sessions.mounted_kb_ids(用户挂载,创建/更新时已校验可读)
-    ∪ 插件 depends_on 中 kb: 资源解析出的公共库(注册表 kind=kb → knowledge_bases)。
+    ∪ 插件 depends_on 中 kb: 资源解析出的公共库(注册表 kind=kb → knowledge_bases)
+    ∪ plugins.mounted_kb_ids(助手运行时挂载,写入时已校验 public+active)。
     去重;防御性二次校验可见性(挂载校验之后库被转 private 等边界)。
     """
     allowed: dict[uuid.UUID, None] = {}
     for kid in mounted_kb_ids or []:
         allowed.setdefault(kid, None)
     mounted_set = set(mounted_kb_ids or [])
+    # 助手挂载只进 allowed、不进 mounted_set:它们必须靠"当前仍 public+active"
+    # 通过下方防御过滤,库被下架/转私有时对全部助手会话自动失效(§4.3)。
+    for kid in plugin_mounted_kb_ids or []:
+        allowed.setdefault(kid, None)
     if plugin_manifest:
         for dep in plugin_manifest.get("depends_on", []) or []:
             resource_id, constraint = split_dependency(dep)

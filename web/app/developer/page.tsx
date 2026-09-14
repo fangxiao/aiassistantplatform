@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "../../components/layout/Navbar";
 import { BlockRenderer } from "../../components/renderers/BlockRenderer";
+import { PluginKbMountModal } from "../../components/kb/PluginKbMountModal";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 import { isAuthed } from "../../lib/api/auth";
 import type {
@@ -38,6 +39,7 @@ export default function DeveloperPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loadingPlugins, setLoadingPlugins] = useState(false);
   const [selectedManifest, setSelectedManifest] = useState<any | null>(null);
+  const [kbMountPlugin, setKbMountPlugin] = useState<PluginInfo | null>(null);
 
   // LLM Endpoints state
   const [endpoints, setEndpoints] = useState<LlmEndpointInfo[]>([]);
@@ -365,6 +367,14 @@ export default function DeveloperPage() {
                             className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-slate-700 hover:bg-slate-50 transition"
                           >
                             清单
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setKbMountPlugin(p)}
+                            className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100 transition"
+                            title="给该助手挂载公共知识库(全员可读)"
+                          >
+                            📚 知识库{p.mounted_kb_ids?.length ? ` (${p.mounted_kb_ids.length})` : ""}
                           </button>
                           <button
                             type="button"
@@ -1017,6 +1027,22 @@ export default function DeveloperPage() {
           </div>
         )}
       </main>
+
+      {/* 助手挂载知识库 Modal (T12.17) */}
+      {kbMountPlugin && (
+        <PluginKbMountModal
+          plugin={kbMountPlugin}
+          onClose={() => setKbMountPlugin(null)}
+          onSaved={(kbIds) => {
+            setPlugins((prev) =>
+              prev.map((p) =>
+                p.id === kbMountPlugin.id ? { ...p, mounted_kb_ids: kbIds } : p
+              )
+            );
+            setKbMountPlugin(null);
+          }}
+        />
+      )}
 
       {/* Manifest Viewer Modal */}
       {selectedManifest && (
