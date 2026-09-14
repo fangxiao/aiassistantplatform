@@ -19,6 +19,7 @@ from agentplatform.api import (
     plugins,
     registry,
     specs,
+    workbench,
 )
 
 api_router = APIRouter()
@@ -34,5 +35,6 @@ api_router.include_router(browser.router)
 api_router.include_router(dev_session.router)
 api_router.include_router(files.router)
 api_router.include_router(kb.router)
+api_router.include_router(workbench.router)
 
 

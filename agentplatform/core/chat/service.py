@@ -113,6 +113,11 @@ async def agent_stream_for_session(
     # 挂载了知识库则下发显式检索工具(builtin tool:kb_search,设计 008 §4.1)
     if allowed_kb_ids and KB_SEARCH_TOOL_ID not in resource_ids:
         resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
+    # 个人待办工具无条件注入(M14 AI 联动):平台级个人能力,不要求助手声明依赖
+    from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
+
+    if WORKBENCH_TODO_TOOL_ID not in resource_ids:
+        resource_ids = [*resource_ids, WORKBENCH_TODO_TOOL_ID]
 
     history = await build_history(session, session_id)
     # history 末尾是刚保存的用户消息,拆出作为 user_message,其余作为前文

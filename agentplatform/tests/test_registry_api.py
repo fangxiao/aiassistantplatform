@@ -28,8 +28,9 @@ class TestListEndpoints:
         resp = await seeded_client.get("/api/registry/tools")
         assert resp.status_code == 200
         ids = {r["id"] for r in resp.json()}
-        # M11 起新增 browser.* 端侧工具与 html_cleaner;M12 新增 kb_search
+        # M11 起新增 browser.* 端侧工具与 html_cleaner;M12 新增 kb_search;M14 新增 workbench_todo
         assert ids == {
+            "tool:workbench_todo",
             "tool:pdf_parse",
             "tool:html_cleaner",
             "tool:kb_search",

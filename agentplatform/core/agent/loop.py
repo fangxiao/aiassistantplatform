@@ -23,6 +23,8 @@ from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, run_kb_search
 from agentplatform.core.llm.client import ToolCall
 from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
+from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
+from agentplatform.core.workbench.todo_tool import run as todo_run
 
 MAX_ITERATIONS = 6
 
@@ -195,6 +197,9 @@ async def stream_agent(
             if resource.id == KB_SEARCH_TOOL_ID:
                 # 知识库检索:需要会话允许范围,不走通用 executor(设计 008 §3.3)
                 return await run_kb_search(session, allowed_kb_ids or [], args)
+            if resource.id == WORKBENCH_TODO_TOOL_ID:
+                # 个人待办:需要会话用户上下文(M14;与 kb_search 同款特判模式)
+                return await todo_run(session, owner_id or "", args)
             if resource.kind == SkillToolKind.tool:
                 return await execute_tool(resource, args)
             return await execute_skill(resource, args, skill_call)
@@ -579,6 +584,7 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
     """从模型输出的纯文本中兜底解析以 markdown code block、JSON 或函数签名格式输出的工具调用。"""
     import re
     import uuid
+
     from agentplatform.core.llm.client import ToolCall
 
     if not text:

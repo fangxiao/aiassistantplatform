@@ -2,6 +2,9 @@
 
 每个模块自描述 RESOURCE 元信息 + 可调用实现(run / build_prompt);
 种子脚本与 M5 执行器按同一接口使用。
+
+注:tool:workbench_todo 的实现位于 core/workbench/todo_tool.py(与待办服务同域),
+此处仅登记其 RESOURCE 进 ALL——它经由 workbench 包导入。
 """
 
 from agentplatform.core.registry.builtin import (
@@ -17,6 +20,7 @@ from agentplatform.core.registry.builtin import (
     summarize,
 )
 from agentplatform.core.registry.builtin.meta import ResourceMeta
+from agentplatform.core.workbench.todo_tool import RESOURCE as _workbench_todo_resource
 
 __all__ = [
     "ALL",
@@ -45,4 +49,5 @@ ALL: tuple[ResourceMeta, ...] = (
     browser_action.RESOURCE,
     browser_list_tabs.RESOURCE,
     kb_search.RESOURCE,
+    _workbench_todo_resource,
 )

@@ -44,6 +44,18 @@ page.tsx(ChatHome)
   createSession + sendMessage 流式生成;产出可「存入知识库」(source.app=workbench)
   或「继续追问」(跳对话视图,简报会话保留可续)。非定时推送,主动唤醒留 P2。
 
+## 3.1 待办云端化与 AI 联动(P1.5 · 2026-09-14)
+
+AI 要写待办 → 待办从 localStorage 升级为**云端权威**(多方写入需一致存储,分域原则的
+触发条件成立):`workbench_todos` 表按 user_id 隔离,origin 区分 manual/ai。
+
+- **工具**:`tool:workbench_todo`(builtin,action=add/list/toggle/delete);loop 按
+  kb_search 同款特判分发(db+owner_id 直传);chat 组装 resource 时**无条件注入**——
+  平台级个人能力,对话里"帮我记一下…"即可生效,不要求助手声明依赖。
+- **API**:`/api/workbench/todos` CRUD + `/completed` 清空 + `/import`(localStorage
+  一次性迁移);前端 TodoCard 切 API,AI 写入带 AI 徽标,乐观更新。
+- 旧 localStorage 数据首次加载自动上传云端后清本地(标记已迁移)。
+
 ## 4. 不做的事(P0/P1 红线)
 
 - 零后端改动;零新表;待办/简报留 P1(本地存储/按钮触发);
