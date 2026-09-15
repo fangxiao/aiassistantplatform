@@ -53,7 +53,12 @@ async def lifespan(app: FastAPI):
     from agentplatform.core.kb.connectors import scheduler as connector_scheduler
 
     connector_scheduler.start()
+    # M15:定时任务(agent run)调度器(设计 011 §3)
+    from agentplatform.core.scheduler import scheduler as task_scheduler
+
+    task_scheduler.start()
     yield
+    await task_scheduler.stop()
     await connector_scheduler.stop()
     await kb_pipeline.stop_worker()
     reaper.cancel()

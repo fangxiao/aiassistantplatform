@@ -18,6 +18,7 @@ from agentplatform.api import (
     kb,
     plugins,
     registry,
+    scheduler,
     specs,
     workbench,
 )
@@ -36,5 +37,6 @@ api_router.include_router(dev_session.router)
 api_router.include_router(files.router)
 api_router.include_router(kb.router)
 api_router.include_router(workbench.router)
+api_router.include_router(scheduler.router)
 
 

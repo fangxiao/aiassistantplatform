@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     connector_concurrency: int = 4  # 单源同步并发抓取数
     connector_user_agent: str = "AgentPlatformConnector/0.1 (+https://ailearning.top/bot)"
     connector_scheduler_tick_seconds: int = 60  # 调度器扫描间隔
+    # 定时唤醒 agent(M15,设计 011)
+    scheduler_tick_seconds: int = 60  # 任务调度扫描间隔
+    scheduler_max_tasks_per_user: int = 10  # 每用户任务数上限
+    scheduler_max_concurrent: int = 3  # 全局并发运行上限,超出顺延下个 tick
+    scheduler_run_timeout_s: int = 600  # 单次运行超时(判失败)
     kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 

@@ -200,7 +200,7 @@ class OpenAIClient:
                 if not has_yielded and idx < len(endpoints_to_try) - 1:
                     last_error = f"{type(exc).__name__}: {exc}"
                     continue
-                yield StreamEvent(type="error", error=f"LLM 请求失败 ({ep_base_url}): {exc}")
+                yield StreamEvent(type="error", error=f"LLM 请求失败 ({ep_base_url}): {type(exc).__name__}: {exc}")
                 return
 
         if last_error:

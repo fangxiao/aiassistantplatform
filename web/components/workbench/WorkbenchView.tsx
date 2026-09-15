@@ -5,6 +5,7 @@ import Link from "next/link";
 import { listKbs, listSources, syncSource, type DataSourceInfo } from "../../lib/api/kb";
 import { TodoCard } from "./TodoCard";
 import { BriefingCard } from "./BriefingCard";
+import { SchedulerCard } from "./SchedulerCard";
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
 
 /** 个人工作台视图(M14 · 设计 010):今日概览 dashboard。
@@ -139,8 +140,9 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
           </Card>
         </div>
 
-        {/* 知识库动态(整宽) */}
-        <div className="mt-5">
+        {/* 定时任务(M15) + 知识库动态 */}
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <SchedulerCard onContinue={onContinue} />
           <KbActivityCard onOpenKb={onOpenKb} />
         </div>
       </div>
@@ -164,7 +166,7 @@ function QuickAction({ icon, title, desc, onClick }: { icon: string; title: stri
   );
 }
 
-function Card({
+export function Card({
   title,
   action,
   children,
@@ -188,7 +190,7 @@ function Card({
   );
 }
 
-function Placeholder({ text }: { text: string }) {
+export function Placeholder({ text }: { text: string }) {
   return <div className="py-6 text-center text-[11px] text-slate-400">{text}</div>;
 }
 

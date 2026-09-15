@@ -73,6 +73,26 @@ export function NotificationBell() {
     } catch {
       /* ignore */
     }
+    // M15:失败的定时任务运行(验收 3:失败可见)
+    try {
+      const tasks = await apiGet<{ id: string; name: string; last_status: string; last_error: string | null; last_run_at: string | null }[]>(
+        "/scheduler/tasks"
+      );
+      for (const t of tasks) {
+        if (t.last_status === "failed") {
+          list.push({
+            id: `task-${t.id}`,
+            icon: "⏰",
+            title: `定时任务「${t.name}」运行失败`,
+            detail: t.last_error ?? undefined,
+            tone: "danger",
+            ts: t.last_run_at ?? new Date().toISOString(),
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     return list;
   }, []);
 

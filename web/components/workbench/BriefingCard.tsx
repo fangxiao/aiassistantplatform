@@ -53,9 +53,21 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [archive, setArchive] = useState<BriefingArchiveItem[]>([]);
   const [showArchive, setShowArchive] = useState(false);
+  // M15:定时任务自动生成的最新简报(服务端 task_runs)
+  const [autoBriefing, setAutoBriefing] = useState<{ text: string; finished_at: string | null } | null>(null);
 
   useEffect(() => {
     setArchive(loadArchive());
+    (async () => {
+      try {
+        const latest = await apiGet<{ output: string | null; finished_at: string | null } | null>(
+          "/scheduler/runs/latest"
+        );
+        if (latest?.output) setAutoBriefing({ text: latest.output, finished_at: latest.finished_at });
+      } catch {
+        /* 定时简报拉取失败静默(可能尚无定时任务) */
+      }
+    })();
   }, []);
 
   const generate = async () => {
@@ -162,6 +174,25 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
       </div>
 
       <div className="p-4">
+        {/* M15 自动生成区:最近一次定时任务产出 */}
+        {autoBriefing && (
+          <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-indigo-700">
+                ⏰ 自动生成
+                {autoBriefing.finished_at && (
+                  <span className="ml-1.5 font-normal text-slate-400">
+                    {new Date(autoBriefing.finished_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="mt-1 line-clamp-4 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-600">
+              {autoBriefing.text}
+            </div>
+          </div>
+        )}
+
         {phase === "idle" && (
           <div className="py-4 text-center text-[11px] text-slate-400">
             点击生成,助手将汇总知识库规模与连接器同步状态
