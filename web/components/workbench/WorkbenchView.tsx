@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { listKbs, listSources, type DataSourceInfo } from "../../lib/api/kb";
+import Link from "next/link";
+import { listKbs, listSources, syncSource, type DataSourceInfo } from "../../lib/api/kb";
 import { TodoCard } from "./TodoCard";
 import { BriefingCard } from "./BriefingCard";
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
@@ -57,6 +58,9 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
           <QuickAction icon="⬆️" title="上传文档" desc="进知识库页选择库" onClick={onOpenKb} />
         </div>
 
+        {/* 空状态三步引导(T14.8):新用户首次进入时替代"空卡片"观感 */}
+        {assistants.length === 0 && sessions.length <= 1 && <OnboardingCard onOpenKb={onOpenKb} />}
+
         <div className="grid gap-5 lg:grid-cols-2">
           {/* 我的待办(P1) + 每日简报(P1) */}
           <TodoCard />
@@ -69,29 +73,41 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {assistants.slice(0, 6).map((a) => (
-                  <button
+                  <div
                     key={a.id}
-                    type="button"
-                    onClick={() => onNewSession(a.id)}
-                    className="group rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50/60"
+                    className="group relative rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50/60"
                   >
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-xs font-bold text-slate-900">
-                        {a.display_name || a.name}
-                      </span>
-                      {(a.mounted_kb_ids?.length ?? 0) > 0 && (
-                        <span
-                          className="shrink-0 rounded bg-emerald-50 border border-emerald-200 px-1 py-0.5 text-[9px] font-medium text-emerald-700"
-                          title={`挂载了 ${a.mounted_kb_ids!.length} 个知识库`}
-                        >
-                          📚{a.mounted_kb_ids!.length}
+                    <button
+                      type="button"
+                      onClick={() => onNewSession(a.id)}
+                      className="block w-full text-left"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-xs font-bold text-slate-900">
+                          {a.display_name || a.name}
                         </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate text-[10px] text-slate-400">
-                      {a.description || "点击开始对话"}
-                    </div>
-                  </button>
+                        {(a.mounted_kb_ids?.length ?? 0) > 0 && (
+                          <span
+                            className="shrink-0 rounded bg-emerald-50 border border-emerald-200 px-1 py-0.5 text-[9px] font-medium text-emerald-700"
+                            title={`挂载了 ${a.mounted_kb_ids!.length} 个知识库`}
+                          >
+                            📚{a.mounted_kb_ids!.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] text-slate-400">
+                        {a.description || "点击开始对话"}
+                      </div>
+                    </button>
+                    {/* T14.8:管理入口 hover 浮现,跳开发者中心 */}
+                    <Link
+                      href="/developer"
+                      className="absolute right-2 top-2 text-[9px] font-medium text-slate-300 opacity-0 transition group-hover:opacity-100 hover:text-indigo-600"
+                      title="前往开发者中心管理"
+                    >
+                      管理 →
+                    </Link>
+                  </div>
                 ))}
               </div>
             )}
@@ -176,12 +192,14 @@ function Placeholder({ text }: { text: string }) {
   return <div className="py-6 text-center text-[11px] text-slate-400">{text}</div>;
 }
 
-/** 知识库动态:各库文档规模 + 连接器最近同步状态(独立拉取与降级)。 */
+/** 知识库动态:各库文档规模 + 连接器最近同步状态(独立拉取与降级);失败源可就地重试。 */
 function KbActivityCard({ onOpenKb }: { onOpenKb: () => void }) {
   const [kbs, setKbs] = useState<KbInfo[]>([]);
   const [sources, setSources] = useState<Record<string, DataSourceInfo[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,7 +243,20 @@ function KbActivityCard({ onOpenKb }: { onOpenKb: () => void }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [reloadTick]);
+
+  // T14.8:失败/部分失败的源就地重试(触发同步后轮询机制自动跟进)
+  const handleRetry = async (kbId: string, s: DataSourceInfo) => {
+    setRetrying(s.id);
+    try {
+      await syncSource(kbId, s.id);
+      setReloadTick((v) => v + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRetrying(null);
+    }
+  };
 
   return (
     <Card title="📚 知识库动态" action={{ label: "管理", onClick: onOpenKb }}>
@@ -265,6 +296,21 @@ function KbActivityCard({ onOpenKb }: { onOpenKb: () => void }) {
                     <span className="text-slate-400">
                       {latest!.last_sync_at ? new Date(latest!.last_sync_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
                     </span>
+                    {(latest!.last_status === "failed" || latest!.last_status === "partial") && !retrying && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRetry(kb.id, latest!);
+                        }}
+                        className="ml-auto shrink-0 rounded bg-rose-50 border border-rose-200 px-1.5 py-0.5 text-[9px] font-medium text-rose-700 hover:bg-rose-100"
+                      >
+                        重试
+                      </button>
+                    )}
+                    {retrying === latest!.id && (
+                      <span className="ml-auto text-[9px] text-indigo-600 animate-pulse">重试中...</span>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-0.5 text-[10px] text-slate-300">尚无数据源同步</div>
@@ -275,5 +321,69 @@ function KbActivityCard({ onOpenKb }: { onOpenKb: () => void }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/** 空状态三步引导(T14.8):新用户首次进入时降低上手门槛。 */
+function OnboardingCard({ onOpenKb }: { onOpenKb: () => void }) {
+  const steps: {
+    icon: string;
+    title: string;
+    desc: string;
+    action?: { label: string; onClick?: () => void; href?: string };
+  }[] = [
+    {
+      icon: "1️⃣",
+      title: "选一个助手开始对话",
+      desc: "点上方「💬 新会话」;通用助手可直接问答、记待办",
+    },
+    {
+      icon: "2️⃣",
+      title: "给知识库喂点资料",
+      desc: "上传文档或配置数据源自动同步",
+      action: { label: "去知识库", onClick: onOpenKb },
+    },
+    {
+      icon: "3️⃣",
+      title: "让助手懂你的业务",
+      desc: "开发者部署插件、给助手挂知识库",
+      action: { label: "开发者中心", href: "/developer" },
+    },
+  ];
+  return (
+    <div className="mb-5 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white p-5">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-sm font-bold text-slate-900">👋 三步上手</span>
+        <span className="text-[10px] text-slate-400">完成即可忽略本卡</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {steps.map((s) => (
+          <div key={s.title} className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+              <span>{s.icon}</span>
+              {s.title}
+            </div>
+            <div className="mt-1 text-[10px] leading-relaxed text-slate-400">{s.desc}</div>
+            {s.action &&
+              (s.action.href ? (
+                <Link
+                  href={s.action.href}
+                  className="mt-1.5 block text-[10px] font-medium text-indigo-600 hover:text-indigo-700"
+                >
+                  {s.action.label} →
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={s.action.onClick}
+                  className="mt-1.5 text-[10px] font-medium text-indigo-600 hover:text-indigo-700"
+                >
+                  {s.action.label} →
+                </button>
+              ))}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   listSources,
   listSyncRuns,
   syncSource,
+  updateSource,
   type DataSourceInfo,
   type SyncRunInfo,
 } from "../../lib/api/kb";
@@ -46,6 +47,7 @@ export function DataSourcesPanel({ kbId, canManage, onChanged }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<DataSourceInfo | null>(null);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, SyncRunInfo[]>>({});
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
@@ -194,6 +196,13 @@ export function DataSourcesPanel({ kbId, canManage, onChanged }: Props) {
                       <>
                         <button
                           type="button"
+                          onClick={() => setEditing(s)}
+                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-50 transition"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
                           disabled={syncing.has(s.id) || s.last_status === "running"}
                           onClick={() => void handleSync(s)}
                           className="rounded-md bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 transition disabled:opacity-40"
@@ -239,11 +248,24 @@ export function DataSourcesPanel({ kbId, canManage, onChanged }: Props) {
       )}
 
       {showCreate && (
-        <CreateSourceModal
+        <SourceFormModal
           kbId={kbId}
           onClose={() => setShowCreate(false)}
-          onCreated={async () => {
+          onSaved={async () => {
             setShowCreate(false);
+            await refresh();
+            onChanged?.();
+          }}
+        />
+      )}
+
+      {editing && (
+        <SourceFormModal
+          kbId={kbId}
+          source={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
             await refresh();
             onChanged?.();
           }}
@@ -253,24 +275,27 @@ export function DataSourcesPanel({ kbId, canManage, onChanged }: Props) {
   );
 }
 
-function CreateSourceModal({
+function SourceFormModal({
   kbId,
+  source,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   kbId: string;
+  source?: DataSourceInfo; // 传入 = 编辑模式(PATCH);缺省 = 创建(POST)
   onClose: () => void;
-  onCreated: () => void | Promise<void>;
+  onSaved: () => void | Promise<void>;
 }) {
-  const [type] = useState<string>("web"); // M13 P0 仅网页;后续类型随 adapter 发布解锁
-  const [form, setForm] = useState({
-    name: "",
-    urls: "",
-    sitemap: "",
-    max_depth: "2",
-    max_pages: "200",
-    poll: "",
-  });
+  const isEdit = !!source;
+  const [type] = useState<string>(source?.type ?? "web"); // M13 P0 仅网页;后续类型随 adapter 发布解锁
+  const [form, setForm] = useState(() => ({
+    name: source?.name ?? "",
+    urls: ((source?.config?.urls as string[]) ?? []).join("\n"),
+    sitemap: (source?.config?.sitemap as string) ?? "",
+    max_depth: String(source?.config?.max_depth ?? 2),
+    max_pages: String(source?.config?.max_pages ?? 200),
+    poll: source?.poll_interval_minutes != null ? String(source.poll_interval_minutes) : "",
+  }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -289,13 +314,22 @@ function CreateSourceModal({
         respect_robots: true,
       };
       if (form.sitemap.trim()) config.sitemap = form.sitemap.trim();
-      await createSource(kbId, {
-        type,
-        name: form.name.trim() || "网页数据源",
-        config,
-        poll_interval_minutes: form.poll ? parseInt(form.poll, 10) : null,
-      });
-      await onCreated();
+      const poll = form.poll ? parseInt(form.poll, 10) : null;
+      if (isEdit && source) {
+        await updateSource(kbId, source.id, {
+          name: form.name.trim() || source.name,
+          config,
+          poll_interval_minutes: poll,
+        });
+      } else {
+        await createSource(kbId, {
+          type,
+          name: form.name.trim() || "网页数据源",
+          config,
+          poll_interval_minutes: poll,
+        });
+      }
+      await onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -310,7 +344,9 @@ function CreateSourceModal({
           <div className="flex items-center gap-2">
             <span className="text-xl">🕸️</span>
             <div>
-              <h3 className="text-sm font-bold text-slate-900">添加数据源 · 网页/站点</h3>
+              <h3 className="text-sm font-bold text-slate-900">
+                {isEdit ? `编辑数据源 · ${source?.name}` : "添加数据源 · 网页/站点"}
+              </h3>
               <p className="text-[11px] text-slate-400">同域抓取,自动去噪转 Markdown 入库(遵循 robots.txt)</p>
             </div>
           </div>
@@ -403,11 +439,11 @@ function CreateSourceModal({
           </button>
           <button
             type="button"
-            disabled={saving || !form.urls.trim()}
+            disabled={saving || (!isEdit && !form.urls.trim())}
             onClick={() => void handleSubmit()}
             className="rounded-md bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
           >
-            {saving ? "创建中..." : "创建数据源"}
+            {saving ? "保存中..." : isEdit ? "保存修改" : "创建数据源"}
           </button>
         </div>
       </div>

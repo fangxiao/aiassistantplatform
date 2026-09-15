@@ -1,13 +1,43 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiGet } from "../../lib/api/client";
 import { createSession, sendMessage } from "../../lib/api/chat";
 import { listKbs, listSources, type DataSourceInfo } from "../../lib/api/kb";
 import type { KbInfo } from "../../lib/types";
 
 /** 每日简报(M14 P1,需求 007 U7):按钮触发,前端聚合平台动态注入 prompt,
- *  复用会话链路生成;产出可收藏入库。非定时推送——主动唤醒属 P2 平台能力。 */
+ *  复用会话链路生成;产出可收藏入库。非定时推送——主动唤醒属 P2 平台能力。
+ *  T14.8:生成完成自动归档(本地保留近 7 份),卡片可展开回看历史。 */
+
+const ARCHIVE_KEY = "workbench_briefings";
+
+interface BriefingArchiveItem {
+  date: string;
+  text: string;
+  session_id: string | null;
+  created_at: string;
+}
+
+function loadArchive(): BriefingArchiveItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(ARCHIVE_KEY);
+    const list = raw ? (JSON.parse(raw) as BriefingArchiveItem[]) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveToArchive(item: BriefingArchiveItem) {
+  // 同日覆盖(每日一份语义),其余保留,总量限近 7 份
+  const list = loadArchive().filter(
+    (x) => x.date !== item.date
+  );
+  list.unshift(item);
+  localStorage.setItem(ARCHIVE_KEY, JSON.stringify(list.slice(0, 7)));
+}
 
 interface Props {
   onContinue: (sessionId: string) => void;
@@ -21,6 +51,12 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
   const [text, setText] = useState("");
   const [sid, setSid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [archive, setArchive] = useState<BriefingArchiveItem[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
+
+  useEffect(() => {
+    setArchive(loadArchive());
+  }, []);
 
   const generate = async () => {
     setPhase("streaming");
@@ -81,6 +117,14 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
         }
       }
       if (!acc.trim()) throw new Error("模型未返回内容");
+      // T14.8:完成即归档(同日覆盖,保留近 7 份)
+      saveToArchive({
+        date: new Date().toLocaleDateString("zh-CN"),
+        text: acc,
+        session_id: session.id,
+        created_at: new Date().toISOString(),
+      });
+      setArchive(loadArchive());
       setPhase("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -141,6 +185,40 @@ export function BriefingCard({ onContinue, onSaveToKb }: Props) {
                 📚 存入知识库
               </button>
             </div>
+          </div>
+        )}
+
+        {/* T14.8:历史归档(本地近 7 份) */}
+        {archive.length > 0 && (
+          <div className="mt-3 border-t border-slate-100 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowArchive((v) => !v)}
+              className="text-[10px] font-medium text-slate-400 hover:text-slate-600"
+            >
+              {showArchive ? "收起历史" : `历史简报(${archive.length})`}
+            </button>
+            {showArchive && (
+              <div className="mt-1.5 space-y-1">
+                {archive.map((b) => (
+                  <div key={b.created_at} className="rounded-lg bg-slate-50 p-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-medium text-slate-600">{b.date}</span>
+                      {b.session_id && (
+                        <button
+                          type="button"
+                          onClick={() => onContinue(b.session_id!)}
+                          className="text-[9px] text-indigo-500 hover:text-indigo-700"
+                        >
+                          继续追问 →
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[10px] text-slate-500">{b.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

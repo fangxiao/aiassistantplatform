@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthUser, broadcastAuthSync, getUser, isAuthed, logout } from "../../lib/api/auth";
+import { NotificationBell } from "../workbench/NotificationBell";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -87,6 +88,7 @@ export function Navbar() {
         <div className="flex items-center gap-3">
           {authed && user ? (
             <div className="flex items-center gap-2">
+              <NotificationBell />
               <button
                 type="button"
                 onClick={() => setShowTokenModal(true)}

@@ -56,6 +56,19 @@ export async function deleteSource(kbId: string, sourceId: string): Promise<{ ok
   return apiDelete(`/kb/kbs/${kbId}/sources/${sourceId}`);
 }
 
+export async function updateSource(
+  kbId: string,
+  sourceId: string,
+  payload: {
+    name?: string;
+    config?: Record<string, any>;
+    poll_interval_minutes?: number | null;
+    status?: string;
+  }
+): Promise<DataSourceInfo> {
+  return apiPatch<DataSourceInfo>(`/kb/kbs/${kbId}/sources/${sourceId}`, payload);
+}
+
 export async function syncSource(kbId: string, sourceId: string): Promise<{ run_id: string; status: string }> {
   return apiPost(`/kb/kbs/${kbId}/sources/${sourceId}/sync`, {});
 }
