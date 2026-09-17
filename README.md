@@ -111,7 +111,7 @@ uv run python -m agentplatform.cli.main update ./my-assistant --target http://lo
 
 ---
 
-## 📋 里程碑达成矩阵 (M0 ~ M10)
+## 📋 里程碑达成矩阵 (M0 ~ M15)
 
 | 里程碑 | 状态 | 交付内容 |
 | :--- | :---: | :--- |
@@ -124,5 +124,10 @@ uv run python -m agentplatform.cli.main update ./my-assistant --target http://lo
 | **M6 · 对话 API 与 SSE 流式**| ✅ 已完成 | 会话与消息信封管理、`delta`/`tool_call`/`done`/`error` 流式事件 |
 | **M7 · 富交互组件体系** | ✅ 已完成 | `interact_events` 迁移、22 种 Renderer、深度防爆与交互回传 |
 | **M8 · 前端 WebUI 平台** | ✅ 已完成 | 对话工作台、会话管理抽屉、助手广场、开发者控制台 |
-| **M9 · 插件 SDK 与 CLI** | ✅ 已完成 | Python SDK 装饰器、CLI（init/validate/dev/test/deploy/logs） |
+| **M9 · 插件 SDK 与 CLI** | ✅ 已完成 | Python SDK 装饰器、CLI（init/validate/dev/test/deploy/logs）、一键安装脚本与自升级 |
 | **M10 · 集成与示例** | ✅ 已完成 | PRD 评审示例插件闭环、E2E 集成测试、全套部署与开发者指南 |
+| **M11 · 端云协同 Browser Agent** | ✅ 已完成 | 交互回填续跑、WebSocket 隧道生产化、html_cleaner、可选依赖与本地回退 (T11.1-T11.11) |
+| **M12 · 知识库** | ✅ 已完成 | pgvector 检索、kb_search 工具、公共库发布、会话挂载、会话产出入库、shared 成员、助手挂载公共库 (T12.1-T12.17) |
+| **M13 · 内容型连接器** | ✅ P0 完成 | 连接器框架 + 网页适配器(SSRF 防护/robots/同域抓取) + 调度器 + 数据源管理 UI;GitHub/飞书/Confluence 排期中 |
+| **M14 · 个人工作台** | ✅ 已完成 | 双视图工作台、云端待办与 AI 联动 (tool:workbench_todo)、每日简报与归档、通知铃铛、新会话选择器 |
+| **M15 · 定时唤醒 Agent** | ✅ P0 完成 | Scheduled Agent Runs:任务调度执行器(复用会话链路)、晨报/巡检/自定义模板、自动简报落卡、失败通知 |

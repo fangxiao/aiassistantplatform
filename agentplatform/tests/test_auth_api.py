@@ -7,6 +7,8 @@
 
 from collections.abc import AsyncIterator
 
+import uuid
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,3 +112,29 @@ class TestProtectedEndpoints:
             "/api/registry/skills", headers={"Authorization": f"Bearer {token}"}
         )
         assert resp.status_code == 200
+
+class TestRegisterRoleHardening:
+    """角色收紧(2026-09-17):自选 developer 默认降级为 user;显式开关才放行。"""
+
+    async def test_self_promoted_developer_downgraded(self, raw_client: AsyncClient) -> None:
+        resp = await raw_client.post(
+            "/api/auth/register",
+            json={"email": f"selfpromo-{uuid.uuid4().hex[:8]}@test.dev",
+                  "password": "password123", "role": "developer"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["role"] == "user"  # 静默降级,不报错
+
+    async def test_self_promote_allowed_when_enabled(
+        self, raw_client: AsyncClient, monkeypatch
+    ) -> None:
+        from agentplatform.config import settings
+
+        monkeypatch.setattr(settings, "allow_self_promote_developer", True)
+        resp = await raw_client.post(
+            "/api/auth/register",
+            json={"email": f"devallowed-{uuid.uuid4().hex[:8]}@test.dev",
+                  "password": "password123", "role": "developer"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["role"] == "developer"

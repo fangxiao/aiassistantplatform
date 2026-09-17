@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import get_current_user
 from agentplatform.core.auth.errors import AuthError
-from agentplatform.core.auth.model import User
+from agentplatform.core.auth.model import User, UserRole
 from agentplatform.core.auth.schemas import (
     LoginRequest,
     RegisterRequest,
@@ -39,11 +39,18 @@ async def register(
     payload: RegisterRequest,
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """注册新用户;email 冲突 409。"""
+    """注册新用户;email 冲突 409。
+
+    角色收紧(2026-09-17):自选 developer 仅在 settings.allow_self_promote_developer
+    显式开启(本地开发)时生效;默认一律注册为普通 user,防止接口自行提权。
+    """
+    from agentplatform.config import settings
+
+    role = payload.role
+    if role == UserRole.developer and not settings.allow_self_promote_developer:
+        role = UserRole.user
     try:
-        user = await create_user(
-            session, payload.email, payload.password, payload.role
-        )
+        user = await create_user(session, payload.email, payload.password, role)
     except AuthError as exc:
         raise _auth_error_to_http(exc) from exc
     await session.commit()
