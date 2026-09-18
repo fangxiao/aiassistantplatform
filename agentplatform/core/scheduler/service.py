@@ -180,6 +180,13 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
                 resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
             if WORKBENCH_TODO_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, WORKBENCH_TODO_TOOL_ID]
+            from agentplatform.core.memory.tool import MEMORY_TOOL_ID
+            from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
+
+            if MEMORY_TOOL_ID not in resource_ids:
+                resource_ids = [*resource_ids, MEMORY_TOOL_ID]
+            if WEB_SEARCH_TOOL_ID not in resource_ids:
+                resource_ids = [*resource_ids, WEB_SEARCH_TOOL_ID]
 
             # 3. prompt:kind 模板 + 服务端聚合上下文
             context = await build_context(db, str(task.user_id), task.kind)
@@ -190,6 +197,9 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             await save_user_message(db, chat_sess.id, prompt)
             from agentplatform.core.agent.loop import run_agent
 
+            from agentplatform.core.memory import service as memory_service
+
+            memories = await memory_service.memories_for_prompt(db, str(task.user_id))
             result = await asyncio.wait_for(
                 run_agent(
                     db,
@@ -199,6 +209,7 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
                     history=[],
                     owner_id=str(task.user_id),
                     allowed_kb_ids=allowed_kb_ids,
+                    memories=memories,
                 ),
                 timeout=settings.scheduler_run_timeout_s,
             )

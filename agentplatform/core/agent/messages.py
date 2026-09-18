@@ -21,9 +21,15 @@ KB_GUIDANCE = (
 
 
 def build_system_prompt(
-    resources: list[SkillTool], plugin_desc: str | None = None
+    resources: list[SkillTool],
+    plugin_desc: str | None = None,
+    memories: list[str] | None = None,
 ) -> str:
-    """系统提示: 说明助手职责、领域规范及可用工具。"""
+    """系统提示: 说明助手职责、领域规范及可用工具。
+
+    memories(M15 P1):用户长期记忆(偏好/事实),由 tool:memory 维护,
+    每次会话组装时注入——让助手"记得"用户,而非每次从零开始。
+    """
     lines: list[str] = []
     if plugin_desc:
         lines.append(f"【你的角色与核心定位】\n{plugin_desc}\n")
@@ -34,6 +40,15 @@ def build_system_prompt(
     skills = [r for r in resources if r.kind == SkillToolKind.skill]
     for s in skills:
         lines.append(f"【专业技能与知识规范 · {s.name or s.id}】\n{s.description or ''}\n")
+
+    # 用户长期记忆(M15 P1):有记忆才注入,控制 token 占用
+    if memories:
+        items = "\n".join(f"- {m}" for m in memories[:20])
+        lines.append(
+            "【关于该用户的长期记忆】\n"
+            f"{items}\n"
+            "(来自用户历史交互,回答时自然遵循这些偏好与事实;可用 tool:memory 更新)\n"
+        )
 
     # 依赖知识库的插件:自动注入检索使用说明(M12,设计 008 §5)
     has_kb = any(r.kind == SkillToolKind.kb or r.id == "tool:kb_search" for r in resources)

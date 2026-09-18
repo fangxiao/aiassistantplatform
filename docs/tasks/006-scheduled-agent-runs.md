@@ -14,5 +14,6 @@
 | T15.6 ✅ | 测试:next_run_at 计算、执行器(假 LLM 产出落 run、失败落 error、权限隔离)、API 鉴权/配额;全量回归 | T15.4 | P0 |
 | T15.7 ✅ | **P1 体验完善**(2026-09-18):通知分级——巡检/晨报产出首行 [ALERT] 标记落 task_runs.alert,异常才进通知铃铛(warn 级),正常静默落卡;存库目标选择——scheduled_tasks.target_kb_id,任务表单下拉可写库;模板丰富——新增 📅 周报/🕰️ 文档新鲜度检查(freshness 聚合每库最新/最旧文档) | T15.6 | P1 |
 | T15.8 | 插件声明 schedules(plugin.yaml)/ cron 表达式 / 通道推送 | T15.6 | P2 |
+| T15.9 ✅ | **能力代差补齐**(2026-09-18,对标豆包类产品):`tool:web_search` 联网搜索(Tavily 协议,WEB_SEARCH_API_KEY 配置,未配置优雅降级)+ `tool:memory` 长期记忆(user_memories 表,save/list/delete,system prompt 注入最近 20 条,会话与定时任务共用)——助手从"不知道、不记得"补齐到与终端产品同水平线 | T15.6 | P1 |
 
 验收对照需求 008 §4:P0 覆盖 1/2/3/4/5/6/7/8 全部八条(2=重启恢复由 next_run_at 持久化 + 启动即扫保证)。

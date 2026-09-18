@@ -115,10 +115,20 @@ async def agent_stream_for_session(
         resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
     # 个人待办工具无条件注入(M14 AI 联动):平台级个人能力,不要求助手声明依赖
     from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
+    from agentplatform.core.memory.tool import MEMORY_TOOL_ID
+    from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
 
     if WORKBENCH_TODO_TOOL_ID not in resource_ids:
         resource_ids = [*resource_ids, WORKBENCH_TODO_TOOL_ID]
+    if MEMORY_TOOL_ID not in resource_ids:
+        resource_ids = [*resource_ids, MEMORY_TOOL_ID]
+    if WEB_SEARCH_TOOL_ID not in resource_ids:
+        resource_ids = [*resource_ids, WEB_SEARCH_TOOL_ID]
 
+    # 用户长期记忆注入(M15 P1):有记忆才传,助手"记得"用户
+    from agentplatform.core.memory import service as memory_service
+
+    memories = await memory_service.memories_for_prompt(session, str(sess.user_id)) if sess.user_id else []
     history = await build_history(session, session_id)
     # history 末尾是刚保存的用户消息,拆出作为 user_message,其余作为前文
     if history:
@@ -134,5 +144,6 @@ async def agent_stream_for_session(
         owner_id=str(sess.user_id) if sess.user_id else None,
         plugin_desc=(plugin.manifest or {}).get("description") if plugin else None,
         allowed_kb_ids=allowed_kb_ids,
+        memories=memories,
     ):
         yield ev

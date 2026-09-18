@@ -23,6 +23,8 @@ from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, run_kb_search
 from agentplatform.core.llm.client import ToolCall
 from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
+from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID, run as web_search_run
+from agentplatform.core.memory.tool import MEMORY_TOOL_ID, run as memory_run
 from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
 from agentplatform.core.workbench.todo_tool import run as todo_run
 
@@ -146,6 +148,7 @@ async def stream_agent(
     owner_id: str | None = None,
     plugin_desc: str | None = None,
     allowed_kb_ids: list[uuid.UUID] | None = None,
+    memories: list[str] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
@@ -173,7 +176,9 @@ async def stream_agent(
     # 携带空闲事务进入长流式阶段会被 PG 终止连接,导致最终结果无法落库。
     await session.commit()
 
-    system = build_system_prompt(list(resources.values()), plugin_desc=plugin_desc)
+    system = build_system_prompt(
+        list(resources.values()), plugin_desc=plugin_desc, memories=memories
+    )
     messages = build_messages(system, history, user_message)
 
     import asyncio
@@ -200,6 +205,12 @@ async def stream_agent(
             if resource.id == WORKBENCH_TODO_TOOL_ID:
                 # 个人待办:需要会话用户上下文(M14;与 kb_search 同款特判模式)
                 return await todo_run(session, owner_id or "", args)
+            if resource.id == MEMORY_TOOL_ID:
+                # 长期记忆:需要会话用户上下文(M15 P1)
+                return await memory_run(session, owner_id or "", args)
+            if resource.id == WEB_SEARCH_TOOL_ID:
+                # 联网搜索:无 DB 依赖,纯网络调用(M15 P1)
+                return await web_search_run(args)
             if resource.kind == SkillToolKind.tool:
                 return await execute_tool(resource, args)
             return await execute_skill(resource, args, skill_call)
