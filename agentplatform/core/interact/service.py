@@ -45,7 +45,29 @@ async def handle_interaction(
     # 对于通用确认/表单提交等动作生成响应 ContentBlock
     response_blocks: list[dict[str, Any]] = []
 
-    if action.endswith("confirm") or action == "input.confirm":
+    # M17 P1:写操作确认回填(http_action:<confirm_id> → 执行/取消挂起的请求)
+    if action.startswith("http_action:"):
+        from agentplatform.core.agent.http_action import confirm_and_run
+
+        confirm_id = action.split(":", 1)[1]
+        approved = bool(value.get("confirmed") if isinstance(value, dict) else value)
+        outcome = await confirm_and_run(confirm_id, approved)
+        import json as _json
+
+        try:
+            data = _json.loads(outcome)
+        except Exception:  # noqa: BLE001
+            data = {"ok": False, "error": outcome[:200]}
+        if data.get("cancelled"):
+            text = f"🚫 **写操作已取消**"
+        elif data.get("ok"):
+            body = str(data.get("body") or "")[:600]
+            text = f"✅ **写操作已执行**(HTTP {data.get('status')})\n\n```\n{body}\n```"
+        else:
+            text = f"⚠️ **写操作执行失败**: {data.get('error', '未知错误')}"
+        response_blocks.append({"type": "markdown", "data": {"text": text}})
+
+    elif action.endswith("confirm") or action == "input.confirm":
         confirmed = bool(value.get("confirmed") if isinstance(value, dict) else value)
         status_text = "已确认操作" if confirmed else "已取消操作"
         response_blocks.append({

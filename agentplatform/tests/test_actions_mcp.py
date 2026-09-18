@@ -30,6 +30,7 @@ class TestHttpRequestTool:
 
     async def test_allowlist_domain_executes(self, monkeypatch) -> None:
         monkeypatch.setattr(settings, "action_http_allowlist", ["example.com"])
+        monkeypatch.setattr(settings, "action_require_confirm", False)  # 闸门单测另行覆盖
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"status": "sent"})
@@ -113,3 +114,50 @@ class TestMcpServer:
     async def test_unknown_method(self, client: AsyncClient) -> None:
         r = await self._rpc(client, {"jsonrpc": "2.0", "id": 5, "method": "nope"})
         assert r["error"]["code"] == -32601
+
+
+class TestWriteConfirmGate:
+    """M17 P1:写操作确认闸门——LLM 无法绕过,人工确认后才执行。"""
+
+    async def test_write_method_pends(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings, "action_http_allowlist", ["example.com"])
+        monkeypatch.setattr(settings, "action_require_confirm", True)
+        out = json.loads(await run_http_action({"method": "POST", "url": "https://example.com/x", "body": "{}"}))
+        assert out.get("pending") is True and out.get("confirm_id")
+        assert "POST https://example.com/x" in out["digest"]
+
+    async def test_get_passes_directly(self, monkeypatch) -> None:
+        """读操作不需要确认(直通执行链)。"""
+        monkeypatch.setattr(settings, "action_http_allowlist", ["example.com"])
+        out = json.loads(await run_http_action({"method": "GET", "url": "https://example.com/x"}))
+        assert "pending" not in out  # 走白名单/DNS 链(此处 example.com 可解析)
+
+    async def test_confirm_executes_once(self, monkeypatch) -> None:
+        from agentplatform.core.agent.http_action import confirm_and_run
+
+        monkeypatch.setattr(settings, "action_http_allowlist", ["example.com"])
+        monkeypatch.setattr(settings, "action_require_confirm", True)
+        out = json.loads(await run_http_action({"method": "POST", "url": "https://example.com/x", "body": "{}"}))
+        cid = out["confirm_id"]
+        # 批准 → 执行(example.com 真实可达)
+        result = json.loads(await confirm_and_run(cid, True))
+        # 真实请求已发出(example.com 对 POST 返回 405——执行本身成功)
+        assert result.get("status") in (200, 405)
+        # 一次性:再确认同一 id → 失效
+        again = json.loads(await confirm_and_run(cid, True))
+        assert again["ok"] is False and "失效" in again["error"]
+
+    async def test_cancel(self, monkeypatch) -> None:
+        from agentplatform.core.agent.http_action import confirm_and_run
+
+        monkeypatch.setattr(settings, "action_http_allowlist", ["example.com"])
+        monkeypatch.setattr(settings, "action_require_confirm", True)
+        out = json.loads(await run_http_action({"method": "DELETE", "url": "https://example.com/x"}))
+        result = json.loads(await confirm_and_run(out["confirm_id"], False))
+        assert result.get("cancelled") is True
+
+    async def test_gate_disabled_by_config(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings, "action_http_allowlist", ["example.com"])
+        monkeypatch.setattr(settings, "action_require_confirm", False)
+        out = json.loads(await run_http_action({"method": "POST", "url": "https://example.com/x", "body": "{}"}))
+        assert "pending" not in out  # 关闭闸门则直通

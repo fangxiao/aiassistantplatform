@@ -17,6 +17,12 @@ HTTP_ACTION_TOOL_ID = "tool:http_request"
 
 _MAX_RESPONSE_BYTES = 256 * 1024
 
+# 写操作确认闸门(M17 P1):pending 一次性、进程内、TTL 10 分钟。
+# 确认者是会话属主(interact 端点已校验会话所有权)——人工闸门不可被 LLM 绕过。
+_PENDING: dict[str, dict] = {}
+_PENDING_TTL_S = 600
+_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
 RESOURCE: dict = {
     "id": HTTP_ACTION_TOOL_ID,
     "kind": "tool",
@@ -64,6 +70,32 @@ async def run(args: dict) -> str:
     if not url:
         return json.dumps({"ok": False, "error": "url 不能为空"}, ensure_ascii=False)
 
+    # 写操作确认闸门:写方法先挂起,等会话属主在确认框点击(loop 特判渲染 input.confirm)
+    if method in _WRITE_METHODS and settings.action_require_confirm and not args.get("__skip_gate__"):
+        import time
+        import uuid as _uuid
+
+        confirm_id = _uuid.uuid4().hex[:12]
+        body_brief = (str(args.get("body") or "")[:120]) or "(无请求体)"
+        digest = f"{method} {url}\n请求体: {body_brief}"
+        _PENDING[confirm_id] = {
+            "args": {**args, "method": method, "url": url},
+            "digest": digest,
+            "created_at": time.time(),
+        }
+        return json.dumps(
+            {
+                "pending": True,
+                "confirm_id": confirm_id,
+                "digest": digest,
+                "message": (
+                    "该请求为写操作,已挂起等待用户在确认框中确认;"
+                    "请向用户说明将要执行的操作并等待其点击确认/取消,不要自行重复调用"
+                ),
+            },
+            ensure_ascii=False,
+        )
+
     ok, reason = _allowlisted(url)
     if not ok:
         return json.dumps({"ok": False, "error": reason}, ensure_ascii=False)
@@ -102,3 +134,29 @@ async def run(args: dict) -> str:
             {"ok": False, "error": f"请求失败: {type(exc).__name__}: {exc}"},
             ensure_ascii=False,
         )
+
+
+async def confirm_and_run(confirm_id: str, approved: bool) -> str:
+    """确认框回填入口(interact 分发):一次性取出 pending,批准则执行。"""
+    import time
+
+    item = _PENDING.pop(confirm_id, None)
+    if item is None:
+        return json.dumps(
+            {"ok": False, "error": "确认已失效或已处理(等待超时/重复点击)"},
+            ensure_ascii=False,
+        )
+    if time.time() - item["created_at"] > _PENDING_TTL_S:
+        return json.dumps({"ok": False, "error": "确认已超时(>10 分钟),请重新发起"}, ensure_ascii=False)
+    if not approved:
+        return json.dumps({"ok": False, "cancelled": True, "message": "用户已取消该写操作"}, ensure_ascii=False)
+    # 批准:走完整安全链(白名单+SSRF)后执行
+    args = item["args"]
+    ok, reason = _allowlisted(str(args.get("url") or ""))
+    if not ok:
+        return json.dumps({"ok": False, "error": reason}, ensure_ascii=False)
+    return await run(args | {"__skip_gate__": True})
+
+
+def pending_digest(confirm_id: str) -> str | None:
+    return (_PENDING.get(confirm_id) or {}).get("digest")

@@ -204,6 +204,9 @@ async def stream_agent(
                 await skill_delta_queue.put(e.text)
         return "".join(chunks)
 
+    # M17 P1:写操作确认框积攒区(执行后由 block_meta 通道下发)
+    pending_confirm_blocks: list[dict] = []
+
     async def execute(resource: SkillTool | None, arguments: str) -> str:
         """执行单个 tool_call,任何异常都回填为文本(让 LLM 可自纠)。"""
         if resource is None:
@@ -223,8 +226,29 @@ async def stream_agent(
                 # 联网搜索:无 DB 依赖,纯网络调用(M15 P1)
                 return await web_search_run(args)
             if resource.id == HTTP_ACTION_TOOL_ID:
-                # 通用 HTTP 动作:白名单+SSRF 约束(M17),无 DB 依赖
-                return await http_action_run(args)
+                # 通用 HTTP 动作:白名单+SSRF 约束(M17);写操作挂起等用户确认(M17 P1)
+                result = await http_action_run(args)
+                try:
+                    import json as _json
+
+                    data = _json.loads(result)
+                    if isinstance(data, dict) and data.get("pending"):
+                        confirm_id = data.get("confirm_id", "")
+                        digest = data.get("digest", "")
+                        pending_confirm_blocks.append(
+                            {
+                                "type": "input.confirm",
+                                "data": {
+                                    "text": f"⚠️ 助手请求执行写操作,请确认:\n{digest}",
+                                    "action": f"http_action:{confirm_id}",
+                                    "confirm_text": "确认执行",
+                                    "cancel_text": "取消",
+                                },
+                            }
+                        )
+                except Exception:  # noqa: BLE001  非 JSON 不处理
+                    pass
+                return result
             if resource.kind == SkillToolKind.tool:
                 return await execute_tool(resource, args)
             return await execute_skill(resource, args, skill_call)
@@ -420,6 +444,10 @@ async def stream_agent(
                         id=norm_name, args=tool_args, result=result
                     )
                     yield AgentEvent(type="tool_call", tool_trace=trace)
+                    # M17 P1:写操作确认框下发(由 execute 内积攒)
+                    for confirm_block in pending_confirm_blocks:
+                        yield AgentEvent(type="block_meta", block=confirm_block)
+                    pending_confirm_blocks.clear()
 
                     # 3. 如果是预览工具，自动向前端下发文件下载/预览卡片
                     if "writewx_preview" in norm_name:

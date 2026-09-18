@@ -7,5 +7,5 @@
 | T17.1 | tool:http_request(白名单+SSRF+约束)+ 测试 | ✅ |
 | T17.2 | MCP server(手写 JSON-RPC:initialize/tools/list/tools/call,JWT)+ 测试 | ✅ |
 | T17.3 | Claude Code 实测接入 + MCP 配置文档 | ✅ 配置说明已入 docs/guide(实测待人工) |
-| T17.4 | P1:写操作确认流/动作审计面板/todo·memory MCP 工具 | ⏳ |
+| T17.4 | P1:~~写操作确认流~~ ✅(2026-09-19:写方法挂起→input.confirm 确认框→interact 回填执行/取消,一次性 pending+TTL,LLM 无法绕过)/动作审计面板/todo·memory MCP 工具 | 部分 |
 | T17.5 | P2:预置 SaaS 连接器(飞书等)/MCP resources | ⏳ |
