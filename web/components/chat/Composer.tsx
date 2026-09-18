@@ -124,7 +124,7 @@ export default function Composer({
         type="button"
         className="rounded-xl bg-slate-900 px-5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 shadow-xs flex items-center justify-center min-w-[72px]"
         onClick={submit}
-        disabled={disabled || !value.trim()}
+        disabled={disabled || (!value.trim() && images.length === 0)}
       >
         {disabled ? "生成中…" : "发送 ↑"}
       </button>
