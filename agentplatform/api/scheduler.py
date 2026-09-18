@@ -31,6 +31,7 @@ class TaskIn(BaseModel):
     plugin_id: uuid.UUID | None = None
     mounted_kb_ids: list[uuid.UUID] = []
     auto_save_kb: bool = False
+    target_kb_id: uuid.UUID | None = None  # P1:自动存库目标(空=回退首个可写库)
     enabled: bool = True
 
 
@@ -45,6 +46,7 @@ class TaskOut(BaseModel):
     plugin_id: uuid.UUID | None
     mounted_kb_ids: list[uuid.UUID]
     auto_save_kb: bool
+    target_kb_id: uuid.UUID | None
     enabled: bool
     last_run_at: datetime | None
     next_run_at: datetime | None
@@ -70,7 +72,7 @@ def _task_out(t: ScheduledTask) -> TaskOut:
         schedule_type=t.schedule_type, daily_at=t.daily_at,
         interval_minutes=t.interval_minutes, plugin_id=t.plugin_id,
         mounted_kb_ids=[uuid.UUID(k) for k in (t.mounted_kb_ids or [])],
-        auto_save_kb=t.auto_save_kb, enabled=t.enabled,
+        auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id, enabled=t.enabled,
         last_run_at=t.last_run_at, next_run_at=t.next_run_at,
         last_status=t.last_status, last_error=t.last_error, created_at=t.created_at,
     )
@@ -120,6 +122,7 @@ async def create_task(
             plugin_id=payload.plugin_id,
             mounted_kb_ids=[str(k) for k in payload.mounted_kb_ids],
             auto_save_kb=payload.auto_save_kb,
+            target_kb_id=payload.target_kb_id,
             enabled=payload.enabled,
         )
     except scheduler_service.SchedulerError as exc:
@@ -146,6 +149,7 @@ async def update_task(
     task.plugin_id = payload.plugin_id
     task.mounted_kb_ids = [str(k) for k in payload.mounted_kb_ids]
     task.auto_save_kb = payload.auto_save_kb
+    task.target_kb_id = payload.target_kb_id
     task.enabled = payload.enabled
     task.next_run_at = scheduler_service.compute_next_run(task, datetime.now())
     await db.commit()

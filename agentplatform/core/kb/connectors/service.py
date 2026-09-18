@@ -50,6 +50,10 @@ def validate_config(source_type: str, config: dict) -> dict:
         urls = [u for u in (config.get("urls") or []) if str(u).strip()]
         if not urls:
             raise KbError("网页数据源至少配置一个种子 URL(config.urls)")
+    if source_type == KbDataSourceType.github.value:
+        repo = str(config.get("repo") or "").strip()
+        if repo.count("/") != 1 or not repo.replace("/", "").replace("_", "").replace("-", "").replace(".", "").isalnum():
+            raise KbError("GitHub 数据源必须配置 repo(owner/repo 格式)")
     return config
 
 

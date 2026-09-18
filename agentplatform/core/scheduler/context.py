@@ -46,14 +46,67 @@ async def _kb_activity(db: AsyncSession, user_id: str, limit: int = 8) -> list[d
 
 async def build_context(db: AsyncSession, user_id: str, kind: str) -> dict:
     """按任务类型聚合上下文;custom 返回空 dict(prompt 原样)。"""
-    if kind not in ("briefing", "inspection"):
+    if kind not in ("briefing", "inspection", "freshness"):
         return {}
     todos = await todo_service.list_todos(db, str(user_id))
     open_todos = [t.text for t in todos if not t.done]
-    return {
+    context: dict = {
         "kbs": await _kb_activity(db, str(user_id)),
         "pending_todos": {"count": len(open_todos), "items": open_todos[:5]},
     }
+    if kind == "freshness":
+        context["freshness"] = await _doc_freshness(db, str(user_id))
+    return context
+
+
+async def _doc_freshness(db: AsyncSession, user_id: str, limit: int = 8) -> list[dict]:
+    """文档新鲜度(P1):每库最近入库时间与最久未更新的文档(供 freshness 模板)。"""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from agentplatform.core.kb.model import KbDocument, KbDocumentStatus
+
+    rows: list[KnowledgeBase] = await kb_service.list_visible_kbs(db, str(user_id))
+    out: list[dict] = []
+    for kb in rows[:limit]:
+        latest_doc = await db.scalar(
+            select(KbDocument)
+            .where(
+                KbDocument.kb_id == kb.id,
+                KbDocument.status != KbDocumentStatus.deleted,
+            )
+            .order_by(KbDocument.created_at.desc())
+            .limit(1)
+        )
+        stale_doc = await db.scalar(
+            select(KbDocument)
+            .where(
+                KbDocument.kb_id == kb.id,
+                KbDocument.status == KbDocumentStatus.ready,
+            )
+            .order_by(KbDocument.created_at.asc())
+            .limit(1)
+        )
+        out.append(
+            {
+                "kb": kb.name,
+                "latest_doc": (
+                    {"name": latest_doc.filename, "at": latest_doc.created_at.isoformat()}
+                    if latest_doc
+                    else None
+                ),
+                "stale_doc": (
+                    {
+                        "name": stale_doc.filename,
+                        "days": (datetime.now(UTC) - stale_doc.created_at).days,
+                    }
+                    if stale_doc
+                    else None
+                ),
+            }
+        )
+    return out
 
 
 def build_prompt(task_kind: str, extra_prompt: str, context: dict) -> str:
@@ -69,10 +122,22 @@ def build_prompt(task_kind: str, extra_prompt: str, context: dict) -> str:
         )
     elif task_kind == "inspection":
         base = (
-            "你是平台巡检助手。请检查以下知识库与数据源状态数据,"
-            "仅报告异常项(同步失败/部分失败/长期未同步)与对应的处理建议;"
-            "全部正常时输出「巡检通过:全部知识库与数据源状态正常」。"
-            "100 字以内,直接输出结论。数据:\n"
+            "你是平台巡检助手。请检查以下知识库与数据源状态数据。"
+            "**输出第一行必须是 [OK] 或 [ALERT] 标记**:发现任一异常(同步失败/部分失败/"
+            "长期未同步)时首行输出 [ALERT] 并列出异常与建议;全部正常时首行输出 [OK],"
+            "第二行起输出「巡检通过:全部知识库与数据源状态正常」。100 字以内,直接输出结论。数据:\n"
+        )
+    elif task_kind == "weekly_report":
+        base = (
+            "你是平台工作台助手。请根据以下平台数据生成一段中文周报(250 字以内),"
+            "包含:①知识库资产概览(库数/文档量);②数据源健康度汇总;③未完成待办清单;"
+            "④下周建议关注的 1-2 件事。直接输出正文,不要开场白。数据:\n"
+        )
+    elif task_kind == "freshness":
+        base = (
+            "你是知识库维护助手。请根据以下文档新鲜度数据,生成一份维护建议(150 字以内):"
+            "列出最久未更新的文档与长期未同步的数据源,给出哪些需要重新同步或更新"
+            "的具体建议;一切新鲜时如实说明。直接输出正文,不要开场白。数据:\n"
         )
     else:
         return extra_prompt.strip()

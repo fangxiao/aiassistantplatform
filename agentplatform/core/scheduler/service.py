@@ -18,7 +18,7 @@ from agentplatform.core.scheduler.model import ScheduledTask, TaskRun
 
 logger = logging.getLogger(__name__)
 
-TASK_KINDS = ("briefing", "inspection", "custom")
+TASK_KINDS = ("briefing", "inspection", "custom", "weekly_report", "freshness")
 
 
 class SchedulerError(Exception):
@@ -209,6 +209,8 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run.output = output
             run.session_id = chat_sess.id
             run.status = "success"
+            # P1 通知分级:产出首行 [ALERT] 标记 → alert=True 进通知;正常静默落卡
+            run.alert = output.splitlines()[0].strip().startswith("[ALERT]") if output else False
             task.last_status = "success"
             await _maybe_autosave(db, task, chat_sess, output)
         except Exception as exc:  # noqa: BLE001  任何异常都落终态(验收 3)
@@ -244,10 +246,16 @@ async def _maybe_autosave(db: AsyncSession, task: ScheduledTask, chat_sess, outp
             return
         kb_rows = await kb_service.list_visible_kbs(db, str(task.user_id))
         target = None
-        for kb in kb_rows:
-            if await kb_service.can_write(db, kb, owner):
-                target = kb
-                break
+        # P1:优先任务声明的目标库(须存在且可写);缺省回退首个可写库
+        if task.target_kb_id:
+            target = next((kb for kb in kb_rows if kb.id == task.target_kb_id), None)
+            if target is not None and not await kb_service.can_write(db, target, owner):
+                target = None
+        if target is None:
+            for kb in kb_rows:
+                if await kb_service.can_write(db, kb, owner):
+                    target = kb
+                    break
         if target is None:
             return
         await kb_service.add_document_from_text(

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 import { Card, Placeholder } from "./WorkbenchView";
+import type { KbInfo } from "../../lib/types";
 
 /** ⏰ 定时任务卡(M15 T15.5):用户级定时 agent 任务管理。
  *  列表(下次运行/状态)/新建编辑弹窗/启停/跑一次/运行记录(产出全文)。 */
@@ -16,6 +17,7 @@ interface SchedTask {
   daily_at: string | null;
   interval_minutes: number | null;
   auto_save_kb: boolean;
+  target_kb_id: string | null;
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -36,6 +38,8 @@ interface SchedRun {
 const KIND_META: Record<string, { icon: string; label: string }> = {
   briefing: { icon: "📰", label: "每日晨报" },
   inspection: { icon: "🔍", label: "巡检" },
+  weekly_report: { icon: "📅", label: "周报" },
+  freshness: { icon: "🕰️", label: "新鲜度检查" },
   custom: { icon: "🧩", label: "自定义" },
 };
 
@@ -298,6 +302,7 @@ function TaskFormModal({
     daily_at: task?.daily_at ?? "08:00",
     interval_minutes: String(task?.interval_minutes ?? 60),
     auto_save_kb: task?.auto_save_kb ?? false,
+    target_kb_id: task?.target_kb_id ?? "",
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -314,6 +319,7 @@ function TaskFormModal({
         daily_at: form.schedule_type === "daily" ? form.daily_at : null,
         interval_minutes: form.schedule_type === "interval" ? parseInt(form.interval_minutes, 10) || 60 : null,
         auto_save_kb: form.auto_save_kb,
+        target_kb_id: form.target_kb_id || null,
         enabled: task?.enabled ?? true,
       };
       if (isEdit && task) {
@@ -363,7 +369,9 @@ function TaskFormModal({
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
             >
               <option value="briefing">📰 每日晨报(聚合知识库动态 + 待办)</option>
-              <option value="inspection">🔍 巡检(仅报告异常与建议)</option>
+              <option value="inspection">🔍 巡检(异常才通知,[OK]/[ALERT] 分级)</option>
+              <option value="weekly_report">📅 周报(资产概览 + 下周建议)</option>
+              <option value="freshness">🕰️ 文档新鲜度检查(最久未更新提醒)</option>
               <option value="custom">🧩 自定义指令</option>
             </select>
           </label>
@@ -436,6 +444,12 @@ function TaskFormModal({
             />
             <span className="text-[11px] text-slate-600">产出自动存入知识库</span>
           </label>
+          {form.auto_save_kb && (
+            <TargetKbSelect
+              value={form.target_kb_id}
+              onChange={(v) => setForm((f) => ({ ...f, target_kb_id: v }))}
+            />
+          )}
         </div>
 
         <div className="flex justify-end gap-2 pt-1">
@@ -453,5 +467,46 @@ function TaskFormModal({
         </div>
       </div>
     </div>
+  );
+}
+
+
+/** P1:自动存库目标选择(列出当前用户可写的库;空=系统自动选首个可写库)。 */
+function TargetKbSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [kbs, setKbs] = useState<KbInfo[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await apiGet<KbInfo[]>("/kb/kbs");
+        setKbs(list.filter((k) => k.can_write));
+      } catch {
+        setKbs([]);
+      }
+    })();
+  }, []);
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-semibold text-slate-600">存入目标库</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+      >
+        <option value="">自动(首个可写库)</option>
+        {kbs.map((k) => (
+          <option key={k.id} value={k.id}>
+            {k.visibility === "public" ? "🌐" : k.visibility === "shared" ? "👥" : "🔒"} {k.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

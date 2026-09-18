@@ -26,7 +26,7 @@ from agentplatform.core.kb.model import (
     KbDocument,
     KbDocumentStatus,
 )
-from agentplatform.core.kb.service import create_kb
+from agentplatform.core.kb.service import KbError, create_kb
 from agentplatform.core.registry.builtin.html_cleaner import run as html_cleaner_run
 
 
@@ -323,3 +323,77 @@ async def test_html_cleaner_produces_markdown_for_connector():
     out = _json.loads(html_cleaner_run(PAGE_A, extract_tables=False))
     assert out["title"] == "页面A"
     assert "标题A" in out["cleaned_markdown"]
+
+
+# ---------------------------------------------------------------- GitHub 连接器(T13.8)
+
+
+def _github_transport(tree: list[dict], files: dict[str, str]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/git/trees/" in url:
+            return httpx.Response(200, json={"tree": tree})
+        if "/contents/" in url:
+            path = url.split("/contents/")[1].split("?")[0]
+            body = files.get(path)
+            if body is None:
+                return httpx.Response(404)
+            return httpx.Response(
+                200, text=body,
+                headers={"content-type": "application/vnd.github.raw"},
+            )
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+TREE = [
+    {"path": "README.md", "type": "blob", "size": 100},
+    {"path": "docs/guide.md", "type": "blob", "size": 100},
+    {"path": "docs/api.txt", "type": "blob", "size": 100},
+    {"path": "src/main.py", "type": "blob", "size": 100},
+    {"path": "docs/design", "type": "tree", "size": 0},
+    {"path": "docs/huge.md", "type": "blob", "size": 99 * 1024 * 1024},
+]
+FILES = {
+    "README.md": "# README 内容",
+    "docs/guide.md": "# 指南 正文",
+    "docs/api.txt": "API 文本",
+    "src/main.py": "print('x')",
+    "docs/huge.md": "huge",
+}
+
+
+class TestGithubAdapter:
+    async def test_fetch_tree_and_filter(self) -> None:
+        """trees 枚举 + 前缀/后缀/大小/类型过滤;external_id=路径,url=blob 链接。"""
+        from agentplatform.core.kb.connectors.github import fetch as gh_fetch
+
+        result = await gh_fetch(
+            {"repo": "acme/docs", "branch": "main", "paths": ["docs"]},
+            {"token": "t"},
+            transport=_github_transport(TREE, FILES),
+        )
+        assert result.full is True
+        ids = [d.external_id for d in result.docs]
+        assert ids == ["docs/guide.md", "docs/api.txt"]
+        guide = result.docs[0]
+        assert guide.title == "guide.md"
+        assert guide.url == "https://github.com/acme/docs/blob/main/docs/guide.md"
+        assert "指南" in guide.content_markdown
+
+    async def test_bad_repo_raises(self) -> None:
+        from agentplatform.core.kb.connectors.github import fetch as gh_fetch
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404)
+
+        with pytest.raises(ValueError, match="仓库或分支不存在"):
+            await gh_fetch({"repo": "acme/nope", "branch": "main"}, {}, transport=httpx.MockTransport(handler))
+
+    async def test_invalid_config_rejected(self) -> None:
+        from agentplatform.core.kb.connectors.service import validate_config
+
+        with pytest.raises(KbError, match="owner/repo"):
+            validate_config("github", {"repo": "justname"})
+        validate_config("github", {"repo": "acme/docs"})  # 合法不抛

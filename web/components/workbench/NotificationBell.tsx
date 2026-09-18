@@ -88,6 +88,26 @@ export function NotificationBell() {
             tone: "danger",
             ts: t.last_run_at ?? new Date().toISOString(),
           });
+          continue;
+        }
+        // P1 通知分级:成功但产出带 [ALERT](如巡检发现异常)也进通知
+        try {
+          const runs = await apiGet<
+            { id: string; status: string; alert: boolean; finished_at: string | null; output: string | null }[]
+          >(`/scheduler/tasks/${t.id}/runs?limit=5`);
+          const alerted = runs.find((r) => r.status === "success" && r.alert);
+          if (alerted) {
+            list.push({
+              id: `task-alert-${alerted.id}`,
+              icon: "⏰",
+              title: `定时任务「${t.name}」发现异常`,
+              detail: (alerted.output ?? "").slice(0, 120),
+              tone: "warn",
+              ts: alerted.finished_at ?? new Date().toISOString(),
+            });
+          }
+        } catch {
+          /* ignore */
         }
       }
     } catch {

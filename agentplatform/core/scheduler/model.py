@@ -31,6 +31,8 @@ class ScheduledTask(Base):
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # 空=平台通用助手
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # 空=运行时取可见库
     auto_save_kb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # P1:自动存库目标(空=回退首个可写库);开启 auto_save_kb 时生效
+    target_kb_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -62,6 +64,8 @@ class TaskRun(Base):
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P1 通知分级:产出含异常([ALERT] 首行)时为 True——正常产出静默,异常才进通知
+    alert: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 Index("ix_task_runs_task_id", TaskRun.task_id)

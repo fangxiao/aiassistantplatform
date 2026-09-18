@@ -98,5 +98,5 @@
 
 - **P0 框架 + 网页连接器**:数据源模型/CRUD/凭据加密/同步编排/手动触发/运行记录/
   调度器骨架;网页 adapter(sitemap + 同域抓取 + html_cleaner + SSRF 防护)。
-- **P1 定时轮询 + GitHub**:轮询调度与启动恢复;GitHub adapter(SHA 增量最规整,先于飞书)。
+- **P1 定时轮询 + GitHub(2026-09-18 已完成)**:轮询调度与启动恢复;GitHub adapter(trees API 全量枚举 + hash 幂等)。
 - **P2 飞书 + Confluence**:OAuth/应用凭据、分页、格式转换各自适配。

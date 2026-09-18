@@ -32,7 +32,7 @@ M13
 | T13.5 ✅ | **调度器**:`connectors/scheduler.py` 60s tick 轮询 due 源 + 启动即扫(重启恢复);lifespan 启停;同 source running 拒绝天然防多 worker 重复 | T13.3 | P0 |
 | T13.6 ✅ | **WebUI**:kb 页「数据源」区(列表/状态/立即同步/运行历史)+ 新建弹窗(web 表单) | T13.4 | P0 |
 | T13.7 ✅ | **测试**:web adapter 单测(SSRF 拦截/同域/markdown/上限,MockTransport);编排幂等(首同步/更新/删除/跳过);API 集成(鉴权/202/凭据不回显);调度 due 判定;需求 006 验收 1/2/4/5/7/8 覆盖 | T13.4 | P0 |
-| T13.8 | **github adapter**:repo/分支/路径白名单/后缀过滤,Contents API,commit SHA 增量 | T13.3 | P1 |
+| T13.8 ✅ | **github adapter**(2026-09-18):Git Trees API 一次枚举全量 + raw 逐文件下载;repo/分支/路径前缀/后缀/大小过滤;PAT 密文存储;内容 hash 幂等(未变更跳过);数据源表单支持 github 类型 | T13.3 | P1 |
 | T13.9 | **feishu adapter**:自建应用凭据加密存储,wiki/文件夹枚举,docx→markdown,更新时间增量(full=False) | T13.3 | P2 |
 | T13.10 | **confluence adapter**:站点+PAT,空间 CQL,storage XHTML→markdown,version 增量 | T13.3 | P2 |
 

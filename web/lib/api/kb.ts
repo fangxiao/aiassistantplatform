@@ -47,7 +47,13 @@ export async function listSources(kbId: string): Promise<DataSourceInfo[]> {
 
 export async function createSource(
   kbId: string,
-  payload: { type: string; name: string; config: Record<string, any>; poll_interval_minutes?: number | null }
+  payload: {
+    type: string;
+    name: string;
+    config: Record<string, any>;
+    credentials?: Record<string, any> | null;
+    poll_interval_minutes?: number | null;
+  }
 ): Promise<DataSourceInfo> {
   return apiPost<DataSourceInfo>(`/kb/kbs/${kbId}/sources`, payload);
 }
@@ -62,6 +68,7 @@ export async function updateSource(
   payload: {
     name?: string;
     config?: Record<string, any>;
+    credentials?: Record<string, any> | null;
     poll_interval_minutes?: number | null;
     status?: string;
   }

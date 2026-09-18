@@ -287,7 +287,7 @@ function SourceFormModal({
   onSaved: () => void | Promise<void>;
 }) {
   const isEdit = !!source;
-  const [type] = useState<string>(source?.type ?? "web"); // M13 P0 仅网页;后续类型随 adapter 发布解锁
+  const [type, setType] = useState<string>(source?.type ?? "web"); // web / github(M13 P1)
   const [form, setForm] = useState(() => ({
     name: source?.name ?? "",
     urls: ((source?.config?.urls as string[]) ?? []).join("\n"),
@@ -295,6 +295,9 @@ function SourceFormModal({
     max_depth: String(source?.config?.max_depth ?? 2),
     max_pages: String(source?.config?.max_pages ?? 200),
     poll: source?.poll_interval_minutes != null ? String(source.poll_interval_minutes) : "",
+    branch: (source?.config?.branch as string) ?? "main",
+    paths: ((source?.config?.paths as string[]) ?? []).join("\n"),
+    token: "",
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -307,27 +310,39 @@ function SourceFormModal({
         .split("\n")
         .map((u) => u.trim())
         .filter(Boolean);
-      const config: Record<string, any> = {
-        urls,
-        max_depth: Math.max(0, parseInt(form.max_depth, 10) || 0),
-        max_pages: Math.max(1, parseInt(form.max_pages, 10) || 200),
-        respect_robots: true,
-      };
-      if (form.sitemap.trim()) config.sitemap = form.sitemap.trim();
       const poll = form.poll ? parseInt(form.poll, 10) : null;
+      const credentials = type === "github" && form.token.trim() ? { token: form.token.trim() } : undefined;
+      let config: Record<string, any>;
+      let name = form.name.trim();
+      if (type === "github") {
+        config = {
+          repo: form.urls.trim(),
+          branch: form.branch.trim() || "main",
+          paths: form.paths
+            .split("\n")
+            .map((x) => x.trim())
+            .filter(Boolean),
+        };
+        name = name || `${config.repo} 文档`;
+      } else {
+        config = {
+          urls,
+          max_depth: Math.max(0, parseInt(form.max_depth, 10) || 0),
+          max_pages: Math.max(1, parseInt(form.max_pages, 10) || 200),
+          respect_robots: true,
+        };
+        if (form.sitemap.trim()) config.sitemap = form.sitemap.trim();
+        name = name || "网页数据源";
+      }
       if (isEdit && source) {
         await updateSource(kbId, source.id, {
-          name: form.name.trim() || source.name,
+          name: name || source.name,
           config,
+          credentials,
           poll_interval_minutes: poll,
         });
       } else {
-        await createSource(kbId, {
-          type,
-          name: form.name.trim() || "网页数据源",
-          config,
-          poll_interval_minutes: poll,
-        });
+        await createSource(kbId, { type, name, config, credentials, poll_interval_minutes: poll });
       }
       await onSaved();
     } catch (err) {
@@ -360,6 +375,20 @@ function SourceFormModal({
         )}
 
         <div className="space-y-3">
+          {!isEdit && (
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-slate-600">数据源类型</span>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+              >
+                <option value="web">🕸️ 网页/站点</option>
+                <option value="github">🐙 GitHub 仓库</option>
+              </select>
+            </label>
+          )}
+
           <label className="block">
             <span className="mb-1 block text-[11px] font-semibold text-slate-600">名称</span>
             <input
@@ -369,6 +398,58 @@ function SourceFormModal({
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
             />
           </label>
+          {type === "github" && (
+            <>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">
+                  仓库(owner/repo;编辑模式下配置保留 github 字段)
+                </span>
+                <input
+                  value={form.urls}
+                  onChange={(e) => setForm((f) => ({ ...f, urls: e.target.value }))}
+                  placeholder="acme/docs"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
+              <div className="flex gap-3">
+                <label className="block flex-1">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-600">分支</span>
+                  <input
+                    value={form.branch}
+                    onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                  />
+                </label>
+                <label className="block flex-1">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-600">访问令牌(PAT,可选)</span>
+                  <input
+                    type="password"
+                    value={form.token}
+                    onChange={(e) => setForm((f) => ({ ...f, token: e.target.value }))}
+                    placeholder="公开仓库可留空"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">
+                  路径白名单(每行一个前缀,留空 = 全仓库)
+                </span>
+                <textarea
+                  value={form.paths}
+                  onChange={(e) => setForm((f) => ({ ...f, paths: e.target.value }))}
+                  rows={2}
+                  placeholder={"docs\npackages/api/README.md"}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
+              <div className="rounded-lg bg-slate-50 p-2 text-[10px] text-slate-400">
+                同步 .md/.markdown/.txt/.rst 文本文件;内容变更自动更新,未变更跳过
+              </div>
+            </>
+          )}
+          {type === "web" && (
+          <>
           <label className="block">
             <span className="mb-1 block text-[11px] font-semibold text-slate-600">
               种子 URL(每行一个;从这些页面沿同域链接扩展)
@@ -390,6 +471,8 @@ function SourceFormModal({
               className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400"
             />
           </label>
+          </>
+          )}
           <div className="flex gap-3">
             <label className="block flex-1">
               <span className="mb-1 block text-[11px] font-semibold text-slate-600">抓取深度</span>
