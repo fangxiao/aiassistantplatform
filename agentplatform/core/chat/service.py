@@ -85,6 +85,7 @@ async def agent_stream_for_session(
     session: AsyncSession,
     session_id: uuid.UUID,
     user_message: str,
+    images: list[str] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """为一次发消息构建 agent 流(供 API SSE 消费)。
 
@@ -93,11 +94,17 @@ async def agent_stream_for_session(
     sess = await get_session(session, session_id)
     if sess is None:
         raise ChatError("会话不存在")
-    await save_user_message(session, session_id, user_message)
+    await save_user_message(session, session_id, user_message, images=images)
 
     plugin = await get_plugin(session, sess.plugin_id) if sess.plugin_id else None
     manifest = (plugin.manifest or {}) if plugin else None
     model = (manifest or {}).get("model")
+    # 多模态路由(设计 012):含图消息切换到多模态模型——不支持视觉的模型传图直接报错
+    if images:
+        from agentplatform.config import settings as _settings
+
+        if _settings.multimodal_model:
+            model = _settings.multimodal_model
     resource_ids = resource_ids_from_plugin(plugin) if plugin else []
     client = await make_llm_client(session, model)
     # 知识库检索允许范围(设计 008 §3.3/§4.3):会话挂载 ∪ 插件静态依赖 ∪ 助手挂载,唯一授权来源
@@ -145,5 +152,6 @@ async def agent_stream_for_session(
         plugin_desc=(plugin.manifest or {}).get("description") if plugin else None,
         allowed_kb_ids=allowed_kb_ids,
         memories=memories,
+        images=images,
     ):
         yield ev

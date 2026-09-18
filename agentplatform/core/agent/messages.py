@@ -77,9 +77,16 @@ def build_system_prompt(
 
 
 def build_messages(
-    system_prompt: str | None, history: list[dict] | None, user_message: str
+    system_prompt: str | None,
+    history: list[dict] | None,
+    user_message: str,
+    images: list[str] | None = None,
 ) -> list[dict]:
-    """组装 [system, ...history, user]; 自动剔除内容为空的历史项。"""
+    """组装 [system, ...history, user]; 自动剔除内容为空的历史项。
+
+    images(设计 012):data:image/* dataURL——最新 user 消息转为 OpenAI 兼容
+    多部分 content(text + image_url);仅首轮携带,tool 回填轮次不含图。
+    """
     messages: list[dict] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -87,6 +94,11 @@ def build_messages(
         content = (h.get("content") or "").strip()
         if content:
             messages.append({"role": h.get("role", "user"), "content": content})
-    if user_message and user_message.strip():
-        messages.append({"role": "user", "content": user_message.strip()})
+    text = (user_message or "").strip()
+    if images:
+        parts: list[dict] = [{"type": "text", "text": text or "请看这些图片"}]
+        parts += [{"type": "image_url", "image_url": {"url": img}} for img in images]
+        messages.append({"role": "user", "content": parts})
+    elif text:
+        messages.append({"role": "user", "content": text})
     return messages

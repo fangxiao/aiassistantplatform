@@ -37,11 +37,24 @@ def message_text(m: Message) -> str:
     return ""
 
 
-async def save_user_message(session: AsyncSession, session_id: uuid.UUID, content: str) -> Message:
+async def save_user_message(
+    session: AsyncSession,
+    session_id: uuid.UUID,
+    content: str,
+    images: list[str] | None = None,
+) -> Message:
+    """用户消息落库;images(设计 012)为 data:image/* dataURL,渲染走 ImageRenderer。"""
+    blocks: list[dict] = []
+    if content:
+        blocks.append({"type": "markdown", "data": {"text": content}})
+    for url in images or []:
+        blocks.append({"type": "image", "data": {"url": url}})
+    if not blocks:
+        blocks = [{"type": "markdown", "data": {"text": ""}}]
     msg = Message(
         session_id=session_id,
         role=MessageRole.user,
-        blocks=[{"type": "markdown", "data": {"text": content}}],
+        blocks=blocks,
     )
     session.add(msg)
     await session.flush()

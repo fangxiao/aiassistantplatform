@@ -149,6 +149,7 @@ async def stream_agent(
     plugin_desc: str | None = None,
     allowed_kb_ids: list[uuid.UUID] | None = None,
     memories: list[str] | None = None,
+    images: list[str] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
@@ -179,7 +180,7 @@ async def stream_agent(
     system = build_system_prompt(
         list(resources.values()), plugin_desc=plugin_desc, memories=memories
     )
-    messages = build_messages(system, history, user_message)
+    messages = build_messages(system, history, user_message, images=images)
 
     import asyncio
     skill_delta_queue: asyncio.Queue[str | None] = asyncio.Queue()

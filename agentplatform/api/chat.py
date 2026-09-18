@@ -194,13 +194,33 @@ async def send_message(
     # 流前校验:会话不存在/无权访问必须以 HTTP 状态码快速失败,
     # 而非进入 SSE 后只在流内发 error 事件(设计 005 §错误契约)。
     await _ensure_session_owned(session, sid, user.id)
+    # 多模态校验(设计 012):data:image 前缀 + 单张 5MB(与知识库单文档上限一致)
+    import binascii
+
+    for img in payload.images:
+        if not img.startswith("data:image/"):
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": "仅支持图片(data:image/*)"},
+            )
+        try:
+            size = len(binascii.a2b_base64(img.split(",", 1)[1]))
+        except (binascii.Error, IndexError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422, detail={"code": "validation_error", "message": "图片编码无效"}
+            ) from exc
+        if size > 5 * 1024 * 1024:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": "单张图片不能超过 5MB"},
+            )
 
     async def event_stream():
         text_parts: list[str] = []
         blocks: list[dict] = []
 
         try:
-            async for ev in agent_stream_for_session(session, sid, payload.content):
+            async for ev in agent_stream_for_session(session, sid, payload.content, images=payload.images):
                 if ev.type == "reasoning" and ev.text:
                     yield sse("reasoning", {"text": ev.text})
                 elif ev.type == "delta" and ev.text:

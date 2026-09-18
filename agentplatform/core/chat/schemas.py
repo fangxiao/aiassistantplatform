@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class CreateSession(BaseModel):
@@ -29,6 +29,8 @@ class UpdateSession(BaseModel):
 
 class SendMessage(BaseModel):
     content: str
+    # 多模态输入(设计 012):data:image/* dataURL,最多 4 张、单张 ≤5MB
+    images: list[str] = Field(default_factory=list, max_length=4)
 
 
 class MessageOut(BaseModel):

@@ -41,11 +41,13 @@ export async function getHistory(sid: string): Promise<ChatMessage[]> {
 }
 
 // 发送消息,逐条返回 SSE 事件(delta / block_meta / tool_call / done / error)
+// images(设计 012):data:image/* dataURL 多模态输入
 export function sendMessage(
   sid: string,
   content: string,
+  images: string[] = [],
 ): AsyncGenerator<SseEvent> {
-  return streamSse(`/chat/sessions/${sid}/messages`, { content });
+  return streamSse(`/chat/sessions/${sid}/messages`, { content, images });
 }
 
 // 交互回传

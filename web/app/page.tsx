@@ -161,10 +161,18 @@ function ChatHome() {
 
   // 发送普通对话消息
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, images: string[] = []) => {
       if (!current || streaming) return;
       setStreaming(true);
-      const userMsg: ChatMessage = { id: nid("u"), role: "user", text: content };
+      const userMsg: ChatMessage = {
+        id: nid("u"),
+        role: "user",
+        text: content,
+        blocks: [
+          ...(content ? [{ type: "markdown" as const, data: { text: content } }] : []),
+          ...images.map((url) => ({ type: "image" as const, data: { url } })),
+        ],
+      };
       const asstId = nid("a");
       const asstMsg: ChatMessage = {
         id: asstId,
@@ -179,7 +187,7 @@ function ChatHome() {
         setMessages((ms) => ms.map((m) => (m.id === asstId ? fn(m) : m)));
 
       try {
-        for await (const ev of sendMessage(current.id, content)) {
+        for await (const ev of sendMessage(current.id, content, images)) {
           if (ev.event === "reasoning") {
             // 模型深度思考中：在助手消息上实时展示思考进度，不计入正文
             const d = ev.data as { text?: string };
