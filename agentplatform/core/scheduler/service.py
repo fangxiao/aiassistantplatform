@@ -181,12 +181,15 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             if WORKBENCH_TODO_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, WORKBENCH_TODO_TOOL_ID]
             from agentplatform.core.memory.tool import MEMORY_TOOL_ID
+            from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
             from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
 
             if MEMORY_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, MEMORY_TOOL_ID]
             if WEB_SEARCH_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, WEB_SEARCH_TOOL_ID]
+            if HTTP_ACTION_TOOL_ID not in resource_ids:
+                resource_ids = [*resource_ids, HTTP_ACTION_TOOL_ID]
 
             # 3. prompt:kind 模板 + 服务端聚合上下文
             context = await build_context(db, str(task.user_id), task.kind)

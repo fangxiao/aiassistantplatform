@@ -30,6 +30,7 @@ class TestListEndpoints:
         ids = {r["id"] for r in resp.json()}
         # M14 新增 workbench_todo;M15 P1 新增 web_search/memory
         assert ids == {
+            "tool:http_request",
             "tool:web_search",
             "tool:memory",
             "tool:workbench_todo",

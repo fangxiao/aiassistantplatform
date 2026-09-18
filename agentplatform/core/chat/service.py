@@ -125,6 +125,7 @@ async def agent_stream_for_session(
     # 个人待办工具无条件注入(M14 AI 联动):平台级个人能力,不要求助手声明依赖
     from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
     from agentplatform.core.memory.tool import MEMORY_TOOL_ID
+    from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
     from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
 
     if WORKBENCH_TODO_TOOL_ID not in resource_ids:
@@ -133,6 +134,8 @@ async def agent_stream_for_session(
         resource_ids = [*resource_ids, MEMORY_TOOL_ID]
     if WEB_SEARCH_TOOL_ID not in resource_ids:
         resource_ids = [*resource_ids, WEB_SEARCH_TOOL_ID]
+    if HTTP_ACTION_TOOL_ID not in resource_ids:
+        resource_ids = [*resource_ids, HTTP_ACTION_TOOL_ID]
 
     # 用户长期记忆注入(M15 P1):有记忆才传,助手"记得"用户
     from agentplatform.core.memory import service as memory_service

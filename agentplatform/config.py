@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     # 联网搜索(M15 P1):Tavily 协议;空 = 工具优雅降级(返回未配置提示)
     web_search_api_key: str = ""
     memory_max_per_user: int = 50  # 每用户长期记忆条数上限(超出淘汰最旧)
+    # 通用动作(M17):允许 agent 调用的域名白名单;空=工具禁用(安全默认)
+    action_http_allowlist: list[str] = []
     kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 

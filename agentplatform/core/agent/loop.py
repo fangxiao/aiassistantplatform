@@ -23,6 +23,7 @@ from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, run_kb_search
 from agentplatform.core.llm.client import ToolCall
 from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
+from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID, run as http_action_run
 from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID, run as web_search_run
 from agentplatform.core.memory.tool import MEMORY_TOOL_ID, run as memory_run
 from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
@@ -221,6 +222,9 @@ async def stream_agent(
             if resource.id == WEB_SEARCH_TOOL_ID:
                 # 联网搜索:无 DB 依赖,纯网络调用(M15 P1)
                 return await web_search_run(args)
+            if resource.id == HTTP_ACTION_TOOL_ID:
+                # 通用 HTTP 动作:白名单+SSRF 约束(M17),无 DB 依赖
+                return await http_action_run(args)
             if resource.kind == SkillToolKind.tool:
                 return await execute_tool(resource, args)
             return await execute_skill(resource, args, skill_call)

@@ -16,6 +16,7 @@ from agentplatform.api import (
     files,
     health,
     kb,
+    mcp,
     memory,
     plugins,
     registry,
@@ -38,6 +39,7 @@ api_router.include_router(dev_session.router)
 api_router.include_router(files.router)
 api_router.include_router(kb.router)
 api_router.include_router(memory.router)
+api_router.include_router(mcp.router)
 api_router.include_router(workbench.router)
 api_router.include_router(scheduler.router)
 

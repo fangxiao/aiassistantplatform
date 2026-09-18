@@ -20,6 +20,7 @@ from agentplatform.core.registry.builtin import (
     summarize,
 )
 from agentplatform.core.registry.builtin.meta import ResourceMeta
+from agentplatform.core.agent.http_action import RESOURCE as _http_action_resource
 from agentplatform.core.agent.web_search import RESOURCE as _web_search_resource
 from agentplatform.core.memory.tool import RESOURCE as _memory_resource
 from agentplatform.core.workbench.todo_tool import RESOURCE as _workbench_todo_resource
@@ -54,4 +55,5 @@ ALL: tuple[ResourceMeta, ...] = (
     _workbench_todo_resource,
     _web_search_resource,
     _memory_resource,
+    _http_action_resource,
 )
