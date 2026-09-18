@@ -10,7 +10,7 @@ import mimetypes
 from pathlib import Path
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from agentplatform.config import settings
@@ -100,3 +100,32 @@ async def download_file(
         media_type=mime_type,
         filename=target.name,
     )
+
+
+@router.post("/upload")
+async def upload_image(
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+) -> dict:
+    """打磨④:对话图片上传——对象存储化(dataURL 不再直存消息表)。
+
+    存 ~/.agentplatform/uploads/,返回白名单内可预览的 /api/files/raw URL。
+    """
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "仅支持图片"})
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "单张图片不能超过 5MB"})
+
+    import uuid as _uuid
+
+    from agentplatform.core.db.engine import SessionLocal  # noqa: F401  保持 DB 依赖标注一致
+
+    uploads = Path.home() / ".agentplatform" / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    suffix = Path(file.filename or "img.png").suffix.lower() or ".png"
+    target = uploads / f"{_uuid.uuid4().hex}{suffix}"
+    target.write_bytes(data)
+
+    url = f"/api/files/raw?path={target}"
+    return {"url": url, "size": len(data)}

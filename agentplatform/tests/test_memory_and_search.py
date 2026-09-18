@@ -3,6 +3,7 @@
 import uuid
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.config import settings
@@ -84,3 +85,21 @@ class TestWebSearch:
 
         out = await run_web_search({"query": "  "})
         assert json.loads(out)["ok"] is False
+
+
+@pytest.mark.asyncio
+class TestMemoryApi:
+    async def test_crud_flow(self, client: AsyncClient) -> None:
+        r = await client.post("/api/memory/memories", json={"content": "手动偏好:用中文"})
+        assert r.status_code == 201
+        mid = r.json()["id"]
+        listed = (await client.get("/api/memory/memories")).json()
+        assert any(m["id"] == mid for m in listed)
+        assert (await client.delete(f"/api/memory/memories/{mid}")).status_code == 204
+
+    async def test_clear_all(self, client: AsyncClient) -> None:
+        await client.post("/api/memory/memories", json={"content": "a"})
+        await client.post("/api/memory/memories", json={"content": "b"})
+        r = await client.delete("/api/memory/memories")
+        assert r.json()["removed"] == 2
+        assert (await client.get("/api/memory/memories")).json() == []

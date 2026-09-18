@@ -10,6 +10,7 @@ interface MessageItemProps {
   message: ChatMessage;
   isStreaming?: boolean;
   isLast?: boolean;
+  onRegenerate?: () => void;
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
   onSaveToKb?: (content: string) => void;
 }
@@ -18,6 +19,7 @@ export default function MessageItem({
   message,
   isStreaming = false,
   isLast = false,
+  onRegenerate,
   onInteract,
   onSaveToKb,
 }: MessageItemProps) {
@@ -142,6 +144,17 @@ export default function MessageItem({
             {blocks.map((block, i) => (
               <BlockRenderer key={i} block={block} onInteract={onInteract} />
             ))}
+            {/* 打磨②:最后一条助手回复可重新生成 */}
+            {!isStreaming && isLast && message.role === "assistant" && hasText && onRegenerate && (
+              <button
+                type="button"
+                onClick={onRegenerate}
+                className="mt-2 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-500 transition hover:border-indigo-300 hover:text-indigo-600"
+                title="按最后一条消息重新生成"
+              >
+                ↻ 重新生成
+              </button>
+            )}
             {/* 流式文本打字光标 */}
             {isStreaming && isLast && hasText && (
               <span className="inline-block h-4 w-1.5 translate-y-0.5 bg-indigo-600 animate-pulse ml-0.5" />

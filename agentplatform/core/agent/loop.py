@@ -56,6 +56,7 @@ class AgentEvent:
     text: str | None = None
     tool_trace: ToolTrace | None = None
     block: dict | None = None
+    usage: dict | None = None  # 打磨:LLM token 用量(done 事件携带)
 
 
 
@@ -65,6 +66,7 @@ class AgentResult:
 
     text: str
     tool_traces: list[ToolTrace]
+    usage_tokens: int | None = None  # 打磨:全部轮次 token 合计
 
 
 async def run_agent(
@@ -77,10 +79,12 @@ async def run_agent(
     max_iterations: int = MAX_ITERATIONS,
     owner_id: str | None = None,
     allowed_kb_ids: list[uuid.UUID] | None = None,
+    memories: list[str] | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
     traces: list[ToolTrace] = []
+    usage_total = 0
     async for ev in stream_agent(
         session,
         llm_client,
@@ -90,13 +94,18 @@ async def run_agent(
         max_iterations=max_iterations,
         owner_id=owner_id,
         allowed_kb_ids=allowed_kb_ids,
+        memories=memories,
     ):
         if ev.type == "delta" and ev.text:
             text_parts.append(ev.text)
         elif ev.type == "tool_call" and ev.tool_trace is not None:
             if ev.tool_trace.result != "":
                 traces.append(ev.tool_trace)
-    return AgentResult(text="".join(text_parts), tool_traces=traces)
+        elif ev.type == "done" and ev.usage:
+            usage_total += int((ev.usage or {}).get("total_tokens") or 0)
+    return AgentResult(
+        text="".join(text_parts), tool_traces=traces, usage_tokens=usage_total or None
+    )
 
 
 def _find_resource(name: str, resources: dict[str, SkillTool]) -> SkillTool | None:
@@ -223,9 +232,12 @@ async def stream_agent(
         reasoning_chunks: list[str] = []
         calls: list[ToolCall] = []
 
+        round_usage = 0
         async for e in _stream(llm_client, messages, tools):
             if e.type == "error":
                 raise AgentLoopError(e.error or "LLM 调用失败")
+            if e.type == "done" and e.usage:
+                round_usage += int((e.usage or {}).get("total_tokens") or 0)
             elif e.type == "reasoning" and e.text:
                 reasoning_chunks.append(e.text)
                 yield AgentEvent(type="reasoning", text=e.text)
@@ -476,7 +488,10 @@ async def stream_agent(
             except Exception:
                 pass
 
-    yield AgentEvent(type="done")
+    yield AgentEvent(
+        type="done",
+        usage={"total_tokens": round_usage} if round_usage else None,
+    )
 
 
 

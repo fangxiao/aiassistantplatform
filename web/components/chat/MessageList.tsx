@@ -11,6 +11,7 @@ interface MessageListProps {
   streaming?: boolean;
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
   onSaveToKb?: (content: string) => void;
+  onRegenerate?: () => void;
 }
 
 export default function MessageList({
@@ -18,6 +19,7 @@ export default function MessageList({
   streaming = false,
   onInteract,
   onSaveToKb,
+  onRegenerate,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +44,9 @@ export default function MessageList({
           isLast={index === messages.length - 1}
           onInteract={onInteract}
           onSaveToKb={onSaveToKb}
+          onRegenerate={
+            index === messages.length - 1 && m.role === "assistant" ? onRegenerate : undefined
+          }
         />
       ))}
       <div ref={bottomRef} />

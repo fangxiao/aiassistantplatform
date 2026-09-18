@@ -1,6 +1,6 @@
 // 对话 API 封装(005 §4 / 003 v2.0 §9)
 
-import { apiDelete, apiGet, apiPatch, apiPost, streamSse, type SseEvent } from "./client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, streamSse, type SseEvent } from "./client";
 import type { ChatMessage, ContentBlock, SessionInfo } from "../types";
 
 export async function listSessions(): Promise<SessionInfo[]> {
@@ -46,8 +46,17 @@ export function sendMessage(
   sid: string,
   content: string,
   images: string[] = [],
+  signal?: AbortSignal,
 ): AsyncGenerator<SseEvent> {
-  return streamSse(`/chat/sessions/${sid}/messages`, { content, images });
+  return streamSse(`/chat/sessions/${sid}/messages`, { content, images }, signal);
+}
+
+// 打磨②:重新生成最后一条助手回复(撤回 + 重跑)
+export function regenerateLast(
+  sid: string,
+  signal?: AbortSignal,
+): AsyncGenerator<SseEvent> {
+  return streamSse(`/chat/sessions/${sid}/regenerate`, {}, signal);
 }
 
 // 交互回传
@@ -76,4 +85,9 @@ export async function sendFeedbackEvent(
     target_block_id: targetBlockId,
     value,
   });
+}
+
+// 打磨④:对话图片上传(对象存储化)——返回服务端 URL,消息块不再存 dataURL
+export async function uploadImage(file: File): Promise<{ url: string; size: number }> {
+  return apiUpload<{ url: string; size: number }>("/files/upload", file);
 }

@@ -114,11 +114,13 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
 export async function* streamSse(
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): AsyncGenerator<SseEvent> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeader() },
     body: JSON.stringify(body),
+    signal,
   });
   if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
   const reader = resp.body.getReader();

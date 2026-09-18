@@ -11,11 +11,15 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+import logging
+
 import httpx
 
 from agentplatform.core.llm.http_client import make_http_client
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.llm.service import get_api_key
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,8 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+
+
 class StreamEvent:
     """流式增量事件。"""
 
@@ -37,6 +43,7 @@ class StreamEvent:
     tool_call: ToolCall | None = None
     message_id: str | None = None
     error: str | None = None
+    usage: dict | None = None  # {prompt_tokens, completion_tokens, total_tokens}
 
 
 class OpenAIClient:
@@ -66,7 +73,13 @@ class OpenAIClient:
         endpoints_to_try = [self.endpoint] + self.fallback_endpoints
         last_error = None
 
-        for idx, ep in enumerate(endpoints_to_try):
+        # 打磨:每个端点两次机会(连接级偶发失败同端点重试一次),再降级下一端点
+        attempts: list[tuple[object, bool]] = []
+        for ep in endpoints_to_try:
+            attempts.append((ep, False))
+            attempts.append((ep, True))  # 第二次 = 同端点重试
+
+        for idx, (ep, is_retry) in enumerate(attempts):
             ep_base_url = ep.base_url.rstrip("/")
             ep_api_key = get_api_key(ep)
             ep_model = ep.model
@@ -76,6 +89,8 @@ class OpenAIClient:
                 "messages": messages,
                 "stream": True,
                 "max_tokens": 8192,
+                # 打磨:采集 token usage(OpenAI 兼容;个别网关不支持时在其分支报错可定位)
+                "stream_options": {"include_usage": True},
             }
             if tools:
                 payload["tools"] = tools
@@ -107,6 +122,7 @@ class OpenAIClient:
                         return
 
                     message_id = ""
+                    usage: dict | None = None
                     tool_calls: dict[int, dict] = {}  # index -> {id, name, arguments}
                     stream_error = None
                     reasoning_parts: list[str] = []
@@ -129,6 +145,8 @@ class OpenAIClient:
                             break
 
                         message_id = chunk.get("id", message_id)
+                        if chunk.get("usage"):
+                            usage = chunk["usage"]
                         for choice in chunk.get("choices", []):
                             delta = choice.get("delta") or {}
                             r_text = (
@@ -192,13 +210,20 @@ class OpenAIClient:
                             reasoning_content=full_reasoning,
                         )
                     yield StreamEvent(
-                        type="done", message_id=message_id, reasoning_content=full_reasoning
+                        type="done",
+                        message_id=message_id,
+                        reasoning_content=full_reasoning,
+                        usage=usage,
                     )
                     return
 
             except Exception as exc:
-                if not has_yielded and idx < len(endpoints_to_try) - 1:
+                if not has_yielded and idx < len(attempts) - 1:
                     last_error = f"{type(exc).__name__}: {exc}"
+                    if is_retry:
+                        logger.warning(
+                            "LLM 端点重试仍失败 (%s): %s", ep_base_url, type(exc).__name__
+                        )
                     continue
                 yield StreamEvent(type="error", error=f"LLM 请求失败 ({ep_base_url}): {type(exc).__name__}: {exc}")
                 return

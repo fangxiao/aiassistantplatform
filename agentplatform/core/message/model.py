@@ -11,6 +11,8 @@ from enum import Enum
 from sqlalchemy import JSON, DateTime, ForeignKey, Text, Uuid
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Integer
+from sqlalchemy import Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agentplatform.core.db.base import Base
@@ -40,6 +42,8 @@ class Message(Base):
     blocks: Mapped[list | None] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), nullable=True
     )
+    # 本条消息消耗的 token 数(assistant 落库时记录;打磨:成本可观测)
+    tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content: Mapped[dict | None] = mapped_column(  # 历史兼容,新消息不写
         JSON().with_variant(JSONB, "postgresql"), nullable=True
     )

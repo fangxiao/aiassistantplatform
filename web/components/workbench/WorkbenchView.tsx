@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { listKbs, listSources, syncSource, type DataSourceInfo } from "../../lib/api/kb";
 import { TodoCard } from "./TodoCard";
+import { MemoryCard } from "./MemoryCard";
 import { BriefingCard } from "./BriefingCard";
 import { SchedulerCard } from "./SchedulerCard";
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
@@ -63,8 +64,10 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
         {assistants.length === 0 && sessions.length <= 1 && <OnboardingCard onOpenKb={onOpenKb} />}
 
         <div className="grid gap-5 lg:grid-cols-2">
-          {/* 我的待办(P1) + 每日简报(P1) */}
+          {/* 我的待办(P1) + 助手记忆(打磨①) */}
           <TodoCard />
+          <MemoryCard />
+          {/* 每日简报(P1) */}
           <BriefingCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
 
           {/* 我的助手 */}

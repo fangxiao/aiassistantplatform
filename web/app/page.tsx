@@ -18,6 +18,7 @@ import {
   listSessions,
   renameSession,
   sendFeedbackEvent,
+  regenerateLast,
   sendMessage,
   updateSessionKbs,
 } from "../lib/api/chat";
@@ -159,6 +160,46 @@ function ChatHome() {
     }
   };
 
+  // 打磨②:流式中断
+  const abortRef = React.useRef<AbortController | null>(null);
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
+  // 打磨②:重新生成最后一条助手回复
+  const handleRegenerate = useCallback(
+    async (asstId: string) => {
+      if (!current || streaming) return;
+      setStreaming(true);
+      const patch = (fn: (m: ChatMessage) => ChatMessage) =>
+        setMessages((ms) => ms.map((m) => (m.id === asstId ? fn(m) : m)));
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        for await (const ev of regenerateLast(current.id, controller.signal)) {
+          if (ev.event === "delta") {
+            const d = ev.data as { text?: string };
+            patch((m) => ({ ...m, text: m.text + (d.text ?? "") }));
+          } else if (ev.event === "block_meta") {
+            const block = ev.data as ContentBlock;
+            patch((m) => ({ ...m, blocks: [...(m.blocks ?? []), block] }));
+          } else if (ev.event === "tool_call") {
+            const d = ev.data as ToolCallInfo;
+            patch((m) => ({ ...m, toolCalls: [...(m.toolCalls ?? []), d] }));
+          }
+        }
+      } catch {
+        patch((m) => ({ ...m, text: m.text || "[已中断]" }));
+      } finally {
+        setStreaming(false);
+        abortRef.current = null;
+        void refreshSessions();
+      }
+    },
+    [current, streaming, refreshSessions]
+  );
+
   // 发送普通对话消息
   const handleSend = useCallback(
     async (content: string, images: string[] = []) => {
@@ -181,13 +222,15 @@ function ChatHome() {
         blocks: [],
         toolCalls: [],
       };
+      const controller = new AbortController();
+      abortRef.current = controller;
       setMessages((ms) => [...ms, userMsg, asstMsg]);
 
       const patch = (fn: (m: ChatMessage) => ChatMessage) =>
         setMessages((ms) => ms.map((m) => (m.id === asstId ? fn(m) : m)));
 
       try {
-        for await (const ev of sendMessage(current.id, content, images)) {
+        for await (const ev of sendMessage(current.id, content, images, controller.signal)) {
           if (ev.event === "reasoning") {
             // 模型深度思考中：在助手消息上实时展示思考进度，不计入正文
             const d = ev.data as { text?: string };
@@ -455,11 +498,12 @@ function ChatHome() {
             messages={messages}
             streaming={streaming}
             onInteract={handleInteract}
+            onRegenerate={() => void handleRegenerate(messages[messages.length - 1]?.id ?? "")}
             onSaveToKb={(content) =>
               setKbSaveTarget({ content, source: { app: "platform", session_id: current?.id } })
             }
           />
-          <Composer onSend={handleSend} disabled={streaming} />
+          <Composer onSend={handleSend} disabled={streaming} onStop={handleStop} />
         </main>
       </div>
 

@@ -3,6 +3,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { uploadImage } from "../../lib/api/chat";
 
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -10,38 +11,46 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export default function Composer({
   onSend,
   disabled,
+  onStop,
 }: {
   onSend: (text: string, images: string[]) => void;
   disabled: boolean;
+  onStop?: () => void;
 }) {
   const [value, setValue] = useState("");
-  const [images, setImages] = useState<string[]>([]);
+  // 打磨④:对象存储化——选图即上传,发送用服务端 URL(消息表不再存 dataURL)
+  const [images, setImages] = useState<{ preview: string; url: string | null }[]>([]);
   const [isComposing, setIsComposing] = useState(false);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
   const addImages = (files: FileList | File[]) => {
-    setImages((prev) => {
-      const next = [...prev];
-      for (const f of Array.from(files)) {
-        if (next.length >= MAX_IMAGES) break;
-        if (!f.type.startsWith("image/")) continue;
-        if (f.size > MAX_IMAGE_BYTES) continue;
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === "string") {
-            setImages((cur) => (cur.length >= MAX_IMAGES ? cur : [...cur, reader.result as string]));
-          }
-        };
-        reader.readAsDataURL(f);
-      }
-      return next;
-    });
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith("image/") || f.size > MAX_IMAGE_BYTES) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const preview = typeof reader.result === "string" ? reader.result : "";
+        if (!preview) return;
+        setImages((cur) => {
+          if (cur.length >= MAX_IMAGES || cur.some((x) => x.preview === preview)) return cur;
+          // 上传异步进行:成功用服务端 URL,失败发送时降级 dataURL
+          uploadImage(f)
+            .then((r) =>
+              setImages((cur2) =>
+                cur2.map((x) => (x.preview === preview ? { ...x, url: r.url } : x))
+              )
+            )
+            .catch(() => undefined);
+          return [...cur, { preview, url: null }];
+        });
+      };
+      reader.readAsDataURL(f);
+    }
   };
 
   const submit = () => {
     const t = value.trim();
     if ((!t && images.length === 0) || disabled) return;
-    onSend(t, images);
+    onSend(t, images.map((x) => x.url ?? x.preview)); // 上传未完成的用 dataURL 兜底
     setValue("");
     setImages([]);
   };
@@ -65,7 +74,7 @@ export default function Composer({
             <div key={i} className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={img}
+                src={img.preview || img.url || ""}
                 alt={`附件${i + 1}`}
                 className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
               />
@@ -123,10 +132,10 @@ export default function Composer({
       <button
         type="button"
         className="rounded-xl bg-slate-900 px-5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 shadow-xs flex items-center justify-center min-w-[72px]"
-        onClick={submit}
-        disabled={disabled || (!value.trim() && images.length === 0)}
+        onClick={disabled && onStop ? onStop : submit}
+        disabled={disabled && !onStop}
       >
-        {disabled ? "生成中…" : "发送 ↑"}
+        {disabled && onStop ? "⏹ 停止" : disabled ? "生成中…" : "发送 ↑"}
       </button>
       </div>
     </div>

@@ -4,6 +4,7 @@ POST /chat/sessions/{sid}/messages 返回 SSE 流:delta / tool_call / done / err
 (block_meta 等富交互事件在 M7 引入)。流结束后落库 assistant 最终消息。
 """
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -198,10 +199,12 @@ async def send_message(
     import binascii
 
     for img in payload.images:
+        if img.startswith("/api/files/raw"):  # 对象存储化后的服务端 URL
+            continue
         if not img.startswith("data:image/"):
             raise HTTPException(
                 status_code=422,
-                detail={"code": "validation_error", "message": "仅支持图片(data:image/*)"},
+                detail={"code": "validation_error", "message": "仅支持图片(data:image/* 或服务端图片 URL)"},
             )
         try:
             size = len(binascii.a2b_base64(img.split(",", 1)[1]))
@@ -220,6 +223,7 @@ async def send_message(
         blocks: list[dict] = []
 
         try:
+            usage_total: int | None = None
             async for ev in agent_stream_for_session(session, sid, payload.content, images=payload.images):
                 if ev.type == "reasoning" and ev.text:
                     yield sse("reasoning", {"text": ev.text})
@@ -232,6 +236,8 @@ async def send_message(
                 elif ev.type == "await_external" and ev.block:
                     blocks.append(ev.block)
                     yield sse("await_external", ev.block)
+                elif ev.type == "done" and ev.usage:
+                    usage_total = ev.usage.get("total_tokens")
                 elif ev.type == "tool_call" and ev.tool_trace is not None:
                     t = ev.tool_trace
                     yield sse(
@@ -248,11 +254,28 @@ async def send_message(
             if final_text.strip():
                 final_blocks.append({"type": "markdown", "data": {"text": final_text}})
             final_blocks.extend(blocks)
+            usage_tokens = (usage_total or None)
             msg = await save_assistant_message(
-                session, sid, final_blocks if final_blocks else final_text
+                session, sid, final_blocks if final_blocks else final_text, tokens=usage_tokens
             )
             await session.commit()
-            yield sse("done", {"message_id": str(msg.id)})
+            yield sse(
+                "done",
+                {"message_id": str(msg.id), "tokens": usage_tokens},
+            )
+
+        except asyncio.CancelledError:
+            # 打磨②:用户"停止生成"——已产出的部分文本落库(刷新不丢),再向上传播取消
+            try:
+                partial = "".join(text_parts)
+                if partial.strip():
+                    final_blocks: list[dict] = [{"type": "markdown", "data": {"text": partial}}]
+                    final_blocks.extend(blocks)
+                    await save_assistant_message(session, sid, final_blocks)
+                    await session.commit()
+            except Exception:  # noqa: BLE001
+                await session.rollback()
+            raise
 
         except ChatError as exc:
             await session.rollback()
@@ -309,3 +332,81 @@ async def submit_event(
     )
     return EventResponse(ok=True)
 
+
+
+@router.post("/sessions/{sid}/regenerate")
+async def regenerate_last(
+    sid: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """重新生成最后一条助手回复(打磨②):撤回最后 assistant 消息,按最后 user 消息重跑。"""
+    await _ensure_session_owned(session, sid, user.id)
+
+    async def event_stream():
+        text_parts: list[str] = []
+        blocks: list[dict] = []
+        try:
+            from agentplatform.core.message.service import MessageRole
+
+            msgs = await list_messages(session, sid)
+            last_user = next((m for m in reversed(msgs) if m.role == MessageRole.user), None)
+            last_asst = next((m for m in reversed(msgs) if m.role == MessageRole.assistant), None)
+            if last_user is None:
+                yield sse("error", {"code": "chat_error", "message": "没有可重新生成的用户消息"})
+                return
+            if last_asst is not None and msgs.index(last_asst) > msgs.index(last_user):
+                await session.delete(last_asst)  # 撤回最后助手回复
+                await session.flush()
+
+            # 取最后 user 消息的文本与图片(blocks 内 image url)
+            content = ""
+            images: list[str] = []
+            for b in last_user.blocks or []:
+                if b.get("type") == "markdown":
+                    content = (b.get("data") or {}).get("text", "")
+                elif b.get("type") == "image":
+                    images.append((b.get("data") or {}).get("url", ""))
+
+            usage_total: int | None = None
+            async for ev in agent_stream_for_session(
+                session, sid, content, images=images or None, save_input=False
+            ):
+                if ev.type == "reasoning" and ev.text:
+                    yield sse("reasoning", {"text": ev.text})
+                elif ev.type == "delta" and ev.text:
+                    text_parts.append(ev.text)
+                    yield sse("delta", {"block_index": 0, "text": ev.text})
+                elif ev.type == "block_meta" and ev.block:
+                    blocks.append(ev.block)
+                    yield sse("block_meta", ev.block)
+                elif ev.type == "done" and ev.usage:
+                    usage_total = ev.usage.get("total_tokens")
+                elif ev.type == "tool_call" and ev.tool_trace is not None:
+                    t = ev.tool_trace
+                    yield sse(
+                        "tool_call",
+                        {"id": t.id, "name": t.name, "arguments": json.dumps(t.args, ensure_ascii=False), "result": t.result},
+                    )
+            final_text = "".join(text_parts)
+            final_blocks: list[dict] = []
+            if final_text.strip():
+                final_blocks.append({"type": "markdown", "data": {"text": final_text}})
+            final_blocks.extend(blocks)
+            msg = await save_assistant_message(
+                session, sid, final_blocks if final_blocks else final_text, tokens=usage_total
+            )
+            await session.commit()
+            yield sse("done", {"message_id": str(msg.id), "tokens": usage_total})
+        except ChatError as exc:
+            await session.rollback()
+            yield sse("error", {"code": "chat_error", "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            yield sse("error", {"code": "agent_error", "message": str(exc)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

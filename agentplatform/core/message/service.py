@@ -62,7 +62,10 @@ async def save_user_message(
 
 
 async def save_assistant_message(
-    session: AsyncSession, session_id: uuid.UUID, content: str | list[dict]
+    session: AsyncSession,
+    session_id: uuid.UUID,
+    content: str | list[dict],
+    tokens: int | None = None,
 ) -> Message:
     if isinstance(content, list):
         blocks = content
@@ -72,6 +75,7 @@ async def save_assistant_message(
         session_id=session_id,
         role=MessageRole.assistant,
         blocks=blocks,
+        tokens=tokens,
     )
     session.add(msg)
     await session.flush()

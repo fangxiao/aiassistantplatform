@@ -86,6 +86,7 @@ async def agent_stream_for_session(
     session_id: uuid.UUID,
     user_message: str,
     images: list[str] | None = None,
+    save_input: bool = True,
 ) -> AsyncIterator[AgentEvent]:
     """为一次发消息构建 agent 流(供 API SSE 消费)。
 
@@ -94,7 +95,8 @@ async def agent_stream_for_session(
     sess = await get_session(session, session_id)
     if sess is None:
         raise ChatError("会话不存在")
-    await save_user_message(session, session_id, user_message, images=images)
+    if save_input:
+        await save_user_message(session, session_id, user_message, images=images)
 
     plugin = await get_plugin(session, sess.plugin_id) if sess.plugin_id else None
     manifest = (plugin.manifest or {}) if plugin else None
