@@ -1,0 +1,2 @@
+name: 网页内容日报
+description: 抓取网页并生成摘要日报;演示 html_cleaner + web_search 组合复用

@@ -1,0 +1,5 @@
+name: 基础功能验证
+input: "你好,请介绍你的功能"
+expect:
+  output_contains:
+    - "分析"

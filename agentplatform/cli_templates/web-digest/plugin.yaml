@@ -1,0 +1,13 @@
+name: {plugin_name}
+display_name: "{plugin_name} 助手"
+version: 0.1.0
+description: "对网页内容做摘要、配合联网搜索生成日报;复用 html_cleaner 与 web_search"
+author: Developer
+model: glm-5.3-flash
+depends_on:
+  - tool:html_cleaner@^1.0
+  - tool:web_search@^1.0
+skills:
+  - id: skill:{plugin_name}_web_digest
+    file: ./skills/web_digest.py
+tools: []

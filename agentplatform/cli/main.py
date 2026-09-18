@@ -193,6 +193,20 @@ depends_on:
 
 ---
 
+## 1.5 开发前置:获取平台能力上下文(M16)
+编写任何代码前,先运行:
+```bash
+agentplatform context    # 输出当前平台真实可复用资源(工具/技能/版本)+ 规范要点
+agentplatform templates  # 查看场景模板;init <name> --template <id> 直接从模板起步
+```
+把 context 输出粘贴进你的 AI 会话,确保 depends_on 与平台实际资源一致,避免重复造轮子。
+
+## 1.6 平台个人能力工具(所有会话默认可用,无需声明依赖)
+- `tool:web_search` : 联网搜索最新信息(需平台配置 WEB_SEARCH_API_KEY)
+- `tool:memory` : 用户长期记忆(记住偏好/事实;会话自动注入,助手可 save/list/delete)
+- `tool:workbench_todo` : 用户待办(记录/查询/完成——"帮我记一条待办")
+- `tool:kb_search` : 知识库检索(会话挂载或助手挂载后可用)
+
 ## 2. 插件工程架构规范
 - `plugin.yaml` : 核心清单，声明插件名称、模型、版本、公共依赖 (`depends_on`)、自有 skills 与 tools。
 - `pyproject.toml` : 插件工程轻量依赖配置 (`agentplatform`, `pyyaml`, `pytest`)。
@@ -289,6 +303,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     if root.exists() and any(root.iterdir()):
         print(f"目录已存在且非空: {root}")
         return 1
+    plugin_name = Path(args.name).name
+    display_name = getattr(args, "display_name", None) or f"{plugin_name}助手"
+
+    # M16:场景模板分支——平台拉取,init 后 validate 零错/test 全过,AI 只填领域逻辑
+    template_id = getattr(args, "template", None)
+    if template_id:
+        return _init_from_template(args, root, template_id, plugin_name, display_name)
+
     root.mkdir(parents=True, exist_ok=True)
     (root / "skills").mkdir(exist_ok=True)
     (root / "tools").mkdir(exist_ok=True)
@@ -751,9 +773,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     # 1. 初始化
+    sp = sub.add_parser("templates", help="列出平台可用插件场景模板(配合 init --template)")
+    sp.add_argument("--target", default=None, help=argparse.SUPPRESS)
+    sp.set_defaults(func=cmd_templates)
+
+    sp = sub.add_parser("context", help="输出平台能力上下文(markdown),粘贴给 AI 作为插件开发背景")
+    sp.add_argument("--target", default=None, help=argparse.SUPPRESS)
+    sp.set_defaults(func=cmd_context)
+
     sp = sub.add_parser("init", help="快速生成带共享能力示例与 AI 规范的插件脚手架")
     sp.add_argument("name", help="插件助手名称 (如 my-assistant)")
     sp.add_argument("--display-name", "--title", dest="display_name", default=None, help="助手中文展示名称 (如 我的智能助理)")
+    sp.add_argument("--template", dest="template", default=None, help="使用场景模板(先 agentplatform templates 查看清单)")
     sp.set_defaults(func=cmd_init)
 
     # 2. 共享能力与控件查询
@@ -823,3 +854,103 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _init_from_template(
+    args: argparse.Namespace,
+    root: Path,
+    template_id: str,
+    plugin_name: str,
+    display_name: str,
+) -> int:
+    """从场景模板实例化插件(M16,设计 013 §1):平台拉取 → 占位符替换 → 落盘。"""
+    import httpx
+
+    target = get_target_url(args)
+    try:
+        resp = httpx.get(f"{target}/api/specs/templates/{template_id}", timeout=15)
+        if resp.status_code == 404:
+            print(f"模板不存在: {template_id}(先运行 agentplatform templates 查看清单)")
+            return 1
+        resp.raise_for_status()
+        tpl = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        print(f"拉取模板失败(平台 {target}): {exc}")
+        print("检查平台是否启动,或直接运行 agentplatform init 使用内置 demo 骨架")
+        return 1
+
+    root.mkdir(parents=True, exist_ok=True)
+    for rel, content in tpl["files"].items():
+        target_file = root / rel
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text(
+            content.replace("{plugin_name}", plugin_name).replace("{display_name}", display_name),
+            encoding="utf-8",
+        )
+    # 规范文件与 demo init 同源
+    (root / "AGENTS.md").write_text(TEMPLATE_AGENTS_MD.format(name=plugin_name), encoding="utf-8")
+    (root / "CLAUDE.md").write_text(TEMPLATE_AGENTS_MD.format(name=plugin_name), encoding="utf-8")
+
+    print(f"✅ 已用模板「{tpl['name']}」创建插件: {plugin_name}")
+    print("   下一步:")
+    print(f"   cd {root.name} && agentplatform validate .")
+    print("   修改 skills/ 中标注「改这里」的领域逻辑 → agentplatform test . → agentplatform deploy .")
+    return 0
+
+
+def cmd_templates(args: argparse.Namespace) -> int:
+    """列出平台可用插件模板(M16)。"""
+    import httpx
+
+    target = get_target_url(args)
+    try:
+        resp = httpx.get(f"{target}/api/specs/templates", timeout=15)
+        resp.raise_for_status()
+        templates = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        print(f"获取模板失败(平台 {target}): {exc}")
+        return 1
+    print(f"📚 插件模板清单 ({target}):")
+    for t in templates:
+        print(f"  - {t['id']:<16} {t['name']:<12} {t['description']}")
+    print("\n使用: agentplatform init <name> --template <id>")
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    """输出平台能力上下文(M16):粘贴给 AI 作为插件开发背景。"""
+    import httpx
+
+    target = get_target_url(args)
+    lines: list[str] = [f"# AgentPlatform 开发上下文({target})\n"]
+
+    try:
+        caps = httpx.get(f"{target}/api/specs/capabilities", timeout=15).json()
+    except Exception as exc:  # noqa: BLE001
+        print(f"获取能力清单失败: {exc}")
+        return 1
+
+    tools = caps.get("builtin_tools", [])
+    skills = caps.get("builtin_skills", [])
+    lines.append("## 可复用平台资源(depends_on 直接引用)\n")
+    for t in tools:
+        lines.append(f"- `tool:{t['name']}` — {t.get('description', '')}")
+    for sk in skills:
+        lines.append(f"- `skill:{sk['name']}` — {sk.get('description', '')}")
+    lines.append("")
+
+    widgets = caps.get("content_blocks", [])
+    if widgets:
+        lines.append(f"## 富交互控件({len(widgets)} 种,助手可用 output_block 输出)\n")
+        lines.append(", ".join(w.get("type", "?") for w in widgets))
+        lines.append("")
+
+    lines.append(
+        "## 规范要点\n"
+        "- 资源 id 命名: tool:<name> / skill:<name>;depends_on 建议带版本约束(^/~)\n"
+        "- 知识库依赖: kb:<slug>@^版本;助手可由工作台直接挂载公共库\n"
+        "- 部署准入: deploy 强制 validate + test(有 test/ 则必过)\n"
+        "- 长期记忆/联网搜索/待办工具对所有会话默认可用,无需声明依赖\n"
+    )
+    print("\n".join(lines))
+    return 0

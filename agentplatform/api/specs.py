@@ -89,3 +89,27 @@ async def install_script() -> Response:
         headers={"Content-Disposition": "inline; filename=install.sh"},
     )
 
+
+
+@router.get("/templates")
+async def list_templates() -> list[dict]:
+    """插件模板清单(M16):id/name/description;init --template 消费。"""
+    from agentplatform.cli_templates import TEMPLATES
+
+    return [
+        {"id": tid, "name": t["name"], "description": t["description"]}
+        for tid, t in TEMPLATES.items()
+    ]
+
+
+@router.get("/templates/{template_id}")
+async def get_template(template_id: str) -> dict:
+    """模板完整文件集;CLI init --template 拉取后按 {plugin_name} 占位符实例化。"""
+    from agentplatform.cli_templates import TEMPLATES
+
+    tpl = TEMPLATES.get(template_id)
+    if tpl is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail=f"模板不存在: {template_id}")
+    return tpl

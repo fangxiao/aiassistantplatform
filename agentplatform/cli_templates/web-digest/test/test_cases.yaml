@@ -1,0 +1,6 @@
+name: 网页日报冒烟
+input: "整理一下 RAG 领域本周动态"
+expect:
+  tool_calls:
+    - tool:html_cleaner
+    - tool:web_search

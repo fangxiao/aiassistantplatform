@@ -1,0 +1,12 @@
+name: {plugin_name}
+display_name: "{plugin_name} 助手"
+version: 0.1.0
+description: "对挂载知识库中的文档做摘要与问答;复用平台 tool:kb_search"
+author: Developer
+model: glm-5.3-flash
+depends_on:
+  - tool:kb_search@^1.0
+skills:
+  - id: skill:{plugin_name}_summarize_doc
+    file: ./skills/summarize_doc.py
+tools: []

@@ -1,0 +1,12 @@
+name: {plugin_name}
+display_name: "{plugin_name} 助手"
+version: 0.1.0
+description: "把本周工作要点变成结构化周报;复用平台 skill:structured_output"
+author: Developer
+model: glm-5.3-flash
+depends_on:
+  - skill:structured_output@^1.0
+skills:
+  - id: skill:{plugin_name}_weekly_report
+    file: ./skills/weekly_report.py
+tools: []

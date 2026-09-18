@@ -44,14 +44,14 @@ def validate_project(root: Path) -> dict:
                 rid = res.get("id", "")
                 prefix = "skill:" if section == "skills" else "tool:"
                 if not rid.startswith(prefix):
-                    errors.append(f"{section} 资源 id 必须以 {prefix!r} 开头: {rid!r}")
+                    errors.append(f"{section} 资源 id 必须以 {prefix!r} 开头: {rid!r}(修法: 将 id 改为 {prefix}:{rid.split(':')[-1]})")
                 if not res.get("file"):
-                    errors.append(f"{section} 资源缺 file 属性: {rid!r}")
+                    errors.append(f"{section} 资源缺 file 属性: {rid!r}(修法: 在 plugin.yaml 该资源下补 file: ./path/to/file.py)")
 
         # depends_on 格式校验(T11.10: 末尾 '?' 表示可选依赖,平台缺失时回退本地实现)
         for dep in raw.get("depends_on", []) or []:
             if not isinstance(dep, str) or "@" not in dep:
-                errors.append(f"depends_on 依赖项格式错误(建议带版本约束如 tool:pdf_parse@^1.0): {dep!r}")
+                errors.append(f"depends_on 依赖项格式错误: {dep!r}(修法: 写成 <kind>:<name>@<约束>,如 tool:pdf_parse@^1.0;可选依赖末尾加 ?)")
                 continue
             constraint_part = dep.split("@", 1)[1].removesuffix("?").strip()
             # kb: 资源为版本化公共库(ADR 0005),必须带版本约束(设计 008 §4.1)
@@ -66,7 +66,7 @@ def validate_project(root: Path) -> dict:
                     continue
                 f = root / res.get("file", "")
                 if not f.exists():
-                    errors.append(f"资源实现文件不存在: {res.get('file')}")
+                    errors.append(f"资源实现文件不存在: {res.get('file')}(修法: 检查 plugin.yaml 中 file 路径是否相对插件根目录)")
                     continue
                 try:
                     loaded = load_resources(str(f))

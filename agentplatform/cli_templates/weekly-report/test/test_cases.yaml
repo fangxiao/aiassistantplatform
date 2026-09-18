@@ -1,0 +1,5 @@
+name: 周报生成冒烟
+input: "本周完成:连接器同步、定时任务上线"
+expect:
+  output_contains:
+    - "周报"

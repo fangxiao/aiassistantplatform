@@ -1,0 +1,5 @@
+name: 文档摘要冒烟
+input: "总结一下平台设计文档的核心内容"
+expect:
+  tool_calls:
+    - tool:kb_search

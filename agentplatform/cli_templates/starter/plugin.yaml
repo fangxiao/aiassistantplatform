@@ -1,0 +1,15 @@
+name: {plugin_name}
+display_name: "{plugin_name} 助手"
+version: 0.1.0
+description: " starter 模板:修改 skills/tools 中的领域逻辑开始你的助手"
+author: Developer
+model: glm-5.3-flash
+depends_on:
+  - tool:pdf_parse@^1.0
+  - skill:summarize@^1.0
+skills:
+  - id: skill:{plugin_name}_demo
+    file: ./skills/demo.py
+tools:
+  - id: tool:{plugin_name}_echo
+    file: ./tools/demo.py

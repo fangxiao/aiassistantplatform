@@ -47,8 +47,12 @@ def _run_case(case_file: Path, base: dict) -> dict:
         errors.extend(base["errors"])
     expect = case.get("expect", {}) or {}
     tool_calls = expect.get("tool_calls", [])
+    # 平台 builtin 资源也算合法期望(M16:模板演示 depends_on 平台能力)
+    from agentplatform.core.registry.builtin import ALL as _builtin_all
+
+    builtin_ids = {r["id"] for r in _builtin_all}
     for rid in tool_calls:
-        if not any(r["id"] == rid for r in base.get("resources", [])):
+        if not any(r["id"] == rid for r in base.get("resources", [])) and rid not in builtin_ids:
             errors.append(f"期望调用 {rid} 未在插件资源中找到")
     output_contains = expect.get("output_contains", [])
     for s in output_contains:
