@@ -1,0 +1,13 @@
+# HTTPS 反向代理模板(Caddy 自动申请/续期证书)
+# 用法: caddy run --config deploy/Caddyfile
+# 替换 platform.example.com 为你的域名,DNS 需指向本机
+platform.example.com {
+	# Web 前端
+	handle /* {
+		reverse_proxy localhost:3000
+	}
+	# 后端 API(同域,免去 CORS 与混合内容问题)
+	handle /api/* {
+		reverse_proxy localhost:8000
+	}
+}

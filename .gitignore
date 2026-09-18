@@ -43,3 +43,5 @@ out/
 .chat_history.json
 *.shot.png
 
+.deploy.env
+backups/

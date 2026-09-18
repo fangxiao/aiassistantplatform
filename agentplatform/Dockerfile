@@ -6,7 +6,11 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PYTHON=/usr/local/bin/python3.12
+    UV_PYTHON=/usr/local/bin/python3.12 \
+    UV_HTTP_TIMEOUT=300
+
+# 国内网络可加速(构建时传入): docker compose build --build-arg UV_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_INDEX=
 
 # 安装 uv
 COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
@@ -20,7 +24,7 @@ COPY migrations ./migrations
 COPY alembic.ini ./
 
 # 仅运行时依赖(不带 dev 组)
-RUN uv sync --frozen --no-dev
+RUN UV_DEFAULT_INDEX=${UV_INDEX:+$UV_INDEX} uv sync --frozen --no-dev || uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
