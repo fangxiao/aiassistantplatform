@@ -72,13 +72,47 @@ class TestMemoryTool:
 
 class TestWebSearch:
     async def test_graceful_degradation_without_key(self, monkeypatch) -> None:
-        """未配置 API key:返回明确提示而非崩溃(LLM 可告知用户)。"""
+        """未配置 API key(tavily):返回明确提示而非崩溃(LLM 可告知用户)。"""
         import json
 
         monkeypatch.setattr(settings, "web_search_api_key", "")
+        monkeypatch.setattr(settings, "web_search_provider", "tavily")
         out = await run_web_search({"query": "今天天气"})
         assert json.loads(out)["ok"] is False
         assert "WEB_SEARCH_API_KEY" in json.loads(out)["error"]
+
+    async def test_searxng_provider(self, monkeypatch) -> None:
+        """自托管 SearXNG 分支(M17 增补):GET json API,免费无限。"""
+        import json
+
+        import httpx
+
+        import agentplatform.core.agent.web_search as ws
+
+        monkeypatch.setattr(settings, "web_search_provider", "searxng")
+        monkeypatch.setattr(settings, "searxng_base_url", "http://searxng.test")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.params["format"] == "json"
+            return httpx.Response(200, json={"results": [
+                {"title": "结果一", "url": "https://a.example.com", "content": "内容" * 50},
+            ]})
+
+        real_client = ws.httpx.AsyncClient
+
+        class _Client(real_client):
+            def __init__(self, **kw):
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(**kw)
+
+        ws.httpx.AsyncClient = _Client
+        try:
+            out = json.loads(await run_web_search({"query": "test", "max_results": 2}))
+        finally:
+            ws.httpx.AsyncClient = real_client
+        assert out["ok"] is True
+        assert out["results"][0]["title"] == "结果一"
+        assert len(out["results"][0]["content"]) <= 500  # 截断
 
     async def test_empty_query_rejected(self) -> None:
         import json

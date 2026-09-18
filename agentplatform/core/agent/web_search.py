@@ -42,41 +42,60 @@ async def run(args: dict) -> str:
     query = (args.get("query") or "").strip()
     if not query:
         return json.dumps({"ok": False, "error": "query 不能为空"}, ensure_ascii=False)
-    if not settings.web_search_api_key:
-        return json.dumps(
-            {
-                "ok": False,
-                "error": "搜索服务未配置:需在平台环境变量设置 WEB_SEARCH_API_KEY(推荐 Tavily)",
-            },
-            ensure_ascii=False,
-        )
+
+    provider = settings.web_search_provider.lower()
     max_results = max(1, min(int(args.get("max_results") or 5), 10))
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": settings.web_search_api_key,
-                    "query": query,
-                    "max_results": max_results,
-                    "search_depth": "basic",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        if provider == "searxng":
+            # 自托管 SearXNG(免费无限;实例需允许 json format)
+            if not settings.searxng_base_url:
+                return json.dumps(
+                    {"ok": False, "error": "SEARXNG_BASE_URL 未配置"}, ensure_ascii=False
+                )
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{settings.searxng_base_url.rstrip('/')}/search",
+                    params={"q": query, "format": "json"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            results = [
+                {"title": r.get("title", ""), "url": r.get("url", ""),
+                 "content": (r.get("content") or "")[:500]}
+                for r in (data.get("results") or [])[:max_results]
+            ]
+        else:  # tavily(默认)
+            if not settings.web_search_api_key:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "搜索服务未配置:设置 WEB_SEARCH_API_KEY(Tavily)或 "
+                                 "切换 WEB_SEARCH_PROVIDER=searxng 使用自托管 SearXNG",
+                    },
+                    ensure_ascii=False,
+                )
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": settings.web_search_api_key,
+                        "query": query,
+                        "max_results": max_results,
+                        "search_depth": "basic",
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            results = [
+                {"title": r.get("title", ""), "url": r.get("url", ""),
+                 "content": (r.get("content") or "")[:500]}
+                for r in data.get("results", [])
+            ]
     except Exception as exc:  # noqa: BLE001  回填给 LLM 可自纠
         return json.dumps(
             {"ok": False, "error": f"搜索请求失败: {type(exc).__name__}: {exc}"},
             ensure_ascii=False,
         )
-    results = [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("url", ""),
-            "content": (r.get("content") or "")[:500],
-        }
-        for r in data.get("results", [])
-    ]
     return json.dumps(
         {
             "ok": True,

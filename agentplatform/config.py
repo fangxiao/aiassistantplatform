@@ -103,8 +103,10 @@ class Settings(BaseSettings):
     # 安全收敛(2026-09-17)
     file_serve_roots: list[str] = []  # /api/files 允许访问的额外根目录(绝对路径);默认仅 cwd 与 ~/.agentplatform
     allow_self_promote_developer: bool = False  # 注册接口是否允许自选 developer 角色(仅本地开发开)
-    # 联网搜索(M15 P1):Tavily 协议;空 = 工具优雅降级(返回未配置提示)
+    # 联网搜索(M15 P1):provider=tavily(需 WEB_SEARCH_API_KEY)/searxng(自托管,免费无限)
     web_search_api_key: str = ""
+    web_search_provider: str = "tavily"
+    searxng_base_url: str = "http://localhost:8888"
     memory_max_per_user: int = 50  # 每用户长期记忆条数上限(超出淘汰最旧)
     # 通用动作(M17):允许 agent 调用的域名白名单;空=工具禁用(安全默认)
     action_http_allowlist: list[str] = []
