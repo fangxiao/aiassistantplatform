@@ -126,7 +126,7 @@ export function SessionDrawer({
   }
 
   return (
-    <aside className="relative flex h-full w-64 flex-col border-r border-slate-200 bg-white">
+    <aside className="relative z-30 flex h-full w-64 flex-col border-r border-slate-200 bg-white max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl">
       <div className="flex items-center justify-between border-b border-slate-100 p-3">
         <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
           <span>💬</span> 历史对话

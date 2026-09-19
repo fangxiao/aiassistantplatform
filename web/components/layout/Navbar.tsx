@@ -42,6 +42,7 @@ export function Navbar() {
 
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleCopyToken = () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("agentplatform_token") : "";
@@ -83,6 +84,15 @@ export function Navbar() {
               );
             })}
           </nav>
+          {/* 移动端汉堡菜单 */}
+          <button
+            type="button"
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="md:hidden rounded-md p-2 text-slate-600 hover:bg-slate-100"
+            aria-label="菜单"
+          >
+            {menuOpen ? "✕" : "☰"}
+          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -189,6 +199,26 @@ export function Navbar() {
           </div>
         </div>
       )}
-    </header>
+    
+      {/* 移动端导航下拉 */}
+      {menuOpen && (
+        <nav className="md:hidden border-t border-slate-100 bg-white px-4 py-2">
+          {navLinks.map((link) => {
+            const active = pathname === link.href;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setMenuOpen(false)}
+                className={`block rounded-md px-3 py-2.5 text-sm font-medium transition ${
+                  active ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+        </nav>
+      )}</header>
   );
 }

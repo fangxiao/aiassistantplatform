@@ -41,7 +41,7 @@ const SYNC_META: Record<string, { label: string; dot: string }> = {
 export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, onOpenKb, onSaveToKb }: Props) {
   return (
     <div className="h-full overflow-y-auto bg-slate-50">
-      <div className="mx-auto max-w-5xl px-6 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         {/* 问候头 */}
         <div className="mb-6">
           <h1 className="text-xl font-bold text-slate-900">
@@ -54,7 +54,7 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
         </div>
 
         {/* 快捷操作 */}
-        <div className="mb-6 grid grid-cols-3 gap-3">
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <QuickAction icon="💬" title="新会话" desc="选一个助手开始" onClick={() => onNewSession()} />
           <QuickAction icon="📖" title="问知识库" desc="检索调试 / 管理库" onClick={onOpenKb} />
           <QuickAction icon="⬆️" title="上传文档" desc="进知识库页选择库" onClick={onOpenKb} />

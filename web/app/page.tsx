@@ -45,7 +45,10 @@ function ChatHome() {
   const [current, setCurrent] = useState<SessionInfo | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [drawerCollapsed, setDrawerCollapsed] = useState(false);
+  // 移动端(<768px)默认折叠抽屉,桌面默认展开
+  const [drawerCollapsed, setDrawerCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 768
+  );
   const [showAsstModal, setShowAsstModal] = useState(false);
   // M14:"新会话"是选择意图而非制造记录——无明确助手时弹选择器,取消不留垃圾会话
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
