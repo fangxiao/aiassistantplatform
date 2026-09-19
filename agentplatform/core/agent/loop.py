@@ -214,8 +214,14 @@ async def stream_agent(
         args = _parse_args(arguments)
         try:
             if resource.id == KB_SEARCH_TOOL_ID:
-                # 知识库检索:需要会话允许范围,不走通用 executor(设计 008 §3.3)
-                return await run_kb_search(session, allowed_kb_ids or [], args)
+                # 知识库检索:需要会话允许范围,不走通用 executor(设计 008 §3.3);
+                # 打磨④:透传最近对话文本供 query 改写(指代消解)
+                recent = [
+                    {"role": m.get("role"), "content": m.get("content")}
+                    for m in messages
+                    if isinstance(m.get("content"), str)
+                ][-4:]
+                return await run_kb_search(session, allowed_kb_ids or [], args, history=recent)
             if resource.id == WORKBENCH_TODO_TOOL_ID:
                 # 个人待办:需要会话用户上下文(M14;与 kb_search 同款特判模式)
                 return await todo_run(session, owner_id or "", args)

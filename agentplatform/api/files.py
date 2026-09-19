@@ -111,11 +111,20 @@ async def upload_image(
 
     存 ~/.agentplatform/uploads/,返回白名单内可预览的 /api/files/raw URL。
     """
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "仅支持图片"})
+    # 打磨⑥:单文档即问——除图片外允许 pdf/md/txt(对话级临时解析,不入知识库)
+    allowed = file.content_type and (
+        file.content_type.startswith("image/")
+        or file.content_type in ("application/pdf", "text/markdown", "text/plain")
+        or (file.filename or "").lower().endswith((".pdf", ".md", ".markdown", ".txt"))
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": "仅支持图片或 PDF/Markdown/文本"},
+        )
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "单张图片不能超过 5MB"})
+        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "文件不能超过 5MB"})
 
     import uuid as _uuid
 

@@ -47,8 +47,9 @@ export function sendMessage(
   content: string,
   images: string[] = [],
   signal?: AbortSignal,
+  docs: string[] = [],
 ): AsyncGenerator<SseEvent> {
-  return streamSse(`/chat/sessions/${sid}/messages`, { content, images }, signal);
+  return streamSse(`/chat/sessions/${sid}/messages`, { content, images, docs }, signal);
 }
 
 // 打磨②:重新生成最后一条助手回复(撤回 + 重跑)
@@ -89,5 +90,10 @@ export async function sendFeedbackEvent(
 
 // 打磨④:对话图片上传(对象存储化)——返回服务端 URL,消息块不再存 dataURL
 export async function uploadImage(file: File): Promise<{ url: string; size: number }> {
+  return apiUpload<{ url: string; size: number }>("/files/upload", file);
+}
+
+// 打磨⑥:单文档即问上传(pdf/md/txt,临时解析不入库)
+export async function uploadDoc(file: File): Promise<{ url: string; size: number }> {
   return apiUpload<{ url: string; size: number }>("/files/upload", file);
 }

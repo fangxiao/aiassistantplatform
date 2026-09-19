@@ -198,6 +198,12 @@ async def send_message(
     # 多模态校验(设计 012):data:image 前缀 + 单张 5MB(与知识库单文档上限一致)
     import binascii
 
+    for doc in payload.docs:
+        if not doc.startswith("/api/files/raw"):
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": "docs 仅支持服务端文档 URL"},
+            )
     for img in payload.images:
         if img.startswith("/api/files/raw"):  # 对象存储化后的服务端 URL
             continue
@@ -224,7 +230,7 @@ async def send_message(
 
         try:
             usage_total: int | None = None
-            async for ev in agent_stream_for_session(session, sid, payload.content, images=payload.images):
+            async for ev in agent_stream_for_session(session, sid, payload.content, images=payload.images, docs=payload.docs):
                 if ev.type == "reasoning" and ev.text:
                     yield sse("reasoning", {"text": ev.text})
                 elif ev.type == "delta" and ev.text:
@@ -259,6 +265,12 @@ async def send_message(
                 session, sid, final_blocks if final_blocks else final_text, tokens=usage_tokens
             )
             await session.commit()
+            # 打磨:会话标题自动生成(独立会话/短任务,失败静默)
+            import asyncio as _asyncio
+
+            from agentplatform.core.message.service import generate_session_title
+
+            _asyncio.get_running_loop().create_task(_generate_title_logged(sid, payload.content))
             yield sse(
                 "done",
                 {"message_id": str(msg.id), "tokens": usage_tokens},
@@ -410,3 +422,21 @@ async def regenerate_last(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+async def _generate_title_logged(sid: uuid.UUID, first_message: str) -> None:
+    """后台生成会话标题;失败仅记日志(独立 Session)。"""
+    import logging
+
+    from agentplatform.core.db.engine import SessionLocal
+    from agentplatform.core.message.service import generate_session_title
+
+    try:
+        async with SessionLocal() as db:
+            title = await generate_session_title(db, sid, first_message)
+            if title:
+                logging.getLogger(__name__).info("会话标题已生成: %s -> %s", sid, title)
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).exception("会话标题生成失败 sid=%s", sid)

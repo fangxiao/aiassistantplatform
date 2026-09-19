@@ -3,7 +3,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { uploadImage } from "../../lib/api/chat";
+import { uploadImage, uploadDoc } from "../../lib/api/chat";
 
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -13,13 +13,15 @@ export default function Composer({
   disabled,
   onStop,
 }: {
-  onSend: (text: string, images: string[]) => void;
+  onSend: (text: string, images: string[], docs: string[]) => void;
   disabled: boolean;
   onStop?: () => void;
 }) {
   const [value, setValue] = useState("");
   // 打磨④:对象存储化——选图即上传,发送用服务端 URL(消息表不再存 dataURL)
   const [images, setImages] = useState<{ preview: string; url: string | null }[]>([]);
+  // 打磨⑥:单文档即问(pdf/md/txt,不入知识库)
+  const [docs, setDocs] = useState<{ name: string; url: string | null }[]>([]);
   const [isComposing, setIsComposing] = useState(false);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -49,10 +51,22 @@ export default function Composer({
 
   const submit = () => {
     const t = value.trim();
-    if ((!t && images.length === 0) || disabled) return;
-    onSend(t, images.map((x) => x.url ?? x.preview)); // 上传未完成的用 dataURL 兜底
+    if ((!t && images.length === 0 && docs.length === 0) || disabled) return;
+    onSend(
+      t,
+      images.map((x) => x.url ?? x.preview),
+      docs.map((x) => x.url).filter(Boolean) as string[],
+    );
     setValue("");
     setImages([]);
+    setDocs([]);
+  };
+
+  const addDoc = (file: File) => {
+    if (docs.length >= 2) return;
+    uploadDoc(file)
+      .then((r) => setDocs((cur) => (cur.length >= 2 ? cur : [...cur, { name: file.name, url: r.url }])))
+      .catch(() => undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -90,6 +104,23 @@ export default function Composer({
           ))}
         </div>
       )}
+      {docs.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {docs.map((d, i) => (
+            <div key={i} className="relative rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5">
+              <span className="text-[11px] text-slate-600">📄 {d.name}</span>
+              <button
+                type="button"
+                onClick={() => setDocs((prev) => prev.filter((_, j) => j !== i))}
+                className="ml-2 text-[10px] text-slate-400 hover:text-rose-500"
+                title="移除"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 items-end">
       <button
         type="button"
@@ -103,11 +134,16 @@ export default function Composer({
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.pdf,.md,.markdown,.txt"
         multiple
         className="hidden"
         onChange={(e) => {
-          if (e.target.files) addImages(e.target.files);
+          if (e.target.files) {
+            const imgs = Array.from(e.target.files).filter((f) => f.type.startsWith("image/"));
+            const files2 = Array.from(e.target.files).filter((f) => !f.type.startsWith("image/"));
+            if (imgs.length) addImages(imgs);
+            files2.slice(0, 2 - docs.length).forEach(addDoc);
+          }
           e.target.value = "";
         }}
       />

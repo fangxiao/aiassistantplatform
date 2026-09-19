@@ -87,6 +87,7 @@ async def agent_stream_for_session(
     user_message: str,
     images: list[str] | None = None,
     save_input: bool = True,
+    docs: list[str] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """为一次发消息构建 agent 流(供 API SSE 消费)。
 
@@ -95,8 +96,12 @@ async def agent_stream_for_session(
     sess = await get_session(session, session_id)
     if sess is None:
         raise ChatError("会话不存在")
+    # 打磨⑥:单文档即问——拉取文档正文(pdf 解析/md·txt 直读),注入 prompt
+    doc_context = await _load_doc_context(docs) if docs else ""
     if save_input:
-        await save_user_message(session, session_id, user_message, images=images)
+        await save_user_message(
+            session, session_id, user_message, images=images, docs=docs
+        )
 
     plugin = await get_plugin(session, sess.plugin_id) if sess.plugin_id else None
     manifest = (plugin.manifest or {}) if plugin else None
@@ -147,11 +152,14 @@ async def agent_stream_for_session(
         prior = history[:-1]
     else:
         prior = []
+    effective_message = (
+        f"{doc_context}\n\n---\n\n用户问题: {user_message}" if doc_context else user_message
+    )
     async for ev in stream_agent(
         session,
         client,
         resource_ids=resource_ids,
-        user_message=user_message,
+        user_message=effective_message,
         history=prior,
         owner_id=str(sess.user_id) if sess.user_id else None,
         plugin_desc=(plugin.manifest or {}).get("description") if plugin else None,
@@ -160,3 +168,36 @@ async def agent_stream_for_session(
         images=images,
     ):
         yield ev
+
+
+_MAX_DOC_CONTEXT_CHARS = 30000  # 即问文档截断;更大请引导用户入知识库
+
+
+async def _load_doc_context(docs: list[str] | None) -> str:
+    """拉取即问文档正文:服务端 /api/files/raw URL → 本地路径解析。"""
+    if not docs:
+        return ""
+    from pathlib import Path
+    from urllib.parse import parse_qs, urlparse
+
+    from agentplatform.core.kb.pipeline import parse_document
+
+    parts: list[str] = []
+    for url in docs[:2]:
+        try:
+            local = Path(parse_qs(urlparse(url).query).get("path", [""])[0])
+            if not local.exists() or not local.is_file():
+                continue
+            suffix = local.suffix.lower()
+            mime = (
+                "application/pdf" if suffix == ".pdf"
+                else "text/markdown" if suffix in (".md", ".markdown")
+                else "text/plain"
+            )
+            text = parse_document(mime, local)
+            if text and text.strip():
+                name = local.name
+                parts.append(f"【文档 {name}】\n{text.strip()[:_MAX_DOC_CONTEXT_CHARS]}")
+        except Exception:  # noqa: BLE001  单文档失败跳过,不阻塞对话
+            continue
+    return "\n\n".join(parts)

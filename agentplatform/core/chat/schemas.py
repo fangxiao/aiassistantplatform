@@ -31,6 +31,8 @@ class SendMessage(BaseModel):
     content: str
     # 多模态输入(设计 012):data:image/* dataURL,最多 4 张、单张 ≤5MB
     images: list[str] = Field(default_factory=list, max_length=4)
+    # 单文档即问(打磨⑥):/api/files/raw 服务端 URL,最多 2 个(临时解析,不入库)
+    docs: list[str] = Field(default_factory=list, max_length=2)
 
 
 class MessageOut(BaseModel):

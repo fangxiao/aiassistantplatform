@@ -105,9 +105,16 @@ async def resolve_allowed_kb_ids(
 
 
 async def run_kb_search(
-    db: AsyncSession, allowed_kb_ids: list[uuid.UUID], args: dict
+    db: AsyncSession,
+    allowed_kb_ids: list[uuid.UUID],
+    args: dict,
+    history: list[dict] | None = None,
 ) -> str:
-    """执行检索(返回 JSON 字符串回填 agent loop)。"""
+    """执行检索(返回 JSON 字符串回填 agent loop)。
+
+    history(打磨④):最近对话上下文,用于把"那第二个呢"类追问改写为
+    独立检索句——loop 的 kb_search 特判透传。
+    """
     query = (args.get("query") or "").strip()
     if not query:
         return "错误:query 不能为空"
@@ -139,9 +146,13 @@ async def run_kb_search(
             )
         scope = wanted
 
+    # 打磨④:多轮指代消解——结合最近对话把追问改写为独立检索句(可开关)
+    if settings.kb_query_rewrite and history:
+        query = await _rewrite_query(db, query, history) or query
+
     endpoint = await resolve_embedding_endpoint(db)
     [query_vec] = await embed_texts([query], endpoint)
-    hits = await retriever.search(db, query_vec, scope, top_k)
+    hits = await retriever.search(db, query_vec, scope, top_k, query_text=query)
     results = [
         {
             "kb_id": str(h.kb_id),
@@ -159,3 +170,47 @@ async def run_kb_search(
     if not results:
         hint = "未检索到相关资料,可尝试更换关键词;若确实无相关资料,请如实告知用户。"
     return json.dumps({"results": results, "hint": hint}, ensure_ascii=False)
+
+
+async def _rewrite_query(db: AsyncSession, query: str, history: list[dict]) -> str | None:
+    """结合最近 2 轮对话,把追问改写为独立检索句;失败/超时返回 None(用原 query)。"""
+    import asyncio
+    import json as _json
+
+    recent = [
+        {"role": h.get("role", "user"), "content": (h.get("content") or "")[:300]}
+        for h in (history or [])[-4:]
+    ]
+    if not recent:
+        return None
+    try:
+        from agentplatform.core.agent.loop import _stream
+        from agentplatform.core.chat.service import make_llm_client
+
+        client = await make_llm_client(db, None)
+        parts: list[str] = []
+        async for ev in asyncio.wait_for(
+            _stream(
+                client,
+                [
+                    {
+                        "role": "user",
+                        "content": (
+                            "以下是对话片段与一个检索问题。把检索问题改写为不依赖对话上下文、"
+                            "可独立理解的检索句(保留专有名词与编号);若本就独立则原样输出。"
+                            "只输出改写后的检索句,不要解释。\n\n对话:\n"
+                            + _json.dumps(recent, ensure_ascii=False)
+                            + f"\n\n检索问题: {query}"
+                        ),
+                    }
+                ],
+                None,
+            ),
+            timeout=8,
+        ):
+            if ev.type == "delta" and ev.text:
+                parts.append(ev.text)
+        out = "".join(parts).strip().strip('"“”')
+        return out[:200] or None
+    except Exception:  # noqa: BLE001  改写失败回退原 query
+        return None

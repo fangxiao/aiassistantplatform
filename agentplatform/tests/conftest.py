@@ -71,6 +71,8 @@ async def db_engine():
     engine = create_async_engine(TEST_URL, poolclass=NullPool)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+        # 打磨①:混合检索依赖 pg_trgm(contrib 自带;生产由迁移 d6f3a8b21c95 建)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     async with engine.begin() as conn:

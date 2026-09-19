@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     kb_chunk_tokens: int = 512  # 切分目标长度
     kb_chunk_overlap_tokens: int = 50  # 切分重叠
     kb_search_top_k: int = 5  # kb_search 默认返回条数
+    kb_query_rewrite: bool = True  # 检索前结合对话改写 query(指代消解,多一次轻量 LLM 调用)
     # 内容型连接器(M13,设计 009):网页抓取边界与调度节奏
     connector_fetch_timeout_s: int = 15  # 单页请求超时
     connector_max_page_bytes: int = 5 * 1024 * 1024  # 单页正文上限
