@@ -42,6 +42,16 @@ def is_owner(kb: KnowledgeBase, user_id: str | None) -> bool:
     return user_id is not None and str(kb.owner_id) == str(user_id)
 
 
+async def member_role(db: AsyncSession, kb_id: uuid.UUID, user_id: str | None) -> str | None:
+    """返回成员角色(member/editor/viewer);非成员返回 None。"""
+    row = await db.scalar(
+        select(KbMember).where(
+            KbMember.kb_id == kb_id, KbMember.user_id == str(user_id or "")
+        )
+    )
+    return row.role if row else None
+
+
 async def is_member(db: AsyncSession, kb_id: uuid.UUID, user_id: str | None) -> bool:
     """shared 库成员判定(设计 008 §12);owner 不入库,由 is_owner 另判。"""
     if user_id is None:
@@ -66,7 +76,10 @@ async def can_write(db: AsyncSession, kb: KnowledgeBase, user: User) -> bool:
     if kb.visibility == KbVisibility.private:
         return is_owner(kb, str(user.id))
     if kb.visibility == KbVisibility.shared:
-        return is_owner(kb, str(user.id)) or await is_member(db, kb.id, str(user.id))
+        if is_owner(kb, str(user.id)):
+            return True
+        # 产品成熟度⑤:viewer 只读,member/editor 可写
+        return (await member_role(db, kb.id, str(user.id))) in ("member", "editor")
     return user.role == UserRole.developer
 
 
@@ -360,18 +373,22 @@ async def list_members(db: AsyncSession, kb_id: uuid.UUID) -> list[KbMember]:
     return list(rows)
 
 
-async def add_member(db: AsyncSession, kb: KnowledgeBase, user: User, *, member: User) -> KbMember:
-    """添加成员(仅 owner);重复加入拒绝。"""
+async def add_member(
+    db: AsyncSession, kb: KnowledgeBase, user: User, *, member: User, role: str = "member"
+) -> KbMember:
+    """添加成员(仅 owner);重复加入拒绝。role: member/editor(可写)/viewer(只读)。"""
     if not can_manage(kb, user):
         raise KbError("仅库所有者可管理成员")
     if str(member.id) == str(kb.owner_id):
         raise KbError("该用户已是库所有者")
+    if role not in ("member", "editor", "viewer"):
+        raise KbError(f"不支持的成员角色: {role!r}(member/editor/viewer)")
     existing = await db.scalar(
         select(KbMember).where(KbMember.kb_id == kb.id, KbMember.user_id == str(member.id))
     )
     if existing is not None:
         raise KbError("该用户已是成员")
-    row = KbMember(kb_id=kb.id, user_id=str(member.id))
+    row = KbMember(kb_id=kb.id, user_id=str(member.id), role=role)
     db.add(row)
     await db.flush()
     return row

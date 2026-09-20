@@ -18,6 +18,7 @@ import {
   listSessions,
   renameSession,
   sendFeedbackEvent,
+  createShare,
   regenerateLast,
   sendMessage,
   updateSessionKbs,
@@ -144,6 +145,19 @@ function ChatHome() {
       alert(`重命名失败: ${err instanceof Error ? err.message : err}`);
     }
   };
+
+  // 产品成熟度③:会话分享(生成只读链接并复制)
+  const handleShareSession = useCallback(async (id: string) => {
+    try {
+      const r = await createShare(id, 7);
+      const base = typeof window !== "undefined" ? window.location.origin : "";
+      const url = `${base}/share/${r.share_token}`;
+      await navigator.clipboard.writeText(url);
+      alert(`分享链接已复制(${new Date(r.expires_at).toLocaleDateString("zh-CN")} 前有效):\n${url}`);
+    } catch (err) {
+      alert(`分享失败: ${err instanceof Error ? err.message : err}`);
+    }
+  }, []);
 
   const handleDeleteSession = async (id: string) => {
     try {
@@ -408,6 +422,7 @@ function ChatHome() {
           onCreate={handleCreateSession}
           onRename={handleRenameSession}
           onDelete={handleDeleteSession}
+          onShare={handleShareSession}
           collapsed={drawerCollapsed}
           onToggleCollapse={() => setDrawerCollapsed(!drawerCollapsed)}
         />

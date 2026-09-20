@@ -22,6 +22,9 @@ class Session(Base):
     user_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # M1 后 FK
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 会话分享(产品成熟度③):非空即开启只读分享;过期后 404
+    share_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    share_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 运行时挂载的知识库 id 列表(M12,设计 008 §4.2);服务端写入前校验可读
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(

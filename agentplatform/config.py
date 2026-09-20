@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     # 通用动作(M17):允许 agent 调用的域名白名单;空=工具禁用(安全默认)
     action_http_allowlist: list[str] = []
     action_require_confirm: bool = True  # 写操作(POST/PUT/PATCH/DELETE)须用户在确认框确认
+    # 通知出口(成熟度④):SMTP 发件(空=禁用邮件);webhook 无需配置按任务传入
+    notify_smtp_host: str = ""
+    notify_smtp_port: int = 465
+    notify_smtp_user: str = ""
+    notify_smtp_pass: str = ""
+    notify_from: str = ""
     kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 

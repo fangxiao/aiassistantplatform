@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Navbar } from "../../components/layout/Navbar";
 import { BlockRenderer } from "../../components/renderers/BlockRenderer";
 import { PluginKbMountModal } from "../../components/kb/PluginKbMountModal";
+import { InsightsPanel } from "../../components/developer/InsightsPanel";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 import { isAuthed } from "../../lib/api/auth";
 import type {
@@ -19,7 +20,7 @@ import type {
 export default function DeveloperPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<
-    "plugins" | "registry" | "widgets" | "guide" | "llm"
+    "plugins" | "registry" | "widgets" | "guide" | "llm" | "insights"
   >("plugins");
 
   // Capabilities state
@@ -240,6 +241,17 @@ export default function DeveloperPage() {
               onClick={() => setActiveTab("llm")}
               className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
                 activeTab === "llm"
+                  ? "bg-slate-900 text-white shadow-xs font-semibold"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              🤖 LLM 端点 ({endpoints.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("insights")}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                activeTab === "insights"
                   ? "bg-slate-900 text-white shadow-xs font-semibold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
@@ -867,6 +879,8 @@ export default function DeveloperPage() {
         {/* ========================================================================= */}
         {/* TAB 5: LLM 端点管理 */}
         {/* ========================================================================= */}
+        {activeTab === "insights" && <InsightsPanel />}
+
         {activeTab === "llm" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-xs text-xs text-slate-600">

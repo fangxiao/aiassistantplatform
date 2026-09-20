@@ -143,6 +143,7 @@ class KbMemberAddIn(BaseModel):
     """按 email 添加成员(008 §12.3),避免暴露用户目录。"""
 
     email: str = Field(min_length=3, max_length=254)
+    role: str = Field(default="member", pattern="^(member|editor|viewer)$")  # 成熟度⑤
 
 
 class KbMemberOut(BaseModel):
@@ -418,7 +419,7 @@ async def add_kb_member(
             status_code=400, detail={"code": "kb_error", "message": f"用户不存在: {payload.email}"}
         )
     try:
-        row = await kb_service.add_member(db, kb, user, member=member_user)
+        row = await kb_service.add_member(db, kb, user, member=member_user, role=payload.role)
     except kb_service.KbError as exc:
         raise _http_error(exc) from exc
     await db.commit()

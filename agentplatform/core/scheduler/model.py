@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Index, Integer, Text, Uuid, func
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +32,10 @@ class ScheduledTask(Base):
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # 空=平台通用助手
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # 空=运行时取可见库
     auto_save_kb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 通知出口(成熟度④): {webhook?: url, webhook_payload?: "feishu"|"raw", email?: addr}
+    notify: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=sa_text("'{}'::jsonb")
+    )
     # P1:自动存库目标(空=回退首个可写库);开启 auto_save_kb 时生效
     target_kb_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -66,6 +71,8 @@ class TaskRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P1 通知分级:产出含异常([ALERT] 首行)时为 True——正常产出静默,异常才进通知
     alert: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # P1 打磨:本次运行消耗 token(成本可观测)
+    tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 Index("ix_task_runs_task_id", TaskRun.task_id)

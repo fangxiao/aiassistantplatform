@@ -223,6 +223,8 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run.output = output
             run.session_id = chat_sess.id
             run.status = "success"
+            # 成熟度④:通知出口推送(失败不影响任务)
+            await _notify(task, output)
             # P1 通知分级:产出首行 [ALERT] 标记 → alert=True 进通知;正常静默落卡
             run.alert = output.splitlines()[0].strip().startswith("[ALERT]") if output else False
             task.last_status = "success"
@@ -280,3 +282,20 @@ async def _maybe_autosave(db: AsyncSession, task: ScheduledTask, chat_sess, outp
         )
     except Exception as exc:  # noqa: BLE001  存库失败仅记录,不改运行状态
         logger.warning("scheduler: 自动存知识库失败 task=%s: %s", task.id, exc)
+
+
+async def _notify(task: ScheduledTask, output: str) -> None:
+    """按任务 notify 配置推送产出:webhook(飞书机器人格式可选)/邮件。"""
+    from agentplatform.core.notify import service as notify_service
+
+    cfg = task.notify or {}
+    text = f"⏰ 定时任务「{task.name}」产出:\n\n{output[:1500]}"
+    if cfg.get("webhook"):
+        payload = (
+            notify_service.feishu_bot_payload(text)
+            if cfg.get("webhook_payload") == "feishu"
+            else {"task": task.name, "output": output[:4000]}
+        )
+        await notify_service.send_webhook(str(cfg["webhook"]), payload)
+    if cfg.get("email"):
+        notify_service.send_email(str(cfg["email"]), f"AgentPlatform · {task.name}", text)

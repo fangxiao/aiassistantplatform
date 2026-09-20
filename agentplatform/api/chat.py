@@ -8,6 +8,7 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -440,3 +441,80 @@ async def _generate_title_logged(sid: uuid.UUID, first_message: str) -> None:
         import logging
 
         logging.getLogger(__name__).exception("会话标题生成失败 sid=%s", sid)
+
+
+# ---------------------------------------------------------------- 会话分享(产品成熟度③)
+
+
+class ShareOut(BaseModel):
+    share_token: str
+    share_url: str
+    expires_at: str
+
+
+@router.post("/sessions/{sid}/share", response_model=ShareOut)
+async def create_share(
+    sid: uuid.UUID,
+    payload: dict | None = None,
+    session: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> ShareOut:
+    """创建只读分享链接(默认 7 天有效;再调一次重置 token)。"""
+    await _ensure_session_owned(session, sid, user.id)
+    import secrets
+    from datetime import UTC, datetime, timedelta
+
+    row = await get_session(session, sid)
+    assert row is not None
+    days = int((payload or {}).get("days") or 7)
+    row.share_token = secrets.token_urlsafe(16)
+    row.share_expires_at = datetime.now(UTC) + timedelta(days=days)
+    await session.commit()
+    return ShareOut(
+        share_token=row.share_token,
+        share_url=f"/share/{row.share_token}",
+        expires_at=row.share_expires_at.isoformat(),
+    )
+
+
+@router.delete("/sessions/{sid}/share", status_code=204)
+async def revoke_share(
+    sid: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+):
+    """撤销分享链接。"""
+    await _ensure_session_owned(session, sid, user.id)
+    row = await get_session(session, sid)
+    assert row is not None
+    row.share_token = None
+    row.share_expires_at = None
+    await session.commit()
+
+
+@router.get("/shared/{share_token}")
+async def view_shared(
+    share_token: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """公开只读视图(无需登录):会话标题 + 消息(不含用户身份字段)。"""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select as _select
+
+    row = await session.scalar(_select(Session).where(Session.share_token == share_token))
+    if row is None:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "分享不存在或已撤销"})
+    if row.share_expires_at and row.share_expires_at < datetime.now(UTC):
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "分享已过期"})
+    msgs = []
+    for m in await list_messages(session, row.id):
+        txt = message_text(m)
+        if m.role.value == "assistant" and not txt.strip():
+            continue
+        msgs.append({"role": m.role.value, "text": txt, "blocks": m.blocks or []})
+    return {
+        "title": row.title or "未命名会话",
+        "created_at": row.created_at.isoformat(),
+        "messages": msgs,
+    }

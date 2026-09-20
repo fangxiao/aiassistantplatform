@@ -14,6 +14,7 @@ from agentplatform.api import (
     chat,
     dev_session,
     files,
+    insights,
     health,
     kb,
     mcp,
@@ -40,6 +41,7 @@ api_router.include_router(files.router)
 api_router.include_router(kb.router)
 api_router.include_router(memory.router)
 api_router.include_router(mcp.router)
+api_router.include_router(insights.router)
 api_router.include_router(workbench.router)
 api_router.include_router(scheduler.router)
 

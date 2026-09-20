@@ -11,6 +11,7 @@ interface SessionDrawerProps {
   onCreate: (pluginId?: string | null) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onShare?: (id: string) => Promise<void>;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -23,6 +24,7 @@ export function SessionDrawer({
   onCreate,
   onRename,
   onDelete,
+  onShare,
   collapsed,
   onToggleCollapse,
 }: SessionDrawerProps) {
@@ -282,6 +284,23 @@ export function SessionDrawer({
                     >
                       ✏️
                     </button>
+                    {onShare && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onShare(s.id);
+                        }}
+                        title="生成只读分享链接"
+                        className={`rounded px-1 py-0.5 text-[10px] ${
+                          isSelected
+                            ? "text-slate-300 hover:bg-slate-800"
+                            : "text-slate-400 hover:bg-slate-200"
+                        }`}
+                      >
+                        🔗
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => handleDelete(s.id, e)}

@@ -18,6 +18,7 @@ interface SchedTask {
   interval_minutes: number | null;
   auto_save_kb: boolean;
   target_kb_id: string | null;
+  notify?: Record<string, any>;
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -303,6 +304,9 @@ function TaskFormModal({
     interval_minutes: String(task?.interval_minutes ?? 60),
     auto_save_kb: task?.auto_save_kb ?? false,
     target_kb_id: task?.target_kb_id ?? "",
+    notify_webhook: (task?.notify?.webhook as string) ?? "",
+    notify_webhook_payload: (task?.notify?.webhook_payload as string) ?? "feishu",
+    notify_email: (task?.notify?.email as string) ?? "",
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -320,6 +324,10 @@ function TaskFormModal({
         interval_minutes: form.schedule_type === "interval" ? parseInt(form.interval_minutes, 10) || 60 : null,
         auto_save_kb: form.auto_save_kb,
         target_kb_id: form.target_kb_id || null,
+        notify: {
+          ...(form.notify_webhook ? { webhook: form.notify_webhook, webhook_payload: form.notify_webhook_payload } : {}),
+          ...(form.notify_email ? { email: form.notify_email } : {}),
+        },
         enabled: task?.enabled ?? true,
       };
       if (isEdit && task) {
@@ -444,6 +452,44 @@ function TaskFormModal({
             />
             <span className="text-[11px] text-slate-600">产出自动存入知识库</span>
           </label>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <div className="mb-2 text-[11px] font-semibold text-slate-600">
+              📬 产出推送(可选)
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-[10px] text-slate-500">Webhook(飞书自定义机器人直接粘贴地址)</span>
+              <input
+                value={form.notify_webhook}
+                onChange={(e) => setForm((f) => ({ ...f, notify_webhook: e.target.value }))}
+                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-indigo-400"
+              />
+            </label>
+            {form.notify_webhook && (
+              <label className="mt-2 block">
+                <span className="mb-1 block text-[10px] text-slate-500">消息格式</span>
+                <select
+                  value={form.notify_webhook_payload}
+                  onChange={(e) => setForm((f) => ({ ...f, notify_webhook_payload: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-indigo-400"
+                >
+                  <option value="feishu">飞书机器人格式(text)</option>
+                  <option value="raw">原始 JSON({`{task, output}`})</option>
+                </select>
+              </label>
+            )}
+            <label className="mt-2 block">
+              <span className="mb-1 block text-[10px] text-slate-500">邮件(需平台配置 SMTP)</span>
+              <input
+                type="email"
+                value={form.notify_email}
+                onChange={(e) => setForm((f) => ({ ...f, notify_email: e.target.value }))}
+                placeholder="someone@example.com"
+                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-indigo-400"
+              />
+            </label>
+          </div>
           {form.auto_save_kb && (
             <TargetKbSelect
               value={form.target_kb_id}

@@ -97,3 +97,12 @@ export async function uploadImage(file: File): Promise<{ url: string; size: numb
 export async function uploadDoc(file: File): Promise<{ url: string; size: number }> {
   return apiUpload<{ url: string; size: number }>("/files/upload", file);
 }
+
+// 会话分享(产品成熟度③):创建/撤销只读链接
+export async function createShare(sid: string, days = 7): Promise<{ share_token: string; share_url: string; expires_at: string }> {
+  return apiPost(`/chat/sessions/${sid}/share`, { days });
+}
+
+export async function revokeShare(sid: string): Promise<void> {
+  await apiDelete(`/chat/sessions/${sid}/share`);
+}
