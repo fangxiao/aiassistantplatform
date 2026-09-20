@@ -19,6 +19,7 @@ from agentplatform.api import (
     kb,
     mcp,
     memory,
+    notify,
     plugins,
     registry,
     scheduler,
@@ -42,6 +43,7 @@ api_router.include_router(kb.router)
 api_router.include_router(memory.router)
 api_router.include_router(mcp.router)
 api_router.include_router(insights.router)
+api_router.include_router(notify.router)
 api_router.include_router(workbench.router)
 api_router.include_router(scheduler.router)
 

@@ -48,3 +48,18 @@ def send_email(to: str, subject: str, body: str) -> bool:
 def feishu_bot_payload(text: str) -> dict:
     """构造飞书自定义机器人消息体(msg_type=text)。"""
     return {"msg_type": "text", "content": {"text": text}}
+
+
+async def deliver(channel, text: str) -> bool:
+    """按通道类型分派推送。channel 为 NotificationChannel(或 duck-typed dict)。"""
+    ctype = getattr(channel, "type", None) or (channel.get("type") if isinstance(channel, dict) else "")
+    cfg = getattr(channel, "config", None) or (channel.get("config") if isinstance(channel, dict) else {})
+    url = str(cfg.get("url") or "")
+    if ctype == "feishu_webhook" and url:
+        return await send_webhook(url, feishu_bot_payload(text))
+    if ctype == "webhook" and url:
+        return await send_webhook(url, {"text": text})
+    if ctype == "email" and cfg.get("email"):
+        return send_email(str(cfg["email"]), "AgentPlatform 通知", text)
+    logger.warning("notify: 未知或配置不全的通道类型 %r", ctype)
+    return False

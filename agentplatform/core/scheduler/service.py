@@ -224,7 +224,7 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run.session_id = chat_sess.id
             run.status = "success"
             # 成熟度④:通知出口推送(失败不影响任务)
-            await _notify(task, output)
+            await _notify(db, task, output)
             # P1 通知分级:产出首行 [ALERT] 标记 → alert=True 进通知;正常静默落卡
             run.alert = output.splitlines()[0].strip().startswith("[ALERT]") if output else False
             task.last_status = "success"
@@ -284,12 +284,34 @@ async def _maybe_autosave(db: AsyncSession, task: ScheduledTask, chat_sess, outp
         logger.warning("scheduler: 自动存知识库失败 task=%s: %s", task.id, exc)
 
 
-async def _notify(task: ScheduledTask, output: str) -> None:
-    """按任务 notify 配置推送产出:webhook(飞书机器人格式可选)/邮件。"""
+async def _notify(db, task: ScheduledTask, output: str) -> None:
+    """按任务 notify 配置推送产出。
+
+    产品化:优先 channel_ids(平台级/个人级通道,NotificationChannel);
+    inline webhook/email 兼容保留(快速临时用)。失败不影响任务本身。
+    """
+    from sqlalchemy import select as _select
+
     from agentplatform.core.notify import service as notify_service
+    from agentplatform.core.notify.model import NotificationChannel
 
     cfg = task.notify or {}
     text = f"⏰ 定时任务「{task.name}」产出:\n\n{output[:1500]}"
+    channels: list = []
+    ids = cfg.get("channel_ids") or []
+    if ids:
+        rows = await db.scalars(
+            _select(NotificationChannel).where(
+                NotificationChannel.id.in_(ids),
+                NotificationChannel.enabled.is_(True),
+                (NotificationChannel.user_id.is_(None))
+                | (NotificationChannel.user_id == str(task.user_id)),
+            )
+        )
+        channels = list(rows)
+    for ch in channels:
+        await notify_service.deliver(ch, text)
+    # inline 兼容
     if cfg.get("webhook"):
         payload = (
             notify_service.feishu_bot_payload(text)
@@ -299,3 +321,6 @@ async def _notify(task: ScheduledTask, output: str) -> None:
         await notify_service.send_webhook(str(cfg["webhook"]), payload)
     if cfg.get("email"):
         notify_service.send_email(str(cfg["email"]), f"AgentPlatform · {task.name}", text)
+
+
+

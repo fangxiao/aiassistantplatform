@@ -295,6 +295,18 @@ function TaskFormModal({
   onSaved: () => void | Promise<void>;
 }) {
   const isEdit = !!task;
+  const [channelOptions, setChannelOptions] = useState<
+    { id: string; name: string; platform: boolean }[]
+  >([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        setChannelOptions(await apiGet("/notify/channels"));
+      } catch {
+        setChannelOptions([]);
+      }
+    })();
+  }, []);
   const [form, setForm] = useState(() => ({
     name: task?.name ?? "",
     kind: task?.kind ?? "briefing",
@@ -304,6 +316,7 @@ function TaskFormModal({
     interval_minutes: String(task?.interval_minutes ?? 60),
     auto_save_kb: task?.auto_save_kb ?? false,
     target_kb_id: task?.target_kb_id ?? "",
+    channel_ids: ((task?.notify?.channel_ids as string[]) ?? []),
     notify_webhook: (task?.notify?.webhook as string) ?? "",
     notify_webhook_payload: (task?.notify?.webhook_payload as string) ?? "feishu",
     notify_email: (task?.notify?.email as string) ?? "",
@@ -325,6 +338,7 @@ function TaskFormModal({
         auto_save_kb: form.auto_save_kb,
         target_kb_id: form.target_kb_id || null,
         notify: {
+          channel_ids: form.channel_ids,
           ...(form.notify_webhook ? { webhook: form.notify_webhook, webhook_payload: form.notify_webhook_payload } : {}),
           ...(form.notify_email ? { email: form.notify_email } : {}),
         },
@@ -457,6 +471,37 @@ function TaskFormModal({
             <div className="mb-2 text-[11px] font-semibold text-slate-600">
               📬 产出推送(可选)
             </div>
+            {channelOptions.length > 0 && (
+              <div className="mb-2">
+                <span className="mb-1 block text-[10px] text-slate-500">通知通道(工作台「📣 通知通道」管理)</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {channelOptions.map((ch) => {
+                    const on = form.channel_ids.includes(ch.id);
+                    return (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            channel_ids: on
+                              ? f.channel_ids.filter((x: string) => x !== ch.id)
+                              : [...f.channel_ids, ch.id],
+                          }))
+                        }
+                        className={`rounded-lg border px-2 py-1 text-[10px] transition ${
+                          on
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                            : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        {ch.platform ? "🌐" : "👤"} {ch.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <label className="block">
               <span className="mb-1 block text-[10px] text-slate-500">Webhook(飞书自定义机器人直接粘贴地址)</span>
               <input

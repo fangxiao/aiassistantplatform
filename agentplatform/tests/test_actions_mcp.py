@@ -161,3 +161,54 @@ class TestWriteConfirmGate:
         monkeypatch.setattr(settings, "action_require_confirm", False)
         out = json.loads(await run_http_action({"method": "POST", "url": "https://example.com/x", "body": "{}"}))
         assert "pending" not in out  # 关闭闸门则直通
+
+
+@pytest.fixture
+async def normal_user(session: AsyncSession):
+    return await create_user(session, f"nc-{uuid.uuid4()}@test.dev", "p", UserRole.user)
+
+
+class TestNotifyChannels:
+    """通知通道(产品化):平台级/个人级 CRUD 与权限。"""
+
+    async def test_channel_crud_and_platform_perm(self, client: AsyncClient, session, normal_user) -> None:
+        # 个人通道
+        r = await client.post(
+            "/api/notify/channels",
+            json={"name": "我的群", "type": "feishu_webhook", "config": {"url": "https://open.feishu.cn/x"}},
+        )
+        assert r.status_code == 201
+        cid = r.json()["id"]
+        assert r.json()["platform"] is False
+
+        # 普通用户建平台级 → 403(临时切换身份,保留原有 override)
+        from agentplatform.core.auth.dependencies import get_current_user
+        from agentplatform.main import app as _app
+
+        orig_override = _app.dependency_overrides.get(get_current_user)
+        _app.dependency_overrides[get_current_user] = lambda: normal_user
+        try:
+            r2 = await client.post(
+                "/api/notify/channels",
+                json={"name": "公司群", "type": "feishu_webhook", "config": {"url": "https://x.cn"}, "platform": True},
+            )
+            assert r2.status_code == 403
+        finally:
+            if orig_override is not None:
+                _app.dependency_overrides[get_current_user] = orig_override
+
+        # 列表可见自己的
+        listed = (await client.get("/api/notify/channels")).json()
+        assert any(c["id"] == cid for c in listed)
+        # 删除(软删)
+        assert (await client.delete(f"/api/notify/channels/{cid}")).status_code == 204
+        listed2 = (await client.get("/api/notify/channels")).json()
+        assert not any(c["id"] == cid for c in listed2)
+
+    async def test_channel_validation(self, client: AsyncClient) -> None:
+        r = await client.post("/api/notify/channels", json={"name": "x", "type": "sms", "config": {}})
+        assert r.status_code == 422
+        r2 = await client.post(
+            "/api/notify/channels", json={"name": "x", "type": "webhook", "config": {"url": "not-url"}}
+        )
+        assert r2.status_code == 422

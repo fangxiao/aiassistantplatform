@@ -7,6 +7,7 @@ import { TodoCard } from "./TodoCard";
 import { MemoryCard } from "./MemoryCard";
 import { BriefingCard } from "./BriefingCard";
 import { SchedulerCard } from "./SchedulerCard";
+import { ChannelsCard } from "./ChannelsCard";
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
 
 /** 个人工作台视图(M14 · 设计 010):今日概览 dashboard。
@@ -146,7 +147,10 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
         {/* 定时任务(M15) + 知识库动态 */}
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <SchedulerCard onContinue={onContinue} />
-          <KbActivityCard onOpenKb={onOpenKb} />
+          <div className="space-y-5">
+            <ChannelsCard isDeveloper={false} />
+            <KbActivityCard onOpenKb={onOpenKb} />
+          </div>
         </div>
       </div>
     </div>
