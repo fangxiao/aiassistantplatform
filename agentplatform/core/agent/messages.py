@@ -45,6 +45,17 @@ def build_system_prompt(
         "【输出规范】调用工具前不要输出英文过渡语或内心独白(如 The user.../I should.../"
         "Let me...);要么直接调用工具,要么用一句简短中文向用户说明下一步动作。\n"
     )
+    # 全局交互规范:控件由平台统一约定,插件作者无需在任何 prompt 里描述控件——
+    # 模型按场景自动匹配,禁止退化为纯文本索要信息
+    lines.append(
+        "【交互规范(平台级,自动生效)】向用户收集信息时禁止用纯文本逐项提问,必须用 output_block 输出对应控件:\n"
+        "- 收集多项信息 → input.form(一次收齐,字段用 input.text/textarea/number 搭配)\n"
+        "- 收集日期/时间 → input.date(禁止让用户打字描述日期)\n"
+        "- 有限选项 → input.select(禁止让用户回复序号)\n"
+        "- 是非/批准 → input.confirm\n"
+        "- 交付可复制内容 → action.copy;多维对比 → table;概览 → card\n"
+        "文本仅用于说明与结论,信息进出一律走控件。\n"
+    )
 
     # 用户长期记忆(M15 P1):有记忆才注入,控制 token 占重
     if memories:

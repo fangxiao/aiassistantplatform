@@ -343,7 +343,8 @@ export function InputConfirmRenderer({ block, onInteract }: ControlProps) {
  */
 function normalizeFormField(f: any, i: number): ContentBlock {
   if (f?.type && f?.data && String(f.type).startsWith("input.")) return f as ContentBlock;
-  const kind = String(f?.widget ?? f?.input ?? f?.field_type ?? "text").replace(/^input\./, "");
+  const rawType = f?.type && !f?.data ? f.type : null; // 裸 type(如 "date"/"text")
+  const kind = String(f?.widget ?? rawType ?? f?.input ?? f?.field_type ?? "text").replace(/^input\./, "");
   const map: Record<string, string> = {
     text: "input.text", textarea: "input.textarea", number: "input.number",
     select: "input.select", radio: "input.radio", checkbox: "input.checkbox",
@@ -353,7 +354,7 @@ function normalizeFormField(f: any, i: number): ContentBlock {
   return {
     type,
     data: {
-      id: f?.id ?? f?.name ?? `field_${i}`,
+      id: f?.id ?? f?.name ?? f?.key ?? `field_${i}`,
       label: f?.label ?? f?.name ?? `字段${i + 1}`,
       placeholder: f?.placeholder,
       required: Boolean(f?.required),
