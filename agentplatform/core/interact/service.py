@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.interact.errors import InteractError
 from agentplatform.core.interact.model import InteractEvent, InteractKind
-from agentplatform.core.message.service import save_assistant_message
+from agentplatform.core.message.service import save_assistant_message, save_user_message
 
 
 async def handle_interaction(
@@ -70,14 +70,34 @@ async def handle_interaction(
     elif action.endswith("confirm") or action == "input.confirm":
         confirmed = bool(value.get("confirmed") if isinstance(value, dict) else value)
         status_text = "已确认操作" if confirmed else "已取消操作"
+        # 打磨(控件发挥):确认结果落为用户消息,agent 下一轮可见并据此续跑
+        await save_user_message(
+            session, session_id, f"【交互确认】{action}: {'确认' if confirmed else '取消'}"
+        )
         response_blocks.append({
             "type": "markdown",
-            "data": {"text": f"✅ **{status_text}**"},
+            "data": {"text": f"✅ **{status_text}**(已告知助手,可继续对话)**"},
         })
     elif action.endswith("form_submit") or action == "input.form":
+        # 打磨(控件发挥):表单提交值渲染为表格回执 + 落用户消息,agent 基于值续跑
+        fields = value.get("fields") if isinstance(value, dict) else None
+        if isinstance(fields, list) and fields:
+            lines = ["| 字段 | 值 |", "|---|---|"]
+            for f in fields:
+                if isinstance(f, dict):
+                    lines.append(f"| {f.get('label') or f.get('id') or '?'} | {f.get('value', '')} |")
+            rows_md = "\n".join(lines)
+            kv = "; ".join(
+                f"{f.get('id') or f.get('label')}={f.get('value')}"
+                for f in fields if isinstance(f, dict)
+            )
+        else:
+            kv = str(value)[:500]
+            rows_md = f"`{kv}`"
+        await save_user_message(session, session_id, f"【表单提交】{action}: {kv}")
         response_blocks.append({
             "type": "markdown",
-            "data": {"text": "✅ **表单数据已接收并提交处理。**"},
+            "data": {"text": f"✅ **表单已提交**(已传给助手,可继续对话)\n\n{rows_md}"},
         })
     else:
         # 通用 fallback 响应
