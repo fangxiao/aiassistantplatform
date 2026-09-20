@@ -13,6 +13,7 @@ SCHEMA = {
     "properties": {
         "topic": {"type": "string", "description": "会议主题"},
         "date": {"type": "string", "format": "date", "title": "日期"},
+        "start_at": {"type": "string", "format": "date-time", "title": "开始时间"},
         "level": {"enum": ["高", "中", "低"], "description": "优先级"},
         "count": {"type": "integer"},
         "notes": {"type": "array", "description": "备注列表,每行一条"},
@@ -28,6 +29,7 @@ class TestSchemaToFields:
         fields = {f["key"]: f for f in schema_to_form_fields(SCHEMA)}
         assert fields["topic"]["widget"] == "text"
         assert fields["date"]["widget"] == "date"
+        assert fields["start_at"]["widget"] == "datetime"
         assert fields["level"]["widget"] == "select" and fields["level"]["options"] == ["高", "中", "低"]
         assert fields["count"]["widget"] == "number"
         assert fields["notes"]["widget"] == "textarea"
@@ -53,7 +55,7 @@ class TestMissingAndBlock:
         assert block["type"] == "input.form"
         data = block["data"]
         assert data["title"].startswith("请补充")
-        assert len(data["fields"]) == 7
+        assert len(data["fields"]) == 8
         assert form_block_for("x", {"properties": {}}) is None
 
 

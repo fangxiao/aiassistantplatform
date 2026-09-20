@@ -247,6 +247,18 @@ CONTENT_BLOCKS_CATALOG: list[dict[str, Any]] = [
         "python_snippet": '{"type": "input.date", "data": {"id": "target_date", "label": "目标发布日期"}}',
     },
     {
+        "type": "input.datetime",
+        "category": "interactive",
+        "category_name": "交互输入类",
+        "name": "日期时间选择器",
+        "description": "日期+时间组合选择控件(会议/提醒等精确时刻场景)",
+        "sample_data": {
+            "id": "start_at",
+            "label": "会议开始时间",
+        },
+        "python_snippet": '{"type": "input.datetime", "data": {"id": "start_at", "label": "会议开始时间"}}',
+    },
+    {
         "type": "input.file",
         "category": "interactive",
         "category_name": "交互输入类",

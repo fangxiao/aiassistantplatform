@@ -23,6 +23,7 @@ import {
   InputCheckboxRenderer,
   InputToggleRenderer,
   InputDateRenderer,
+  InputDatetimeRenderer,
   InputFileRenderer,
   InputConfirmRenderer,
   InputFormRenderer,
@@ -72,6 +73,7 @@ class RendererRegistry {
     this.map.set("input.checkbox", InputCheckboxRenderer);
     this.map.set("input.toggle", InputToggleRenderer);
     this.map.set("input.date", InputDateRenderer);
+    this.map.set("input.datetime", InputDatetimeRenderer);
     this.map.set("input.file", InputFileRenderer);
     this.map.set("input.confirm", InputConfirmRenderer);
     this.map.set("input.form", InputFormRenderer);

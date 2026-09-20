@@ -270,6 +270,50 @@ export function InputDateRenderer({ block, onInteract }: ControlProps) {
   );
 }
 
+// 8b. input.datetime(日期+时间组合控件)
+export function InputDatetimeRenderer({ block, onInteract }: ControlProps) {
+  const dateVal = String(block.data?.default ?? block.data?.defaultValue ?? "").slice(0, 10);
+  const [d, setD] = useState(dateVal);
+  const [t, setT] = useState("");
+  const action = String(block.data?.action ?? "input.datetime");
+  const label = block.data?.label ? String(block.data.label) : null;
+  const withSeconds = Boolean(block.data?.withSeconds);
+
+  const submit = () => {
+    const value = d && t ? `${d} ${t}${withSeconds ? ":00" : ""}` : d || t;
+    onInteract?.(action, { value }, block.data?.args);
+  };
+
+  return (
+    <div className="my-2 max-w-sm rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
+      <div className="flex gap-2">
+        <input
+          type="date"
+          value={d}
+          onChange={(e) => setD(e.target.value)}
+          className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-800 focus:border-slate-500 focus:outline-none"
+        />
+        <input
+          type="time"
+          step={withSeconds ? 1 : 60}
+          value={t}
+          onChange={(e) => setT(e.target.value)}
+          className="w-28 rounded border border-slate-300 px-2 py-1 text-xs text-slate-800 focus:border-slate-500 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!d && !t}
+          className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 transition disabled:opacity-40"
+        >
+          确定
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // 9. input.file
 export function InputFileRenderer({ block, onInteract }: ControlProps) {
   const action = String(block.data?.action ?? "input.file");
@@ -348,7 +392,8 @@ function normalizeFormField(f: any, i: number): ContentBlock {
   const map: Record<string, string> = {
     text: "input.text", textarea: "input.textarea", number: "input.number",
     select: "input.select", radio: "input.radio", checkbox: "input.checkbox",
-    date: "input.date", time: "input.text", toggle: "input.toggle", file: "input.file",
+    date: "input.date", datetime: "input.datetime", "datetime-local": "input.datetime",
+    time: "input.text", toggle: "input.toggle", file: "input.file",
   };
   const type = map[kind] ?? "input.text";
   return {

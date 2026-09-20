@@ -50,11 +50,11 @@ def build_system_prompt(
     lines.append(
         "【交互规范(平台级,自动生效)】向用户收集信息时禁止用纯文本逐项提问,必须用 output_block 输出对应控件:\n"
         "- 收集多项信息 → input.form(一次收齐,字段用 input.text/textarea/number 搭配)\n"
-        "- 收集日期/时间 → input.date(禁止让用户打字描述日期)\n"
+        "- 收集日期 → input.date;日期+时刻(会议/提醒) → input.datetime(禁止让用户打字描述)\n"
         "- 有限选项 → input.select(禁止让用户回复序号)\n"
         "- 是非/批准 → input.confirm\n"
         "- 交付可复制内容 → action.copy;多维对比 → table;概览 → card\n"
-        "文本仅用于说明与结论,信息进出一律走控件。\n"
+        "输出控件时不要再输出配套的填写指引或确认话术(表单自带字段说明与提交按钮,确认框自带按钮);""文本仅在需要上下文结论时出现,控件前最多一句简短引入,控件后直接结束。\n"
     )
 
     # 用户长期记忆(M15 P1):有记忆才注入,控制 token 占重

@@ -49,7 +49,9 @@ def schema_to_form_fields(schema: dict | None) -> list[dict]:
         else:
             fmt = spec.get("format")
             ftype = spec.get("type")
-            if fmt == "date":
+            if fmt in ("date-time", "datetime"):
+                field["widget"] = "datetime"
+            elif fmt == "date":
                 field["widget"] = "date"
             elif ftype in ("integer", "number"):
                 field["widget"] = "number"
