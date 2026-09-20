@@ -260,9 +260,14 @@ async def _upsert_document(
     if dup is not None:  # 库里已有同内容文档(可能来自手动上传):跳过不重复
         return "skipped"
 
+    from pathlib import PurePosixPath as _P
+
+    safe_title = _safe_filename(doc.title)
+    # 外部文档标题常已含后缀(如 GitHub 文件名 README.md),仅缺后缀时补 .md
+    fname = safe_title if _P(safe_title).suffix else f"{safe_title}.md"
     row = KbDocument(
         kb_id=kb.id,
-        filename=f"{_safe_filename(doc.title)}.md",
+        filename=fname,
         mime="text/markdown",
         size_bytes=len(content),
         content_hash=content_hash,
