@@ -231,6 +231,30 @@ async def stream_agent(
             if resource.id == WEB_SEARCH_TOOL_ID:
                 # 联网搜索:无 DB 依赖,纯网络调用(M15 P1)
                 return await web_search_run(args)
+            # Schema 驱动表单(控件零感知):skill 缺 required 参数时,不靠模型文本追问,
+            # 平台按 schema 自动生成 input.form 下发;回填值经【表单提交】进会话,
+            # 下一轮模型带齐参数再调 skill。仅拦 skill(工具参数由模型从上下文组装)。
+            if (
+                resource.kind == SkillToolKind.skill
+                and resource.id != KB_SEARCH_TOOL_ID
+            ):
+                from agentplatform.core.agent.schema_form import form_block_for, missing_required
+
+                schema_dict = (getattr(resource, "schema_", None) or {}).get("parameters")
+                if missing_required(schema_dict, args):
+                    block = form_block_for(resource.name or resource.id, schema_dict)
+                    if block is not None:
+                        pending_confirm_blocks.append(block)
+                        return json.dumps(
+                            {
+                                "status": "awaiting_form",
+                                "message": (
+                                    f"技能 {resource.name or resource.id} 缺少必填参数,已向用户下发"
+                                    "按参数 schema 自动生成的表单;等待【表单提交】后再调用本技能执行"
+                                ),
+                            },
+                            ensure_ascii=False,
+                        )
             if resource.id == HTTP_ACTION_TOOL_ID:
                 # 通用 HTTP 动作:白名单+SSRF 约束(M17);写操作挂起等用户确认(M17 P1)
                 # user/session 透传供审计留痕(M17 P1)
