@@ -25,6 +25,17 @@ interface AdminUser {
   task_count: number;
 }
 
+interface ActionLog {
+  id: string;
+  user_id: string;
+  method: string;
+  url: string;
+  outcome: string;
+  status_code: number | null;
+  detail: string | null;
+  created_at: string;
+}
+
 interface Overview {
   users: number;
   sessions: number;
@@ -44,20 +55,23 @@ export function InsightsPanel() {
   const [costs, setCosts] = useState<CostSummary | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [actions, setActions] = useState<ActionLog[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [c, o, u] = await Promise.all([
+        const [c, o, u, a] = await Promise.all([
           apiGet<CostSummary>("/insights/costs?days=30"),
           apiGet<Overview>("/insights/admin/overview"),
           apiGet<AdminUser[]>("/insights/admin/users"),
+          apiGet<ActionLog[]>("/insights/actions?limit=30"),
         ]);
         setCosts(c);
         setOverview(o);
         setUsers(u);
+        setActions(a);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("403")) setForbidden(true);
@@ -211,6 +225,60 @@ export function InsightsPanel() {
             </tbody>
           </table>
         </div>
+      </div>
+      {/* 动作审计 */}
+      <div className="rounded-2xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 px-5 py-3 text-sm font-bold text-slate-900">
+          🛡️ 动作审计(http_request 调用留痕)
+        </div>
+        {actions.length === 0 ? (
+          <div className="p-6 text-center text-xs text-slate-400">暂无动作调用记录</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold text-slate-600">
+                <tr>
+                  <th className="px-5 py-3">时间</th>
+                  <th className="px-4 py-3">用户</th>
+                  <th className="px-4 py-3">请求</th>
+                  <th className="px-4 py-3">结果</th>
+                  <th className="px-4 py-3">说明</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {actions.map((a) => (
+                  <tr key={a.id} className="hover:bg-slate-50/70">
+                    <td className="px-5 py-2.5 text-slate-400">
+                      {new Date(a.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-500">{a.user_id.slice(0, 8)}</td>
+                    <td className="px-4 py-2.5 font-mono text-slate-700">
+                      <span className="mr-1.5 rounded bg-slate-100 px-1 py-0.5 text-[10px]">{a.method}</span>
+                      {a.url.length > 50 ? a.url.slice(0, 50) + "…" : a.url}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] ${
+                          a.outcome === "executed" || a.outcome === "confirmed"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : a.outcome === "cancelled" || a.outcome === "pending"
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-rose-50 text-rose-700"
+                        }`}
+                      >
+                        {a.outcome}
+                        {a.status_code ? ` ${a.status_code}` : ""}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 max-w-xs truncate text-slate-400" title={a.detail ?? ""}>
+                      {a.detail ?? "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

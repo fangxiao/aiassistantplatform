@@ -13,6 +13,7 @@ from agentplatform.api import (
     browser,
     chat,
     dev_session,
+    diagnostics,
     files,
     insights,
     health,
@@ -44,6 +45,7 @@ api_router.include_router(memory.router)
 api_router.include_router(mcp.router)
 api_router.include_router(insights.router)
 api_router.include_router(notify.router)
+api_router.include_router(diagnostics.router)
 api_router.include_router(workbench.router)
 api_router.include_router(scheduler.router)
 

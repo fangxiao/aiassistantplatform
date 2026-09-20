@@ -185,3 +185,36 @@ async def platform_overview(
         scheduled_tasks_active=await _count(ScheduledTask, ScheduledTask.enabled.is_(True)),
         documents_ready=await _count(KbDocument, KbDocument.status == KbDocumentStatus.ready),
     )
+
+
+class ActionLogRow(BaseModel):
+    id: uuid.UUID
+    user_id: str
+    method: str
+    url: str
+    outcome: str
+    status_code: int | None
+    detail: str | None
+    created_at: datetime
+
+
+@router.get("/actions", response_model=list[ActionLogRow])
+async def action_logs(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[ActionLogRow]:
+    """动作审计记录(产品成熟度④/M17 P1):http_request 执行/拒绝/取消留痕。"""
+    _ensure_developer(user)
+    from agentplatform.core.agent.action_log import ActionLog
+
+    rows = await db.scalars(
+        select(ActionLog).order_by(ActionLog.created_at.desc()).limit(min(limit, 200))
+    )
+    return [
+        ActionLogRow(
+            id=r.id, user_id=r.user_id, method=r.method, url=r.url, outcome=r.outcome,
+            status_code=r.status_code, detail=r.detail, created_at=r.created_at,
+        )
+        for r in rows
+    ]

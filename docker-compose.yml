@@ -39,15 +39,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://agentplatform:agentplatform@pg:5432/agentplatform
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
-      # LLM/搜索/动作等配置经 .deploy.env 透传(见 deploy/README §三)
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-auto}
-      MULTIMODAL_MODEL: ${MULTIMODAL_MODEL:-auto}
-      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-tavily}
-      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:-}
-      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8888}
-      ACTION_HTTP_ALLOWLIST: ${ACTION_HTTP_ALLOWLIST:-[]}
+      # LLM/搜索/动作等全部经 .deploy.env 透传(env_file);
+      # 此处不再显式声明——空值会覆盖 env_file 的配置(诊断页抓到的坑)
     ports:
       - "8000:8000"
     depends_on:
@@ -55,6 +48,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - default
+      - search-net   # 直连 SearXNG(容器名解析;deploy --with-search 启动)
 
   web:
     build:
@@ -71,3 +67,8 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  search-net:
+    name: agentplatform-net
+    external: true

@@ -38,6 +38,7 @@ export function Navbar() {
     { href: "/assistants", label: "🧩 助手广场" },
     { href: "/kb", label: "📚 知识库" },
     { href: "/developer", label: "🛠️ 开发者中心" },
+    { href: "/status", label: "🩺 系统诊断" },
   ];
 
   const [showTokenModal, setShowTokenModal] = useState(false);

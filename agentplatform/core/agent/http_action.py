@@ -23,6 +23,30 @@ _PENDING: dict[str, dict] = {}
 _PENDING_TTL_S = 600
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
+# 审计上下文(loop 特判设置;run 内各分支读取落库)
+import contextvars
+
+_ctx_user: contextvars.ContextVar[str] = contextvars.ContextVar("action_user", default="")
+_ctx_session = contextvars.ContextVar("action_session", default=None)
+
+
+async def _audit(method: str, url: str, outcome: str, *, status_code: int | None = None, detail: str | None = None) -> None:
+    """动作留痕(尽力而为,失败不影响主流程)。"""
+    try:
+        from agentplatform.core.agent.action_log import ActionLog
+        from agentplatform.core.db.engine import SessionLocal
+
+        async with SessionLocal() as db:
+            db.add(ActionLog(
+                user_id=_ctx_user.get() or "unknown",
+                session_id=_ctx_session.get(),
+                method=method, url=url[:1000], outcome=outcome,
+                status_code=status_code, detail=(detail or "")[:500],
+            ))
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
 RESOURCE: dict = {
     "id": HTTP_ACTION_TOOL_ID,
     "kind": "tool",
@@ -64,11 +88,14 @@ def _allowlisted(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-async def run(args: dict) -> str:
+async def run(args: dict, *, user_id: str = "", session_id=None) -> str:
+    """执行动作;user_id/session_id 供审计留痕(loop 特判透传)。"""
     method = str(args.get("method") or "GET").upper()
     url = str(args.get("url") or "").strip()
     if not url:
         return json.dumps({"ok": False, "error": "url 不能为空"}, ensure_ascii=False)
+    _ctx_user.set(user_id)
+    _ctx_session.set(session_id)
 
     # 写操作确认闸门:写方法先挂起,等会话属主在确认框点击(loop 特判渲染 input.confirm)
     if method in _WRITE_METHODS and settings.action_require_confirm and not args.get("__skip_gate__"):
@@ -83,6 +110,7 @@ async def run(args: dict) -> str:
             "digest": digest,
             "created_at": time.time(),
         }
+        await _audit(method, url, "pending", detail="写操作挂起等确认")
         return json.dumps(
             {
                 "pending": True,
@@ -98,6 +126,7 @@ async def run(args: dict) -> str:
 
     ok, reason = _allowlisted(url)
     if not ok:
+        await _audit(method, url, "rejected", detail=reason)
         return json.dumps({"ok": False, "error": reason}, ensure_ascii=False)
 
     # SSRF:DNS 解析后逐 IP 复查(与网页连接器同判定;含协议/host 校验)
@@ -106,6 +135,7 @@ async def run(args: dict) -> str:
     try:
         await _assert_url_safe(httpx.AsyncClient(), url)
     except ValueError as exc:
+        await _audit(method, url, "rejected", detail=str(exc))
         return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
     except Exception:  # noqa: BLE001  DNS 失败等
         return json.dumps(
@@ -124,12 +154,14 @@ async def run(args: dict) -> str:
         text = resp.text
         if len(text.encode()) > _MAX_RESPONSE_BYTES:
             text = text[:_MAX_RESPONSE_BYTES] + "...[截断]"
+        await _audit(method, url, "executed" if resp.status_code < 400 else "error", status_code=resp.status_code)
         return json.dumps(
             {"ok": resp.status_code < 400, "status": resp.status_code,
              "body": text, "note": "调用已执行;请勿重复执行同一写操作"},
             ensure_ascii=False,
         )
     except Exception as exc:  # noqa: BLE001
+        await _audit(method, url, "error", detail=f"{type(exc).__name__}: {exc}")
         return json.dumps(
             {"ok": False, "error": f"请求失败: {type(exc).__name__}: {exc}"},
             ensure_ascii=False,
@@ -149,9 +181,11 @@ async def confirm_and_run(confirm_id: str, approved: bool) -> str:
     if time.time() - item["created_at"] > _PENDING_TTL_S:
         return json.dumps({"ok": False, "error": "确认已超时(>10 分钟),请重新发起"}, ensure_ascii=False)
     if not approved:
+        await _audit(str(item["args"].get("method") or ""), str(item["args"].get("url") or ""), "cancelled")
         return json.dumps({"ok": False, "cancelled": True, "message": "用户已取消该写操作"}, ensure_ascii=False)
     # 批准:走完整安全链(白名单+SSRF)后执行
     args = item["args"]
+    await _audit(str(args.get("method") or ""), str(args.get("url") or ""), "confirmed")
     ok, reason = _allowlisted(str(args.get("url") or ""))
     if not ok:
         return json.dumps({"ok": False, "error": reason}, ensure_ascii=False)

@@ -53,6 +53,10 @@ async def register(
         user = await create_user(session, payload.email, payload.password, role)
     except AuthError as exc:
         raise _auth_error_to_http(exc) from exc
+    # 冷启动:预置平台向导会话(失败静默)
+    from agentplatform.core.onboarding import seed_onboarding
+
+    await seed_onboarding(session, str(user.id))
     await session.commit()
     return user
 

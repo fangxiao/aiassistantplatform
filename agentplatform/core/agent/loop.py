@@ -233,7 +233,8 @@ async def stream_agent(
                 return await web_search_run(args)
             if resource.id == HTTP_ACTION_TOOL_ID:
                 # 通用 HTTP 动作:白名单+SSRF 约束(M17);写操作挂起等用户确认(M17 P1)
-                result = await http_action_run(args)
+                # user/session 透传供审计留痕(M17 P1)
+                result = await http_action_run(args, user_id=owner_id or "", session_id=None)
                 try:
                     import json as _json
 
