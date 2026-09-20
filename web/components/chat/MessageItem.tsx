@@ -141,6 +141,17 @@ export default function MessageItem({
           </div>
         ) : (
           <div className="space-y-2">
+            {/* 思考过程(完成后折叠,可展开;打磨:区分思考与回答) */}
+            {!isStreaming && message.reasoning && hasText && (
+              <details className="mb-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-1.5">
+                <summary className="cursor-pointer select-none text-[11px] font-medium text-slate-400">
+                  🧠 思考过程(模型内部推理,点击展开)
+                </summary>
+                <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[10px] leading-5 text-violet-500/80">
+                  {message.reasoning}
+                </div>
+              </details>
+            )}
             {blocks.map((block, i) => (
               <BlockRenderer key={i} block={block} onInteract={onInteract} />
             ))}

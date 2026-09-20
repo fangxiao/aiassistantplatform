@@ -42,10 +42,13 @@ def compute_next_run(task: ScheduledTask, now: datetime) -> datetime | None:
             hh, mm = (int(p) for p in task.daily_at.split(":", 1))
         except ValueError:
             return None
-        candidate = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if candidate <= now:
+        # daily_at 为服务器本地时区时刻(用户视角);now 为 UTC——先转本地再算,
+        # 否则 16:20 本地会变成 UTC16:20 = 次日 00:20(时区 bug 修复)
+        local = now.astimezone()
+        candidate = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if candidate <= local:
             candidate += timedelta(days=1)
-        return candidate
+        return candidate.astimezone(UTC)
     return None
 
 

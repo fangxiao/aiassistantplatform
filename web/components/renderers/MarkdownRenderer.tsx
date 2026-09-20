@@ -78,6 +78,46 @@ export default function MarkdownRenderer({ block }: { block: ContentBlock }) {
   while (i < lines.length) {
     const line = lines[i];
 
+    // GFM 表格:| a | b | + |---|---| 分隔行(打磨:模型输出表格此前按纯文本显示)
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const parseRow = (row: string): string[] =>
+        row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const header = parseRow(line);
+      i += 2; // 跳过表头与分隔行
+      const bodyRows: string[][] = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        bodyRows.push(parseRow(lines[i]));
+        i++;
+      }
+      out.push(
+        <div key={key++} className="my-2 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-50">
+                {header.map((h, hi) => (
+                  <th key={hi} className="border border-slate-200 px-3 py-1.5 text-left font-semibold text-slate-700">
+                    {inline(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {bodyRows.map((r, ri) => (
+                <tr key={ri} className="even:bg-slate-50/50">
+                  {header.map((_, ci) => (
+                    <td key={ci} className="border border-slate-200 px-3 py-1.5 text-slate-600">
+                      {inline(r[ci] ?? "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
     // HTML 块 (如微信排版组件 <section style="...">, <div>, <table>, <!DOCTYPE)
     if (/^\s*<(?:section|div|article|table|header|footer|main|aside|nav|blockquote|!DOCTYPE|html)\b/i.test(line.trim())) {
       const htmlBuf: string[] = [line];

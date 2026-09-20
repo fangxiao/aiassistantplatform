@@ -155,7 +155,9 @@ async def update_task(
     task.target_kb_id = payload.target_kb_id
     task.notify = payload.notify
     task.enabled = payload.enabled
-    task.next_run_at = scheduler_service.compute_next_run(task, datetime.now())
+    from datetime import UTC as _UTC
+
+    task.next_run_at = scheduler_service.compute_next_run(task, datetime.now(_UTC))
     await db.commit()
     return _task_out(task)
 

@@ -34,17 +34,18 @@ def _task(**kw) -> ScheduledTask:
     return ScheduledTask(**base)
 
 
-class TestComputeNextRun:
-    def test_daily_future_today(self) -> None:
-        now = datetime(2026, 9, 15, 7, 0, tzinfo=UTC)
-        nxt = scheduler_service.compute_next_run(_task(daily_at="08:00"), now)
-        assert nxt == datetime(2026, 9, 15, 8, 0, tzinfo=UTC)
+def _local_daily_utc(day: datetime, hh: int, mm: int) -> datetime:
+    """服务器本地时区某日 hh:mm 对应的 UTC 时刻(测试期望值动态计算,时区无关)。"""
+    return day.astimezone().replace(hour=hh, minute=mm, second=0, microsecond=0).astimezone(UTC)
 
-    def test_daily_past_rolls_to_tomorrow(self) -> None:
-        """错过不补跑:今天 08:00 已过 → 顺延明天(验收 2)。"""
-        now = datetime(2026, 9, 15, 9, 0, tzinfo=UTC)
+
+class TestComputeNextRun:
+    def test_daily_in_local_tz(self) -> None:
+        """daily_at 按本地时区解释(时区修复后语义);期望值动态计算。"""
+        now = datetime(2026, 9, 15, 1, 0, tzinfo=UTC)  # 本地(UTC+8)09:00,本地 08:00 已过 → 明天
         nxt = scheduler_service.compute_next_run(_task(daily_at="08:00"), now)
-        assert nxt == datetime(2026, 9, 16, 8, 0, tzinfo=UTC)
+        base = now.astimezone() + timedelta(days=1)
+        assert nxt == _local_daily_utc(base, 8, 0), f"got {nxt}"
 
     def test_interval(self) -> None:
         now = datetime(2026, 9, 15, 9, 0, tzinfo=UTC)
@@ -163,3 +164,19 @@ class TestSchedulerApi:
         r6 = await client.delete(f"/api/scheduler/tasks/{tid}")
         assert r6.status_code == 204
         assert (await client.get("/api/scheduler/tasks")).json() == []
+
+
+class TestDailyTimezone:
+    def test_daily_at_interpreted_in_local_tz(self) -> None:
+        """时区回归:daily_at=16:20(本地) → next_run_at 换算为对应 UTC,而非 UTC16:20。"""
+        from datetime import UTC, datetime
+
+        now = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)  # 北京 14:00
+        nxt = scheduler_service.compute_next_run(_task(daily_at="16:20"), now)
+        # 北京 16:20 = UTC 08:20,在今天(now 已过 14:00 北京 → 应为今天 16:20 北京)
+        assert nxt == datetime(2026, 9, 20, 8, 20, tzinfo=UTC), f"got {nxt}"
+
+        # 已过本地 16:20 → 明天
+        now2 = datetime(2026, 9, 20, 9, 0, tzinfo=UTC)  # 北京 17:00
+        nxt2 = scheduler_service.compute_next_run(_task(daily_at="16:20"), now2)
+        assert nxt2 == datetime(2026, 9, 21, 8, 20, tzinfo=UTC), f"got {nxt2}"
