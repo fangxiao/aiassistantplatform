@@ -32,6 +32,9 @@ class LlmEndpoint(Base):
     model: Mapped[str] = mapped_column(Text, nullable=False)
     api_key_enc: Mapped[str] = mapped_column(Text, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 端点归属(用户自定义模型):null=平台共享端点(developer 管理);
+    # user_id=个人端点,仅本人可见可用,密钥自己管
+    owner_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     endpoint_type: Mapped[EndpointType] = mapped_column(
         SAEnum(EndpointType, name="llm_endpoint_type", create_type=False),
         nullable=False,

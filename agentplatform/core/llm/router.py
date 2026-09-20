@@ -49,18 +49,29 @@ def get_multimodal_model() -> str:
 
 
 async def resolve_endpoint(
-    session: AsyncSession, model: str
+    session: AsyncSession, model: str, user_id: str | None = None
 ) -> LlmEndpoint | None:
-    """按模型名解析端点;无精确匹配回退默认端点;都无返回 None。"""
-    rows = await session.scalars(
-        select(LlmEndpoint).order_by(LlmEndpoint.is_default.desc())
+    """按模型名解析端点:用户自定义优先于平台共享;无精确匹配回退默认。
+
+    优先级:用户精确匹配 > 共享精确匹配 > 用户默认 > 共享默认 > None。
+    """
+    rows = list(
+        await session.scalars(select(LlmEndpoint).order_by(LlmEndpoint.is_default.desc()))
     )
-    default: LlmEndpoint | None = None
-    for ep in rows:
+    own = [ep for ep in rows if user_id is not None and ep.owner_id == str(user_id)]
+    shared = [ep for ep in rows if ep.owner_id is None]
+    for ep in own:
         if ep.model == model:
             return ep
-        if ep.is_default and default is None:
-            default = ep
-    return default
+    for ep in shared:
+        if ep.model == model:
+            return ep
+    for ep in own:
+        if ep.is_default:
+            return ep
+    for ep in shared:
+        if ep.is_default:
+            return ep
+    return None
 
 
