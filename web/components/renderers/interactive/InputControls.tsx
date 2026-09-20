@@ -335,11 +335,40 @@ export function InputConfirmRenderer({ block, onInteract }: ControlProps) {
 }
 
 // 11. input.form (容器型表单)
+
+/**
+ * 字段规范化:模型常输出扁平描述 {label, name, widget, options, placeholder,
+ * required, default}(而非标准 {type, data} ContentBlock)——统一转成渲染器
+ * 期望的结构,避免"组件降级显示"。widget 别名映射到 22 控件体系。
+ */
+function normalizeFormField(f: any, i: number): ContentBlock {
+  if (f?.type && f?.data && String(f.type).startsWith("input.")) return f as ContentBlock;
+  const kind = String(f?.widget ?? f?.input ?? f?.field_type ?? "text").replace(/^input\./, "");
+  const map: Record<string, string> = {
+    text: "input.text", textarea: "input.textarea", number: "input.number",
+    select: "input.select", radio: "input.radio", checkbox: "input.checkbox",
+    date: "input.date", time: "input.text", toggle: "input.toggle", file: "input.file",
+  };
+  const type = map[kind] ?? "input.text";
+  return {
+    type,
+    data: {
+      id: f?.id ?? f?.name ?? `field_${i}`,
+      label: f?.label ?? f?.name ?? `字段${i + 1}`,
+      placeholder: f?.placeholder,
+      required: Boolean(f?.required),
+      options: Array.isArray(f?.options) ? f.options : undefined,
+      defaultValue: f?.default,
+    },
+  };
+}
+
 export function InputFormRenderer({ block, onInteract }: ControlProps) {
   const title = block.data?.title ? String(block.data.title) : null;
   const action = String(block.data?.action ?? "input.form");
-  const fields: ContentBlock[] = block.data?.fields ?? [];
-  const submitLabel = String(block.data?.submit_label ?? "提交表单");
+  const rawFields: any[] = block.data?.fields ?? [];
+  const fields: ContentBlock[] = rawFields.map(normalizeFormField);
+  const submitLabel = String(block.data?.submit_label ?? block.data?.submit_text ?? "提交表单");
 
   const [formValues, setFormValues] = useState<Record<string, any>>({});
 

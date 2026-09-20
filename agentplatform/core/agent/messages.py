@@ -41,7 +41,12 @@ def build_system_prompt(
     for s in skills:
         lines.append(f"【专业技能与知识规范 · {s.name or s.id}】\n{s.description or ''}\n")
 
-    # 用户长期记忆(M15 P1):有记忆才注入,控制 token 占用
+    lines.append(
+        "【输出规范】调用工具前不要输出英文过渡语或内心独白(如 The user.../I should.../"
+        "Let me...);要么直接调用工具,要么用一句简短中文向用户说明下一步动作。\n"
+    )
+
+    # 用户长期记忆(M15 P1):有记忆才注入,控制 token 占重
     if memories:
         items = "\n".join(f"- {m}" for m in memories[:20])
         lines.append(

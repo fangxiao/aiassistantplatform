@@ -6,6 +6,27 @@ import React from "react";
 import type { ChatMessage, ContentBlock } from "../../lib/types";
 import { BlockRenderer } from "../renderers/BlockRenderer";
 
+/**
+ * 拆分模型误写进正文的英文决策思考前导(如 "The user wants... I should call..."):
+ * 启发式——开头连续英文句子段(且后文存在中文/内容较长)视为思考前导,
+ * 返回 [preamble, body]。无匹配返回 ["", text]。
+ */
+function splitEnglishPreamble(text: string): [string, string] {
+  if (!text) return ["", ""];
+  // 找第一处中文或首个表格/标题/代码块结构的位置
+  const m = text.search(/[\u4e00-\u9fff]|\n#{1,3} |\n\||```/);
+  if (m <= 0) return ["", text];
+  const head = text.slice(0, m).trim();
+  if (!head) return ["", text];
+  // 前导需"足够像思考":全英文句式 + 长度阈值 + 含决策动词特征
+  const ascii = (head.match(/[\x00-\x7f]/g) || []).length / head.length;
+  const thinky = /(should|let me|i'll|need to|the user|my role|first|alternatively|given that)/i.test(head);
+  if (ascii > 0.85 && head.length > 60 && thinky) {
+    return [head, text.slice(m).replace(/^\s+/, "")];
+  }
+  return ["", text];
+}
+
 interface MessageItemProps {
   message: ChatMessage;
   isStreaming?: boolean;
@@ -34,14 +55,16 @@ export default function MessageItem({
   }
 
   const hasBlocks = message.blocks && message.blocks.length > 0;
-  const hasText = Boolean(message.text && message.text.trim().length > 0);
+  const [engPreamble, cleanText] = splitEnglishPreamble(message.text || "");
+  const effectiveReasoning = [message.reasoning, engPreamble].filter(Boolean).join("\n\n");
+  const hasText = Boolean(cleanText && cleanText.trim().length > 0);
   const hasToolCalls = Boolean(message.toolCalls && message.toolCalls.length > 0);
-  const isThinking = isStreaming && isLast && Boolean(message.reasoning) && !hasText && !hasBlocks;
-  const isActivelyWaiting = isStreaming && isLast && !hasText && !hasBlocks && !message.reasoning;
+  const isThinking = isStreaming && isLast && Boolean(effectiveReasoning) && !hasText && !hasBlocks;
+  const isActivelyWaiting = isStreaming && isLast && !hasText && !hasBlocks && !effectiveReasoning;
 
   const blocks: ContentBlock[] = hasBlocks
     ? (message.blocks as ContentBlock[])
-    : [{ type: "markdown", data: { text: message.text || "" } }];
+    : [{ type: "markdown", data: { text: cleanText || "" } }];
 
   const runningTool = message.toolCalls?.find((tc) => !tc.result);
   const hasRunningTool = Boolean(runningTool);
@@ -142,13 +165,13 @@ export default function MessageItem({
         ) : (
           <div className="space-y-2">
             {/* 思考过程(完成后折叠,可展开;打磨:区分思考与回答) */}
-            {!isStreaming && message.reasoning && hasText && (
+            {!isStreaming && effectiveReasoning && hasText && (
               <details className="mb-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-1.5">
                 <summary className="cursor-pointer select-none text-[11px] font-medium text-slate-400">
                   🧠 思考过程(模型内部推理,点击展开)
                 </summary>
                 <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[10px] leading-5 text-violet-500/80">
-                  {message.reasoning}
+                  {effectiveReasoning}
                 </div>
               </details>
             )}
