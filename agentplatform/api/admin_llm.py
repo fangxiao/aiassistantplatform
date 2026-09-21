@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import get_current_user
-from agentplatform.core.auth.model import User
+from agentplatform.core.auth.model import User, UserRole
 from agentplatform.core.db.session import get_session
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.llm.schemas import (
@@ -31,7 +31,9 @@ async def get_endpoints(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[LlmEndpoint]:
-    """端点列表(不含明文 api_key);response_model 负责脱敏序列化。"""
+    """平台共享端点列表(developer);response_model 负责脱敏序列化。"""
+    if user.role != UserRole.developer:
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "平台端点仅 developer 可管理;个人模型请在「我的模型」添加"})
     return await list_endpoints(session)
 
 
@@ -41,7 +43,9 @@ async def post_endpoint(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> LlmEndpoint:
-    """新增端点;api_key 加密存储。"""
+    """新增平台共享端点(developer);api_key 加密存储。"""
+    if user.role != UserRole.developer:
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "仅 developer 可管理平台端点"})
     endpoint = await create_endpoint(session, **payload.model_dump())
     await session.commit()
     return endpoint

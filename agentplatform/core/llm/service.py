@@ -10,8 +10,16 @@ from agentplatform.core.llm.crypto import decrypt, encrypt
 from agentplatform.core.llm.model import EndpointType, LlmEndpoint
 
 
-async def list_endpoints(session: AsyncSession) -> list[LlmEndpoint]:
-    rows = await session.scalars(select(LlmEndpoint).order_by(LlmEndpoint.name))
+async def list_endpoints(
+    session: AsyncSession, owner_id: str | None = None
+) -> list[LlmEndpoint]:
+    """端点列表:owner_id=None 平台共享端点;传 user_id 返回该用户个人端点。"""
+    stmt = select(LlmEndpoint)
+    if owner_id is None:
+        stmt = stmt.where(LlmEndpoint.owner_id.is_(None))
+    else:
+        stmt = stmt.where(LlmEndpoint.owner_id == str(owner_id))
+    rows = await session.scalars(stmt.order_by(LlmEndpoint.name))
     return list(rows)
 
 
@@ -30,8 +38,9 @@ async def create_endpoint(
     api_key: str,
     is_default: bool = False,
     endpoint_type: EndpointType | str = EndpointType.chat,
+    owner_id: str | None = None,
 ) -> LlmEndpoint:
-    """新增端点;设默认时先清除其他默认。"""
+    """新增端点;设默认时先清除其他默认;owner_id 非空为用户个人端点。"""
     if is_default:
         await _clear_default(session)
     endpoint = LlmEndpoint(
@@ -41,6 +50,7 @@ async def create_endpoint(
         api_key_enc=encrypt(api_key),
         is_default=is_default,
         endpoint_type=EndpointType(endpoint_type),
+        owner_id=owner_id,
     )
     session.add(endpoint)
     await session.flush()

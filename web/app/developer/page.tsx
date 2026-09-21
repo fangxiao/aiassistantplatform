@@ -6,6 +6,7 @@ import { Navbar } from "../../components/layout/Navbar";
 import { BlockRenderer } from "../../components/renderers/BlockRenderer";
 import { PluginKbMountModal } from "../../components/kb/PluginKbMountModal";
 import { InsightsPanel } from "../../components/developer/InsightsPanel";
+import { MyModelsPanel } from "../../components/settings/MyModelsPanel";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 import { isAuthed } from "../../lib/api/auth";
 import type {
@@ -882,6 +883,9 @@ export default function DeveloperPage() {
         {activeTab === "insights" && <InsightsPanel />}
 
         {activeTab === "llm" && (
+          <>
+          <MyModelsPanel />
+
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-xs text-xs text-slate-600">
               <span>
@@ -1039,6 +1043,7 @@ export default function DeveloperPage() {
               </div>
             )}
           </div>
+          </>
         )}
       </main>
 

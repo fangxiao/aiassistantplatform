@@ -96,7 +96,7 @@ class TestSendMessageSSE:
             [StreamEvent(type="delta", text="你好"), StreamEvent(type="delta", text="世界"), StreamEvent(type="done", message_id="m1")],
         ])
 
-        async def _fake_make(session_: AsyncSession, model: str | None):
+        async def _fake_make(session_: AsyncSession, model: str | None, user_id: str | None = None):
             return fake
 
         monkeypatch.setattr("agentplatform.core.chat.service.make_llm_client", _fake_make)
@@ -125,7 +125,7 @@ class TestSendMessageSSE:
             [StreamEvent(type="delta", text="完成"), StreamEvent(type="done", message_id="m2")],
         ])
 
-        async def _fake_make(session_: AsyncSession, model: str | None):
+        async def _fake_make(session_: AsyncSession, model: str | None, user_id: str | None = None):
             return fake
 
         monkeypatch.setattr("agentplatform.core.chat.service.make_llm_client", _fake_make)

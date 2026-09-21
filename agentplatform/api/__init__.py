@@ -18,6 +18,7 @@ from agentplatform.api import (
     insights,
     health,
     kb,
+    llm_user,
     mcp,
     memory,
     notify,
@@ -46,6 +47,7 @@ api_router.include_router(mcp.router)
 api_router.include_router(insights.router)
 api_router.include_router(notify.router)
 api_router.include_router(diagnostics.router)
+api_router.include_router(llm_user.router)
 api_router.include_router(workbench.router)
 api_router.include_router(scheduler.router)
 

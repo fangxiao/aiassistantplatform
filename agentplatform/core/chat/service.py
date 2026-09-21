@@ -36,14 +36,21 @@ def resource_ids_from_plugin(plugin: Plugin) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-async def make_llm_client(session: AsyncSession, model: str | None) -> OpenAIClient:
-    """按模型解析端点并构造客户端;无可用端点回退到 .env 配置，均无抛 ChatError。"""
+async def make_llm_client(
+    session: AsyncSession, model: str | None, user_id: str | None = None
+) -> OpenAIClient:
+    """按模型解析端点并构造客户端(用户自定义端点优先);无可用端点回退到 .env,均无抛 ChatError。"""
     fallbacks: list[LlmEndpoint] = []
     from agentplatform.config import settings
     from agentplatform.core.llm import crypto
     from agentplatform.core.llm.model import LlmEndpoint
 
-    if settings.openai_base_url and settings.openai_api_key:
+    endpoint = None
+    # 指定了模型:DB 精确匹配优先(用户自定义 > 平台共享)——用户自定义模型生效的前提;
+    # env 默认端点只做兜底,不再无条件抢占
+    if model:
+        endpoint = await resolve_endpoint(session, model, user_id=user_id)
+    if endpoint is None and settings.openai_base_url and settings.openai_api_key:
         endpoint = LlmEndpoint(
             name="default_env",
             base_url=settings.openai_base_url,
@@ -51,8 +58,8 @@ async def make_llm_client(session: AsyncSession, model: str | None) -> OpenAICli
             api_key_enc=crypto.encrypt(settings.openai_api_key),
             is_default=True,
         )
-    else:
-        endpoint = await resolve_endpoint(session, model or "")
+    if endpoint is None:
+        endpoint = await resolve_endpoint(session, model or "", user_id=user_id)
         if endpoint is None:
             if settings.fallback_openai_base_url and settings.fallback_openai_api_key:
                 endpoint = LlmEndpoint(
@@ -113,7 +120,7 @@ async def agent_stream_for_session(
         if _settings.multimodal_model:
             model = _settings.multimodal_model
     resource_ids = resource_ids_from_plugin(plugin) if plugin else []
-    client = await make_llm_client(session, model)
+    client = await make_llm_client(session, model, user_id=sess.user_id)
     # 知识库检索允许范围(设计 008 §3.3/§4.3):会话挂载 ∪ 插件静态依赖 ∪ 助手挂载,唯一授权来源
     plugin_mounted = [
         uuid.UUID(k) for k in (getattr(plugin, "mounted_kb_ids", None) or [])
