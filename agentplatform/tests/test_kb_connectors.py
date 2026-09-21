@@ -397,3 +397,66 @@ class TestGithubAdapter:
         with pytest.raises(KbError, match="owner/repo"):
             validate_config("github", {"repo": "justname"})
         validate_config("github", {"repo": "acme/docs"})  # 合法不抛
+
+
+# ---------------------------------------------------------------- GitLab 连接器(离职归档)
+
+
+def _gitlab_transport(tree: list[dict], files: dict[str, str], base: str) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/repository/tree" in url:
+            return httpx.Response(200, json=tree)
+        if "/raw" in url:
+            path = url.split("/repository/files/")[1].split("/raw")[0]
+            from urllib.parse import unquote
+
+            body = files.get(unquote(path))
+            if body is None:
+                return httpx.Response(404)
+            return httpx.Response(200, text=body)
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+GITLAB_TREE = [
+    {"path": "README.md", "type": "blob", "size": 100},
+    {"path": "docs/architecture.md", "type": "blob", "size": 100},
+    {"path": "src/main.py", "type": "blob", "size": 100},
+    {"path": "docs/pics/logo.png", "type": "blob", "size": 100},
+]
+GITLAB_FILES = {
+    "README.md": "# 内网项目",
+    "docs/architecture.md": "# 架构说明",
+    "src/main.py": "print()",
+}
+
+
+class TestGitlabAdapter:
+    async def test_fetch_filters_and_urls(self) -> None:
+        """GitLab v4:树枚举+raw 下载,后缀/路径过滤,URL 指向自托管 blob 页。"""
+        from agentplatform.core.kb.connectors.gitlab import fetch as gl_fetch
+
+        result = await gl_fetch(
+            {"base_url": "https://gitlab.corp", "repo": "team/project", "branch": "main", "paths": ["docs"]},
+            {"token": "glpat-x"},
+            transport=_gitlab_transport(GITLAB_TREE, GITLAB_FILES, "https://gitlab.corp"),
+        )
+        assert result.full is True
+        ids = [d.external_id for d in result.docs]
+        assert ids == ["docs/architecture.md"]  # README 被前缀过滤;main.py 后缀;png 后缀
+        assert result.docs[0].url == "https://gitlab.corp/team/project/-/blob/main/docs/architecture.md"
+
+    async def test_missing_config_raises(self) -> None:
+        from agentplatform.core.kb.connectors.gitlab import fetch as gl_fetch
+
+        with pytest.raises(ValueError, match="base_url"):
+            await gl_fetch({"repo": "a/b"}, {})
+
+    async def test_validate(self) -> None:
+        from agentplatform.core.kb.connectors.service import validate_config
+
+        with pytest.raises(KbError, match="base_url"):
+            validate_config("gitlab", {"repo": "a/b"})
+        validate_config("gitlab", {"base_url": "https://git.corp", "repo": "group/sub/project"})  # 多级组路径合法

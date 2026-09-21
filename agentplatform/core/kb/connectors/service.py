@@ -54,6 +54,12 @@ def validate_config(source_type: str, config: dict) -> dict:
         repo = str(config.get("repo") or "").strip()
         if repo.count("/") != 1 or not repo.replace("/", "").replace("_", "").replace("-", "").replace(".", "").isalnum():
             raise KbError("GitHub 数据源必须配置 repo(owner/repo 格式)")
+    if source_type == KbDataSourceType.gitlab.value:
+        repo = str(config.get("repo") or "").strip().strip("/")
+        if repo.count("/") < 1:
+            raise KbError("GitLab 数据源必须配置 repo(group/project 格式)")
+        if not str(config.get("base_url") or "").startswith("http"):
+            raise KbError("GitLab 数据源必须配置 base_url(自托管实例地址)")
     return config
 
 

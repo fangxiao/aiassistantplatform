@@ -20,6 +20,7 @@ const TYPE_META: Record<string, { icon: string; label: string }> = {
   feishu: { icon: "📌", label: "飞书文档" },
   confluence: { icon: "📘", label: "Confluence" },
   github: { icon: "🐙", label: "GitHub" },
+  gitlab: { icon: "🦊", label: "GitLab(自托管)" },
 };
 
 const SYNC_STATUS_META: Record<string, { label: string; cls: string; dot: string }> = {
@@ -296,6 +297,7 @@ function SourceFormModal({
     max_pages: String(source?.config?.max_pages ?? 200),
     poll: source?.poll_interval_minutes != null ? String(source.poll_interval_minutes) : "",
     branch: (source?.config?.branch as string) ?? "main",
+    gitlab_base_url: (source?.config?.base_url as string) ?? "",
     paths: ((source?.config?.paths as string[]) ?? []).join("\n"),
     token: "",
   }));
@@ -316,6 +318,17 @@ function SourceFormModal({
       let name = form.name.trim();
       if (type === "github") {
         config = {
+          repo: form.urls.trim(),
+          branch: form.branch.trim() || "main",
+          paths: form.paths
+            .split("\n")
+            .map((x) => x.trim())
+            .filter(Boolean),
+        };
+        name = name || `${config.repo} 文档`;
+      } else if (type === "gitlab") {
+        config = {
+          base_url: form.gitlab_base_url.trim(),
           repo: form.urls.trim(),
           branch: form.branch.trim() || "main",
           paths: form.paths
@@ -385,6 +398,7 @@ function SourceFormModal({
               >
                 <option value="web">🕸️ 网页/站点</option>
                 <option value="github">🐙 GitHub 仓库</option>
+                <option value="gitlab">🦊 GitLab(自托管)</option>
               </select>
             </label>
           )}
@@ -398,6 +412,52 @@ function SourceFormModal({
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
             />
           </label>
+          {type === "gitlab" && (
+            <>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">
+                  GitLab 实例地址(base_url,内网地址亦可)
+                </span>
+                <input
+                  value={form.gitlab_base_url}
+                  onChange={(e) => setForm((f) => ({ ...f, gitlab_base_url: e.target.value }))}
+                  placeholder="https://gitlab.internal.corp"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">
+                  项目路径(group/project)
+                </span>
+                <input
+                  value={form.urls}
+                  onChange={(e) => setForm((f) => ({ ...f, urls: e.target.value }))}
+                  placeholder="team/tabsmanager"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">分支</span>
+                <input
+                  value={form.branch}
+                  onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">
+                  路径白名单(每行一个前缀,留空 = 全项目)与访问令牌(PAT,公开项目可留空)
+                </span>
+                <textarea
+                  value={form.paths}
+                  onChange={(e) => setForm((f) => ({ ...f, paths: e.target.value }))}
+                  rows={2}
+                  placeholder={"docs/\nREADME.md"}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
+            </>
+          )}
           {type === "github" && (
             <>
               <label className="block">

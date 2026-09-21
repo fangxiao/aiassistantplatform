@@ -98,6 +98,7 @@ class KbDataSourceType(str, Enum):
     feishu = "feishu"
     confluence = "confluence"
     github = "github"
+    gitlab = "gitlab"
 
 
 class KbSyncStatus(str, Enum):
