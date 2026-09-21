@@ -2,6 +2,10 @@
 
 单机部署 AgentPlatform(给公司/个人使用)。整套 **零付费** 可跑(含联网搜索)。
 
+## 〇、给新公司快速开台
+
+见 [NEW-COMPANY.md](./NEW-COMPANY.md)——30 分钟部署+配模型+初始化管理员。
+
 ## 一、准备
 
 - Docker(含 compose)
