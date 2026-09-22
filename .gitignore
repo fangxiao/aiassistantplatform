@@ -45,3 +45,4 @@ out/
 
 .deploy.env
 backups/
+*.zip
