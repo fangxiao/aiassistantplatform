@@ -773,6 +773,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     # 1. 初始化
+    sp = sub.add_parser("setup", help="交互式开台向导(新公司独立部署:配模型+起容器+管理员)")
+    sp.set_defaults(func=cmd_setup)
+
     sp = sub.add_parser("templates", help="列出平台可用插件场景模板(配合 init --template)")
     sp.add_argument("--target", default=None, help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_templates)
@@ -953,4 +956,60 @@ def cmd_context(args: argparse.Namespace) -> int:
         "- 长期记忆/联网搜索/待办工具对所有会话默认可用,无需声明依赖\n"
     )
     print("\n".join(lines))
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """交互式开台向导(给新公司独立部署):收集配置 → 写 .deploy.env → 起容器 → 输出管理员 SQL。
+    纯代码流程,不依赖 AI;机械步骤全自动,凭据只在本地文件,不外传。
+    """
+    from pathlib import Path
+
+    print("🚀 AgentPlatform 新公司开台向导(交互式)")
+    print("提示:以下信息不填完整无法继续;密钥只写入 .deploy.env(已 gitignore)。\n")
+
+    def ask(prompt: str, default: str = "") -> str:
+        suffix = f" [{default}]" if default else ""
+        val = input(f"{prompt}{suffix}: ").strip()
+        return val or default
+
+    base_url = ask("模型 Base URL(OpenAI 兼容,如 https://api.xxx.com/v1)")
+    if not base_url:
+        print("✗ Base URL 必填,退出")
+        return 1
+    api_key = ask("API Key")
+    default_model = ask("默认模型名", "glm-5.3-flash")
+    multimodal = ask("多模态模型名(可空)")
+    with_search = ask("启用免费联网搜索(需出公网)y/N", "n").lower().startswith("y")
+
+    env_path = Path(".deploy.env")
+    with env_path.open("a", encoding="utf-8") as f:
+        f.write("\n# setup 向导写入\n")
+        f.write(f"OPENAI_BASE_URL={base_url}\n")
+        f.write(f"OPENAI_API_KEY={api_key}\n")
+        f.write(f"DEFAULT_MODEL={default_model}\n")
+        if multimodal:
+            f.write(f"MULTIMODAL_MODEL={multimodal}\n")
+    print(f"\n✅ 配置已写入 {env_path.resolve()}")
+
+    print("\n📦 启动容器(pg + redis + api + web)" + (" + 搜索栈" if with_search else ""))
+    import subprocess
+
+    cmds = [["docker", "compose", "up", "-d", "--build"]]
+    if with_search:
+        cmds.append(["docker", "compose", "-f", "deploy/docker-compose.search.yml", "up", "-d"])
+    for c in cmds:
+        proc = subprocess.run(c, capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"✗ 启动失败:\n{proc.stdout}\n{proc.stderr}")
+            return 1
+    print("✅ 容器已启动")
+
+    print("\n👤 管理员初始化:")
+    print("  1) 打开 http://<本机IP>:3000/auth 注册管理员账号")
+    print("  2) 然后执行(把 <邮箱> 换成注册邮箱):")
+    print("     docker compose exec -T pg psql -U agentplatform -d agentplatform -c \"UPDATE users SET role='developer' WHERE email='<邮箱>';\"")
+    print("\n🩺 验收:访问 http://<本机IP>:3000/status,六项诊断应全绿")
+    print("💾 备份:建议 crontab 加入 ./deploy/backup.sh(每日)")
+    print("\n🎉 开台完成!")
     return 0
