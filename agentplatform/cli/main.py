@@ -776,8 +776,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("release", help="打包发布 zip(git archive 干净导出,供人工带入内网)")
     sp.set_defaults(func=cmd_release)
 
-    sp = sub.add_parser("upgrade", help="离线升级(内网):解包 zip 保留配置→重建容器→迁移")
-    sp.add_argument("zip_path", help="agentplatform-<ver>.zip 路径")
+    sp = sub.add_parser("upgrade", help="离线升级(内网):[zip]解包→重建容器→迁移;无 zip 则仅重建迁移")
+    sp.add_argument("zip_path", nargs="?", default=None, help="agentplatform-<ver>.zip 路径(可选)")
     sp.set_defaults(func=cmd_upgrade)
 
     sp = sub.add_parser("setup", help="交互式开台向导(新公司独立部署:配模型+起容器+管理员)")
@@ -1051,31 +1051,28 @@ def cmd_release(args: argparse.Namespace) -> int:
 
 
 def cmd_upgrade(args: argparse.Namespace) -> int:
-    """离线升级(内网执行):解包 zip 覆盖源码(保留 .deploy.env 与数据卷)→ 重建容器 → 迁移。
+    """离线升级(内网执行,在部署目录跑):[zip 参数]解包覆盖 → 重建容器 → 迁移。
 
-    使用:agentplatform upgrade agentplatform-<ver>.zip
+    - `agentplatform upgrade agentplatform-<ver>.zip`:解包 + 重建 + 迁移(新 CLI 场景)
+    - `agentplatform upgrade`:跳过解包,仅重建 + 迁移(zip 已手动 unzip -o 覆盖的场景
+      ——旧版 CLI 没有本命令时,unzip 后经 `uv run` 即用新代码,再执行本命令收尾)
+    zip 内不含 .deploy.env,配置天然保留;数据卷不受影响。
     """
-    import shutil
     import subprocess
     import zipfile
     from pathlib import Path
 
-    zip_path = Path(args.zip_path)
-    if not zip_path.exists():
-        print(f"✗ 找不到包:{zip_path}")
-        return 1
-    backup_env = None
-    env_file = Path(".deploy.env")
-    if env_file.exists():
-        backup_env = env_file.read_text(encoding="utf-8")
-
-    print("📦 解包覆盖源码(保留 .deploy.env)...")
-    with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(".")
-
-    if backup_env is not None:
-        env_file.write_text(backup_env, encoding="utf-8")
-        print("✅ .deploy.env 已保留")
+    raw_zip = getattr(args, "zip_path", None)
+    if raw_zip:
+        zip_path = Path(raw_zip)
+        if not zip_path.exists():
+            print(f"✗ 找不到包:{zip_path}")
+            return 1
+        print("📦 解包覆盖源码(.deploy.env 不在包内,天然保留)...")
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(".")
+    else:
+        print("📦 跳过解包(假定源码已覆盖),执行重建与迁移...")
 
     print("🔨 重建容器(数据卷不受影响)...")
     for cmd in (

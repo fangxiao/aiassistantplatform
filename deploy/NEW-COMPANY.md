@@ -76,10 +76,10 @@ docker compose exec -T pg psql -U agentplatform -d agentplatform -c \
 # 外网(开发机,仓库根目录):打干净发布包(不含 .git/密钥)
 agentplatform release              # 产出 agentplatform-<版本>.zip
 
-# 人工将 zip 拖入内网,然后在部署目录执行:
-agentplatform upgrade agentplatform-<版本>.zip
-#   = 解包覆盖源码(.deploy.env 与数据卷保留)→ 重建 api/web → alembic 迁移
-#   = /status 验收
+# 人工将 zip 拖入内网,然后在部署目录执行(unzip 让 CLI 随源码一起更新,
+# 旧版 CLI 无 upgrade 命令也能走通):
+unzip -o agentplatform-<版本>.zip
+uv run agentplatform upgrade        # 重建 api/web + alembic 迁移;/status 验收
 ```
 
 ## 7. 该公司员工的自助能力
