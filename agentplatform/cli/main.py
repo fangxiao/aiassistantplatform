@@ -773,6 +773,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     # 1. 初始化
+    sp = sub.add_parser("release", help="打包发布 zip(git archive 干净导出,供人工带入内网)")
+    sp.set_defaults(func=cmd_release)
+
+    sp = sub.add_parser("upgrade", help="离线升级(内网):解包 zip 保留配置→重建容器→迁移")
+    sp.add_argument("zip_path", help="agentplatform-<ver>.zip 路径")
+    sp.set_defaults(func=cmd_upgrade)
+
     sp = sub.add_parser("setup", help="交互式开台向导(新公司独立部署:配模型+起容器+管理员)")
     sp.set_defaults(func=cmd_setup)
 
@@ -1012,4 +1019,82 @@ def cmd_setup(args: argparse.Namespace) -> int:
     print("\n🩺 验收:访问 http://<本机IP>:3000/status,六项诊断应全绿")
     print("💾 备份:建议 crontab 加入 ./deploy/backup.sh(每日)")
     print("\n🎉 开台完成!")
+    return 0
+
+
+def cmd_release(args: argparse.Namespace) -> int:
+    """打包发布 zip(外网开发机执行):git archive 导出干净源码,供人工带入内网。
+
+    zip 不含 .git/部署配置;内网侧用 `agentplatform upgrade <zip>` 接收。
+    """
+    import subprocess
+    from pathlib import Path
+
+    if not Path(".git").exists():
+        print("✗ 请在平台仓库根目录执行(需要 git 仓库打包)")
+        return 1
+    ver = subprocess.run(
+        ["git", "describe", "--tags", "--always"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    out = Path(f"agentplatform-{ver}.zip").resolve()
+    proc = subprocess.run(
+        ["git", "archive", "--format=zip", f"--output={out}", "HEAD"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print(f"✗ 打包失败:{proc.stderr}")
+        return 1
+    print(f"✅ 发布包:{out}")
+    print(f"   版本:{ver}  大小:{out.stat().st_size // 1024}KB")
+    print("   带入内网后执行:agentplatform upgrade <该zip路径>")
+    return 0
+
+
+def cmd_upgrade(args: argparse.Namespace) -> int:
+    """离线升级(内网执行):解包 zip 覆盖源码(保留 .deploy.env 与数据卷)→ 重建容器 → 迁移。
+
+    使用:agentplatform upgrade agentplatform-<ver>.zip
+    """
+    import shutil
+    import subprocess
+    import zipfile
+    from pathlib import Path
+
+    zip_path = Path(args.zip_path)
+    if not zip_path.exists():
+        print(f"✗ 找不到包:{zip_path}")
+        return 1
+    backup_env = None
+    env_file = Path(".deploy.env")
+    if env_file.exists():
+        backup_env = env_file.read_text(encoding="utf-8")
+
+    print("📦 解包覆盖源码(保留 .deploy.env)...")
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(".")
+
+    if backup_env is not None:
+        env_file.write_text(backup_env, encoding="utf-8")
+        print("✅ .deploy.env 已保留")
+
+    print("🔨 重建容器(数据卷不受影响)...")
+    for cmd in (
+        ["docker", "compose", "up", "-d", "--build", "api", "web"],
+    ):
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"✗ 失败:{proc.stderr[-500:]}")
+            return 1
+
+    print("🗃  执行数据库迁移...")
+    proc = subprocess.run(
+        ["docker", "compose", "exec", "-T", "api", "alembic", "upgrade", "head"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print(f"✗ 迁移失败:{proc.stderr[-500:]}")
+        return 1
+
+    print("🩺 验收:访问 /status 确认诊断全绿")
+    print("🎉 升级完成")
     return 0
