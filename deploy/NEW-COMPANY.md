@@ -12,8 +12,12 @@
 
 ## 1. 部署(一条命令)
 
+**CLI 无需预装**——clone 后 `uv run` 直接用:
+
 ```bash
-git clone <平台仓库> && cd agentplatform
+git clone <平台仓库> agentplatform && cd agentplatform
+# 若无 uv:curl -LsSf https://astral.sh/uv/install.sh | sh
+# 纯内网服务器:改用公司 pip/git 镜像(UV_INDEX=<内网PyPI>)或直接拷贝仓库压缩包
 ./deploy/deploy.sh            # 四容器:pg + redis + api + web;SECRET_KEY 自动生成
 ./deploy/deploy.sh --with-search   # 如需免费联网搜索(SearXNG + WARP,需能出公网)
 ```

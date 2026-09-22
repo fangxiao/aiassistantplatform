@@ -13,11 +13,16 @@ description: 给新公司开台——部署 AgentPlatform 独立实例并配置�
 依次确认,缺什么就明确问用户要什么,拿到后再继续:
 
 1. `docker --version` 与 `docker compose version` 可用;不可用则指导安装(Docker Desktop / `curl -fsSL https://get.docker.com | sh`)
-2. 向用户收集(**必须问,不可编造**):
+2. **本向导依赖**(CLI 无需预装——clone 平台仓库后用 `uv run` 直接跑):
+   - `git --version` 可用;不可用则装 git
+   - `uv --version` 可用;不可用则 `curl -LsSf https://astral.sh/uv/install.sh | sh`
+   - **纯内网服务器**(不能出公网):确认公司有 pip 镜像(如 devpi/nexus)与 git 镜像,
+     `UV_INDEX=<内网PyPI镜像>` 后再 `uv sync`;或直接从内网拷贝平台仓库压缩包解压使用
+3. 向用户收集(**必须问,不可编造**):
    - 模型 Base URL(OpenAI 兼容,如 `https://api.xxx.com/v1`)
    - API Key
    - 默认模型名(如 `glm-5.3-flash`);可选:多模态模型名
-3. 可选(问了用户,没有就跳过并在最终报告注明"未配置"):
+4. 可选(问了用户,没有就跳过并在最终报告注明"未配置"):
    - 内网 GitLab 地址 + read_api PAT → 离职知识归档可用
    - 飞书自建应用 app_id/secret → 文档同步可用
    - 该服务器能否出公网 → 决定 `--with-search`
