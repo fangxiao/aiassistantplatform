@@ -33,3 +33,13 @@ __all__ = [
     "tool",
 ]
 
+
+
+def rewrite_html_img_proxy(html: str) -> str:
+    """把 HTML 中全部外链 <img src> 改写为平台代理签名 URL(T18 项8)。
+
+    插件写盘前一行调用即可;幂等,已代理/平台自身文件 URL 保持原样。
+    """
+    from agentplatform.core.agent.img_proxy import rewrite_html
+
+    return rewrite_html(html)

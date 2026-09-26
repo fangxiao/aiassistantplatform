@@ -148,6 +148,39 @@ async def download_file(
     )
 
 
+@router.get("/img")
+async def proxy_image(
+    u: str = Query(..., description="外链图片 URL"),
+    exp: str | None = Query(None, description="签名过期时间戳"),
+    sig: str | None = Query(None, description="HMAC 签名"),
+    user: User | None = Depends(get_optional_current_user),
+):
+    """外链图片代理缓存(优化项8):服务端抓取+落盘缓存,免头签名访问。
+
+    鉴权:有效签名或登录; SSRF 防护:仅公网 http/https;仅图片内容,≤10MB。
+    """
+    if not (u.startswith("http://") or u.startswith("https://")):
+        raise HTTPException(status_code=422, detail="URL 需为 http/https")
+    if not _sig_valid(f"img:{u}", exp, sig) and user is None:
+        raise HTTPException(
+            status_code=401, detail={"code": "unauthorized", "message": "缺少认证令牌"}
+        )
+    import httpx as _httpx
+
+    from agentplatform.core.agent.img_proxy import fetch_and_cache
+
+    try:
+        cached = await fetch_and_cache(u)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except _httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"上游图片获取失败: HTTP {exc.response.status_code}")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"图片获取失败: {type(exc).__name__}")
+    media_type, _ = mimetypes.guess_type(cached.name)
+    return FileResponse(cached, media_type=media_type or "image/png", headers={"Cache-Control": "public, max-age=604800"})
+
+
 @router.post("/upload")
 async def upload_image(
     file: UploadFile,
