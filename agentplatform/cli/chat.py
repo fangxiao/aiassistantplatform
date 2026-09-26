@@ -12,6 +12,7 @@ from agentplatform.config import settings
 from agentplatform.core.agent.loop import run_agent
 from agentplatform.core.llm import crypto
 from agentplatform.core.llm.client import OpenAIClient
+from agentplatform.core.llm.router import normalize_model
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.registry.model import SkillToolKind, SkillToolSource
 from agentplatform.core.registry.service import register
@@ -76,7 +77,7 @@ async def run_single_chat(
     endpoint = LlmEndpoint(
         name="dev_chat",
         base_url=base_url,
-        model=model,
+        model=normalize_model(model),
         api_key_enc=crypto.encrypt(api_key),
         is_default=True,
     )

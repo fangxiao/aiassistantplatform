@@ -15,6 +15,21 @@ from agentplatform.core.llm.model import LlmEndpoint
 _model_cycler: Iterator[str] | None = None
 
 
+def normalize_model(model: str | None) -> str:
+    """把 auto/round_robin/default/空 统一翻译为平台默认强模型。
+
+    背景(2026-09-26 writewx 会话劣化事故):此前 "auto" 被原样透传给网关,
+    网关在多模型池里按请求自行路由,质量等于抽签,且平台无法感知实际模型。
+    现在 "auto" 的语义收口为「平台默认模型」——路由决策收归平台侧,确定性优先。
+    需要网关侧自动路由时,请在端点/助手中显式指定网关支持的路由模型名。
+    """
+    from agentplatform.config import settings
+
+    if not model or model.lower() in ("auto", "round_robin", "default"):
+        return settings.default_model
+    return model
+
+
 def get_next_model(
     model: str | None = None,
     *,
@@ -54,7 +69,9 @@ async def resolve_endpoint(
     """按模型名解析端点:用户自定义优先于平台共享;无精确匹配回退默认。
 
     优先级:用户精确匹配 > 共享精确匹配 > 用户默认 > 共享默认 > None。
+    model 中的 auto/round_robin/default 先收口为平台默认模型(见 normalize_model)。
     """
+    model = normalize_model(model)
     rows = list(
         await session.scalars(select(LlmEndpoint).order_by(LlmEndpoint.is_default.desc()))
     )

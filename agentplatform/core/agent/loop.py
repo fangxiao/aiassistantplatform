@@ -1014,20 +1014,34 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
                 )
             )
 
-        # 7. 自然语言草稿箱注入意图兜底: 如果模型口头提到调用草稿箱注入，或声称"注入成功"，或用户指令确认注入
+        # 7. 自然语言草稿箱注入意图兜底: 模型口头承诺"调用草稿箱注入"且当前消息携带
+        #    真实文章 HTML 时,代为发起注入并按契约补全 title/html_content 参数。
+        #    安全边界(2026-09-26 修复):仅在确有文章载荷时触发——问候语里的能力介绍
+        #    ("自动注入草稿箱")、成功话术("注入完成")一律不得变成幽灵工具调用;
+        #    空载荷注入违反工具契约(title/html_content 必填),曾导致空文章注入风险。
         nl_draft = re.search(
-            r"(?:调用|使用|重新调用|执行|发起)\s*[`']?(?:tool:)?(?:browser_wechat_draft|草稿箱注入)[`']?|(?:将文章|正在将文章|开始)?注入.*微信.*草稿箱|草稿箱.*注入成功",
+            r"(?:调用|使用|重新调用|执行|发起)\s*[`']?(?:tool:)?(?:browser_wechat_draft|草稿箱注入)[`']?|(?:将文章|正在将文章|开始)注入.*微信.*草稿箱",
             text,
         )
         if nl_draft and any("browser_wechat_draft" in rid for rid in resources):
-            target_res = next((rid for rid in resources if "browser_wechat_draft" in rid), "tool:browser_wechat_draft")
-            extracted.append(
-                ToolCall(
-                    id=f"call_draft_{uuid.uuid4().hex[:8]}",
-                    name=target_res.replace(":", "__"),
-                    arguments="{}",
+            draft_html = _extract_html_fallback(text)
+            if draft_html:
+                draft_title_m = (
+                    re.search(r"<title>([^<]+)</title>", draft_html, re.IGNORECASE)
+                    or re.search(r"<h1[^>]*>([^<]+)</h1>", draft_html, re.IGNORECASE)
                 )
-            )
+                draft_args = {
+                    "title": draft_title_m.group(1).strip() if draft_title_m else "未命名文章",
+                    "html_content": draft_html,
+                }
+                target_res = next((rid for rid in resources if "browser_wechat_draft" in rid), "tool:browser_wechat_draft")
+                extracted.append(
+                    ToolCall(
+                        id=f"call_draft_{uuid.uuid4().hex[:8]}",
+                        name=target_res.replace(":", "__"),
+                        arguments=json.dumps(draft_args, ensure_ascii=False),
+                    )
+                )
 
     return extracted
 

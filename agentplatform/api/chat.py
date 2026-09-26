@@ -425,6 +425,91 @@ async def regenerate_last(
     )
 
 
+@router.post("/sessions/{sid}/continue")
+async def continue_after_interaction(
+    sid: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """交互回填(表单提交/确认等)后自动续跑:以最后一条 user 消息(交互回填文本,
+    如【表单提交】/【交互确认】)作为当前轮触发 agent——不落新消息、不删历史,
+    用户无需再手动输入"继续"。
+    """
+    await _ensure_session_owned(session, sid, user.id)
+
+    async def event_stream():
+        text_parts: list[str] = []
+        blocks: list[dict] = []
+        try:
+            from agentplatform.core.message.service import MessageRole
+
+            msgs = await list_messages(session, sid)
+            last_user = next((m for m in reversed(msgs) if m.role == MessageRole.user), None)
+            if last_user is None:
+                yield sse("error", {"code": "chat_error", "message": "没有可续跑的交互回填消息"})
+                return
+            content = ""
+            for b in last_user.blocks or []:
+                if b.get("type") == "markdown":
+                    content = (b.get("data") or {}).get("text", "")
+
+            usage_total: int | None = None
+            async for ev in agent_stream_for_session(session, sid, content, save_input=False):
+                if ev.type == "reasoning" and ev.text:
+                    yield sse("reasoning", {"text": ev.text})
+                elif ev.type == "delta" and ev.text:
+                    text_parts.append(ev.text)
+                    yield sse("delta", {"block_index": 0, "text": ev.text})
+                elif ev.type == "block_meta" and ev.block:
+                    blocks.append(ev.block)
+                    yield sse("block_meta", ev.block)
+                elif ev.type == "tool_call" and ev.tool_trace is not None:
+                    t = ev.tool_trace
+                    yield sse(
+                        "tool_call",
+                        {
+                            "kind": t.id.split(":", 1)[0],
+                            "name": t.id,
+                            "args": t.args,
+                            "result": t.result,
+                        },
+                    )
+                elif ev.type == "done" and ev.usage:
+                    usage_total = ev.usage.get("total_tokens")
+
+            final_text = "".join(text_parts)
+            final_blocks: list[dict] = []
+            if final_text.strip():
+                final_blocks.append({"type": "markdown", "data": {"text": final_text}})
+            final_blocks.extend(blocks)
+            msg = await save_assistant_message(
+                session, sid, final_blocks if final_blocks else final_text, tokens=usage_total
+            )
+            await session.commit()
+            yield sse("done", {"message_id": str(msg.id), "tokens": usage_total})
+        except asyncio.CancelledError:
+            try:
+                partial = "".join(text_parts)
+                if partial.strip():
+                    await save_assistant_message(session, sid, [{"type": "markdown", "data": {"text": partial}}])
+                    await session.commit()
+            except Exception:  # noqa: BLE001
+                await session.rollback()
+            raise
+        except ChatError as exc:
+            await session.rollback()
+            yield sse("error", {"code": "chat_error", "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            yield sse("error", {"code": "agent_error", "message": str(exc)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 async def _generate_title_logged(sid: uuid.UUID, first_message: str) -> None:
     """后台生成会话标题;失败仅记日志(独立 Session)。"""
     import logging

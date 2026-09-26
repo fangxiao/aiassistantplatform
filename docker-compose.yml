@@ -43,6 +43,11 @@ services:
       # 此处不再显式声明——空值会覆盖 env_file 的配置(诊断页抓到的坑)
     ports:
       - "8000:8000"
+    volumes:
+      # 数据目录持久化:部署的插件(installed_plugins)、上传/生图产物(uploads)必须
+      # 落宿主机——否则容器重建即丢失插件实现文件,而 DB 注册路径仍在,插件全面瘫痪
+      # (2026-09-26 writewx preview 不可用事故根因)
+      - ~/.agentplatform:/root/.agentplatform
     depends_on:
       pg:
         condition: service_healthy
