@@ -5,6 +5,41 @@
 
 import type { ReactNode } from "react";
 import type { ContentBlock } from "../../lib/types";
+import { BlockRenderer } from "./BlockRenderer";
+
+type InteractFn = (action: string, value: any, args?: Record<string, any>) => void;
+
+/**
+ * 伪调用兜底(规范 4.1 确定性转换):弱模型常把 input.form({...}) 当普通文本
+ * 输出而非发起真实 output_block 调用,用户看到的是无法交互的死文本。此处识别
+ * 该模式并确定性转换为真实表单控件(action=input.form,提交后经 interact
+ * 通道以【表单提交】回填会话,agent 据此续跑)。
+ */
+export function parsePseudoForm(src: string): ContentBlock | null {
+  if (!/^\s*input\.form\s*\(/.test(src)) return null;
+  const fieldRe = /["'“”]?([^"'“”:(){}]+?)["'“”]?\s*:\s*input\.(\w+)\s*\(([^)]*)\)/g;
+  const fields: Record<string, unknown>[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = fieldRe.exec(src))) {
+    const label = m[1].trim();
+    if (!label || label === "fields") continue;
+    const field: Record<string, unknown> = { key: label, label, widget: m[2] };
+    const opts = Array.from(m[3].matchAll(/["']([^"']+)["']/g), (x) => x[1]);
+    if (opts.length) field.options = opts;
+    fields.push(field);
+  }
+  if (!fields.length) return null;
+  return {
+    type: "input.form",
+    data: {
+      title: "请填写以下信息",
+      description: "填写后助手将立即继续执行",
+      fields,
+      submit_text: "提交并继续",
+      action: "input.form",
+    },
+  };
+}
 
 function escapeHtml(s: string): string {
   return s
@@ -52,7 +87,13 @@ function inline(text: string): ReactNode[] {
   return nodes;
 }
 
-export default function MarkdownRenderer({ block }: { block: ContentBlock }) {
+export default function MarkdownRenderer({
+  block,
+  onInteract,
+}: {
+  block: ContentBlock;
+  onInteract?: InteractFn;
+}) {
   const text = String(block.data?.text ?? "");
 
   // 1. 如果整段文本为完整 HTML 根结构(如微信公众号排版 <section style="..."> 或 <!DOCTYPE)
@@ -153,11 +194,46 @@ export default function MarkdownRenderer({ block }: { block: ContentBlock }) {
         i++;
       }
       i++; // 跳过结束 ```
+      // 伪调用兜底:代码块内容是 input.form({...}) 时渲染为真实表单
+      const pseudoSrc = buf.join("\n");
+      if (!/^```/.test(pseudoSrc)) {
+        const formBlock = parsePseudoForm(pseudoSrc);
+        if (formBlock) {
+          out.push(<BlockRenderer key={key++} block={formBlock} onInteract={onInteract} />);
+          continue;
+        }
+      }
       out.push(
         <pre key={key++} className="my-2 overflow-x-auto rounded bg-slate-800 p-3 text-sm text-slate-100">
           <code>{buf.join("\n")}</code>
         </pre>,
       );
+      continue;
+    }
+    // 伪调用兜底(裸文本形态,无代码围栏):input.form({...}) 直接写在正文里
+    if (/^\s*input\.form\s*\(/.test(line)) {
+      const formBuf: string[] = [line];
+      while (
+        formBuf.length < 30 &&
+        !/\}\s*\)\s*;?\s*$/.test(formBuf[formBuf.length - 1] ?? "") &&
+        i + 1 < lines.length
+      ) {
+        i++;
+        formBuf.push(lines[i]);
+      }
+      const formBlock = parsePseudoForm(formBuf.join("\n"));
+      if (formBlock) {
+        out.push(<BlockRenderer key={key++} block={formBlock} onInteract={onInteract} />);
+        i++;
+        continue;
+      }
+      // 解析失败:按代码块原样展示,不吞内容
+      out.push(
+        <pre key={key++} className="my-2 overflow-x-auto rounded bg-slate-800 p-3 text-sm text-slate-100">
+          <code>{formBuf.join("\n")}</code>
+        </pre>,
+      );
+      i++;
       continue;
     }
     // 标题

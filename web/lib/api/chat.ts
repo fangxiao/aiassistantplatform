@@ -60,6 +60,14 @@ export function regenerateLast(
   return streamSse(`/chat/sessions/${sid}/regenerate`, {}, signal);
 }
 
+// 交互回填(表单提交/确认)后自动续跑:以【表单提交】/【交互确认】回填消息触发 agent
+export function continueChat(
+  sid: string,
+  signal?: AbortSignal,
+): AsyncGenerator<SseEvent> {
+  return streamSse(`/chat/sessions/${sid}/continue`, {}, signal);
+}
+
 // 交互回传
 export async function interactBlock(
   sid: string,

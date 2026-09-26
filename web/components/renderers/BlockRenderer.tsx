@@ -1,12 +1,13 @@
 "use client";
 
-import React, { createContext, useContext } from "react";
+import React, { useContext } from "react";
 import { ContentBlock } from "../../lib/types";
 import { registry } from "../../lib/registry/RendererRegistry";
 import { FallbackRenderer } from "./FallbackRenderer";
+import { NestingContext } from "./blockContext";
 
-// 深度上下文 (003 v2.0 §7.2 最大嵌套深度 = 3)
-export const NestingContext = createContext<number>(0);
+// 深度上下文 (003 v2.0 §7.2 最大嵌套深度 = 3);实现见 blockContext.ts,此处转发导出
+export { NestingContext };
 
 interface BlockRendererProps {
   block: ContentBlock;

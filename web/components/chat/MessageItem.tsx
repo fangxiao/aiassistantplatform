@@ -75,6 +75,7 @@ export default function MessageItem({
   /** 将技术名称映射为对用户友好的中文描述 */
   function friendlyLabel(rawName: string): { icon: string; name: string } {
     const n = (rawName || "").toLowerCase();
+    if (n.includes("output_block")) return { icon: "🧩", name: "下发交互控件" };
     if (n.includes("writewx_write") || n.includes("wechat_write")) return { icon: "✍️", name: "文章撰写" };
     if (n.includes("wechat_official") || n.includes("layout") || n.includes("排版")) return { icon: "🎨", name: "排版规范获取" };
     if (n.includes("writewx_preview") || n.includes("preview")) return { icon: "👁️", name: "文章预览生成" };
@@ -108,21 +109,33 @@ export default function MessageItem({
               const isDone = !isStreaming || (Boolean(tc.result) && !(isLast && i === (message.toolCalls?.length ?? 1) - 1 && !tc.result));
               const { icon, name } = friendlyLabel(tc.name || tc.id || "");
               const stepResult = tc.result?.startsWith("⚡") ? tc.result.replace(/^⚡\s*\[/, "").replace(/\]$/, "") : null;
+              // 执行状态真实显示:失败结果不渲染成"✅完成"(2026-09-26 编造成功教训)
+              let hasFailed = false;
+              if (isDone && tc.result) {
+                try {
+                  const d = JSON.parse(tc.result);
+                  hasFailed = d?.ok === false || d?.status === "error" || d?.status === "failed";
+                } catch {
+                  /* 非 JSON 结果(纯文本/HTML)按成功显示 */
+                }
+              }
               return (
                 <div
                   key={i}
                   className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all ${
-                    isDone
-                      ? "bg-emerald-50 text-emerald-800"
-                      : "bg-amber-50 text-amber-900 animate-pulse"
+                    !isDone
+                      ? "bg-amber-50 text-amber-900 animate-pulse"
+                      : hasFailed
+                        ? "bg-rose-50 text-rose-800"
+                        : "bg-emerald-50 text-emerald-800"
                   }`}
                   title={`[开发者信息] ${tc.name ?? tc.id}`}  /* 技术名称仅 tooltip 可见 */
                 >
                   <span className={`text-base ${isDone ? "" : "animate-spin"}`}>
-                    {isDone ? "✅" : icon}
+                    {isDone ? (hasFailed ? "❌" : "✅") : icon}
                   </span>
                   <div className="flex flex-col">
-                    <span className="font-medium">{isDone ? `${name}完成` : `正在${name}...`}</span>
+                    <span className="font-medium">{!isDone ? `正在${name}...` : hasFailed ? `${name}失败` : `${name}完成`}</span>
                     {stepResult && (
                       <span className="text-[11px] opacity-75 mt-0.5">{stepResult}</span>
                     )}

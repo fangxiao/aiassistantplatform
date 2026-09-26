@@ -19,6 +19,7 @@ import {
   renameSession,
   sendFeedbackEvent,
   createShare,
+  continueChat,
   regenerateLast,
   sendMessage,
   updateSessionKbs,
@@ -343,6 +344,62 @@ function ChatHome() {
           blocks: resp.blocks,
         };
         setMessages((prev) => [...prev, asstMsg]);
+      }
+      // 交互回填后自动续跑(表单提交/确认类动作):agent 以回填消息为当前轮直接继续,
+      // 用户无需再手动输入"继续"
+      const isFormSubmit = action === "input.form" || action.endsWith("form_submit");
+      const isConfirm = action === "input.confirm" || action.endsWith("confirm");
+      if (isFormSubmit || isConfirm) {
+        setStreaming(true);
+        const asstId = nid("a");
+        setMessages((prev) => [
+          ...prev,
+          { id: asstId, role: "assistant", text: "", blocks: [], toolCalls: [] },
+        ]);
+        const patch = (fn: (m: ChatMessage) => ChatMessage) =>
+          setMessages((ms) => ms.map((m) => (m.id === asstId ? fn(m) : m)));
+        const controller = new AbortController();
+        abortRef.current = controller;
+        try {
+          for await (const ev of continueChat(current.id, controller.signal)) {
+            if (ev.event === "reasoning") {
+              const d = ev.data as { text?: string };
+              patch((m) => ({ ...m, reasoning: (m.reasoning ?? "") + (d.text ?? "") }));
+            } else if (ev.event === "delta") {
+              const d = ev.data as { text?: string };
+              patch((m) => ({ ...m, reasoning: undefined, text: m.text + (d.text ?? "") }));
+            } else if (ev.event === "block_meta") {
+              const block = ev.data as ContentBlock;
+              patch((m) => ({ ...m, blocks: [...(m.blocks ?? []), block] }));
+            } else if (ev.event === "tool_call") {
+              const d = ev.data as ToolCallInfo;
+              patch((m) => {
+                const currentList = m.toolCalls ?? [];
+                const matchIndex = currentList.findLastIndex(
+                  (tc) => tc.id === d.id || (tc.name && tc.name === d.name)
+                );
+                if (matchIndex >= 0) {
+                  const copy = [...currentList];
+                  copy[matchIndex] = d;
+                  return { ...m, toolCalls: copy };
+                }
+                return { ...m, toolCalls: [...currentList, d] };
+              });
+            } else if (ev.event === "done") {
+              const d = ev.data as { message_id?: string };
+              patch((m) => ({ ...m, id: d.message_id ?? m.id, reasoning: undefined }));
+            } else if (ev.event === "error") {
+              const d = ev.data as { message?: string };
+              patch((m) => ({ ...m, text: m.text + `\n\n[错误] ${d.message ?? "未知"}` }));
+            }
+          }
+        } catch {
+          patch((m) => ({ ...m, text: m.text || "[已中断]" }));
+        } finally {
+          setStreaming(false);
+          abortRef.current = null;
+          void refreshSessions();
+        }
       }
     } catch (err) {
       alert(`交互处理失败: ${err instanceof Error ? err.message : err}`);
