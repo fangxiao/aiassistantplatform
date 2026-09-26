@@ -28,12 +28,13 @@ class TestListEndpoints:
         resp = await seeded_client.get("/api/registry/tools")
         assert resp.status_code == 200
         ids = {r["id"] for r in resp.json()}
-        # M14 新增 workbench_todo;M15 P1 新增 web_search/memory
+        # M14 新增 workbench_todo;M15 P1 新增 web_search/memory;M18 新增 image_gen
         assert ids == {
             "tool:http_request",
             "tool:web_search",
             "tool:memory",
             "tool:workbench_todo",
+            "tool:image_gen",
             "tool:pdf_parse",
             "tool:html_cleaner",
             "tool:kb_search",

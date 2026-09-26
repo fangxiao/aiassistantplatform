@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     web_search_api_key: str = ""
     web_search_provider: str = "tavily"
     searxng_base_url: str = "http://localhost:8888"
+    # 生图(M18):OpenAI 兼容 /images/generations;凭据缺省复用主 LLM 端点(同网关零配置)
+    image_gen_model: str = ""  # 空=网关默认生图模型
+    image_gen_base_url: str = ""  # 空=复用 openai_base_url
+    image_gen_api_key: str = ""  # 空=复用 openai_api_key
+    image_gen_size: str = "1024x1024"
     memory_max_per_user: int = 50  # 每用户长期记忆条数上限(超出淘汰最旧)
     # 通用动作(M17):允许 agent 调用的域名白名单;空=工具禁用(安全默认)
     action_http_allowlist: list[str] = []

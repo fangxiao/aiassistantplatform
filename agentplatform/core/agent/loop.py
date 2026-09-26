@@ -25,6 +25,7 @@ from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
 from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID, run as http_action_run
 from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID, run as web_search_run
+from agentplatform.core.agent.image_gen import IMAGE_GEN_TOOL_ID, run as image_gen_run
 from agentplatform.core.memory.tool import MEMORY_TOOL_ID, run as memory_run
 from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
 from agentplatform.core.workbench.todo_tool import run as todo_run
@@ -231,6 +232,9 @@ async def stream_agent(
             if resource.id == WEB_SEARCH_TOOL_ID:
                 # 联网搜索:无 DB 依赖,纯网络调用(M15 P1)
                 return await web_search_run(args)
+            if resource.id == IMAGE_GEN_TOOL_ID:
+                # 文生图:无 DB 依赖,产物落盘 uploads 经 files 通道回 URL(M18)
+                return await image_gen_run(args)
             # Schema 驱动表单(控件零感知):skill 缺 required 参数时,不靠模型文本追问,
             # 平台按 schema 自动生成 input.form 下发;回填值经【表单提交】进会话,
             # 下一轮模型带齐参数再调 skill。仅拦 skill(工具参数由模型从上下文组装)。
