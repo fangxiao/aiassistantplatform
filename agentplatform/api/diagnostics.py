@@ -136,9 +136,55 @@ async def _probe_scheduler() -> CheckResult:
         return CheckResult(name="scheduler", ok=False, detail="调度器状态未知")
 
 
+async def _probe_plugin_files() -> CheckResult:
+    """已注册插件实现文件完整性校验(T18.10):impl_path 指向本地文件的逐个核验。
+
+    背景:插件代码落盘与 DB 注册是两个存储,曾因容器重建丢失文件而出现
+    "注册路径在、实现没了"的静默瘫痪——此处显式告警,不再静默降级。
+    """
+    t0 = time.monotonic()
+    try:
+        from sqlalchemy import select
+
+        from agentplatform.core.db.engine import SessionLocal
+        from agentplatform.core.registry.model import SkillTool, SkillToolSource
+
+        async with SessionLocal() as db:
+            rows = list(
+                await db.scalars(
+                    select(SkillTool).where(SkillTool.source == SkillToolSource.private)
+                )
+            )
+        # 只核验落在本机数据根内的路径:共享 DB 可能存有其他开发环境的绝对路径
+        from pathlib import Path
+
+        roots = [Path.home() / ".agentplatform", Path.cwd()]
+        missing = []
+        checked = 0
+        for row in rows:
+            path = row.impl_path or ""
+            if not path.endswith(".py"):
+                continue  # 端侧(endpoint:)等非本地文件实现不核验
+            p = Path(path)
+            if not any(p == r or r in p.parents for r in roots):
+                continue  # 非本机数据根的路径(其他环境写入的注册行)不核验
+            checked += 1
+            if not p.exists():
+                missing.append(f"{row.id}")
+        detail = f"{checked} 个本地实现文件全部存在" if not missing else f"缺失实现: {', '.join(missing[:8])}"
+        return CheckResult(
+            name="plugin_files",
+            ok=not missing,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            detail=detail,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name="plugin_files", ok=False, detail=f"完整性校验失败: {type(exc).__name__}")
+
+
 @router.get("", response_model=list[CheckResult])
 async def run_diagnostics() -> list[CheckResult]:
-    """一键体检:DB/Redis/LLM/Embedding/搜索/调度器。"""
+    """一键体检:DB/Redis/LLM/Embedding/搜索/调度器/插件文件完整性。"""
     return [
         await _probe_db(),
         await _probe_redis(),
@@ -146,4 +192,5 @@ async def run_diagnostics() -> list[CheckResult]:
         await _probe_embedding(),
         await _probe_search(),
         await _probe_scheduler(),
+        await _probe_plugin_files(),
     ]

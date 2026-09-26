@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useContext, useState } from "react";
+import React, { useContext, useId, useState } from "react";
 import { ContentBlock } from "../../../lib/types";
 import { BlockRenderer } from "../BlockRenderer";
 import { NestingContext } from "../blockContext";
@@ -38,14 +38,16 @@ export function InputTextRenderer({ block, onInteract }: ControlProps) {
   const [val, setVal] = useState(String(block.data?.default ?? ""));
   const { nested, report } = useFieldReport(block, onInteract);
   const action = String(block.data?.action ?? "input.text");
+  const inputId = useId();
   const label = block.data?.label ? String(block.data.label) : null;
   const placeholder = String(block.data?.placeholder ?? "请输入...");
 
   return (
     <div className="my-2 max-w-md rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
+      {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <input
+          id={inputId}
           type="text"
           value={val}
           placeholder={placeholder}
@@ -74,13 +76,15 @@ export function InputTextareaRenderer({ block, onInteract }: ControlProps) {
   const [val, setVal] = useState(String(block.data?.default ?? ""));
   const { nested, report } = useFieldReport(block, onInteract);
   const action = String(block.data?.action ?? "input.textarea");
+  const inputId = useId();
   const label = block.data?.label ? String(block.data.label) : null;
   const placeholder = String(block.data?.placeholder ?? "请输入多行文本...");
 
   return (
     <div className="my-2 max-w-md rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
+      {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <textarea
+        id={inputId}
         rows={3}
         value={val}
         placeholder={placeholder}
@@ -110,13 +114,15 @@ export function InputNumberRenderer({ block, onInteract }: ControlProps) {
   const [val, setVal] = useState<number>(Number(block.data?.default ?? 0));
   const { nested, report } = useFieldReport(block, onInteract);
   const action = String(block.data?.action ?? "input.number");
+  const inputId = useId();
   const label = block.data?.label ? String(block.data.label) : null;
 
   return (
     <div className="my-2 max-w-xs rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
+      {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <input
+          id={inputId}
           type="number"
           value={val}
           min={block.data?.min}
@@ -148,13 +154,15 @@ export function InputSelectRenderer({ block, onInteract }: ControlProps) {
   const [val, setVal] = useState(String(block.data?.default ?? options[0]?.value ?? ""));
   const { nested, report } = useFieldReport(block, onInteract);
   const action = String(block.data?.action ?? "input.select");
+  const inputId = useId();
   const label = block.data?.label ? String(block.data.label) : null;
 
   return (
     <div className="my-2 max-w-xs rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
+      {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <select
+          id={inputId}
           value={val}
           onChange={(e) => {
             setVal(e.target.value);
@@ -529,11 +537,14 @@ export function InputFormRenderer({ block, onInteract }: ControlProps) {
       className="my-3 max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
     >
       {title && <h4 className="mb-3 text-sm font-bold text-slate-800">{title}</h4>}
-      <div className="space-y-3">
-        {fields.map((f, i) => (
-          <BlockRenderer key={i} block={f} onInteract={handleFieldInteract} />
-        ))}
-      </div>
+      <NestingContext.Provider value={1}>
+        {/* 容器自带嵌套上下文:字段在此一律按"嵌套态"渲染(值实时上报、隐藏自带按钮) */}
+        <div className="space-y-3">
+          {fields.map((f, i) => (
+            <BlockRenderer key={i} block={f} onInteract={handleFieldInteract} />
+          ))}
+        </div>
+      </NestingContext.Provider>
       <button
         type="submit"
         className="mt-4 w-full rounded bg-slate-800 py-2 text-xs font-medium text-white hover:bg-slate-700 transition"

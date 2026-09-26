@@ -52,7 +52,12 @@ asyncio_mode = "auto"
 testpaths = ["agentplatform/tests"]
 # importlib 模式:包名 agentplatform 无 stdlib 冲突(prepend 模式在早期
 # 命名 platform 时曾被 stdlib platform 遮蔽;importlib 模式以顶层模块导入)。
-addopts = "--import-mode=importlib"
+# 默认跑单元;E2E 冒烟(对真实运行栈,含真实 LLM 调用)显式运行:
+#   uv run pytest agentplatform/tests/e2e -m e2e
+addopts = "--import-mode=importlib -m 'not e2e'"
+markers = [
+    "e2e: 对真实运行栈的冒烟测试(需服务可达,默认 http://localhost:8000,真实调用 LLM 产生费用)",
+]
 
 [tool.ruff]
 line-length = 100
