@@ -2,7 +2,7 @@
 //
 // 已登录时统一注入 Authorization: Bearer <token>(M1);未登录请求不带该头。
 
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
 
 export interface SseEvent {
@@ -11,7 +11,7 @@ export interface SseEvent {
 }
 
 // 读取登录 token(localStorage);服务端渲染时无 window 返回 null
-function getAuthHeader(): Record<string, string> {
+export function getAuthHeader(): Record<string, string> {
   if (typeof window === "undefined") return {};
   const token = localStorage.getItem("agentplatform_token");
   return token ? { Authorization: `Bearer ${token}` } : {};

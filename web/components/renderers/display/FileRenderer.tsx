@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ContentBlock } from "../../../lib/types";
+import { API_BASE, getAuthHeader } from "../../../lib/api/client";
 
 function formatSize(bytes?: number): string {
   if (!bytes) return "";
@@ -29,16 +30,55 @@ export function FileRenderer({ block }: { block: ContentBlock }) {
 
   const [copied, setCopied] = useState(false);
 
-  // 构建下载与预览 URL
-  const backendBase =
-    process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  // 文件链接需要鉴权(Bearer),而 <a> 新标签页无法携带请求头——
+  // 统一改为:带鉴权 fetch 内容 → blob object URL 供打开/下载;
+  // 顺带修复 NEXT_PUBLIC_API_BASE=/api 时拼出 /api/api/files/raw 的 404。
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const backendBase = API_BASE;
   let previewUrl = rawPath;
   let downloadUrl = rawPath;
 
   if (rawPath && !rawPath.startsWith("http://") && !rawPath.startsWith("https://")) {
-    previewUrl = `${backendBase}/api/files/raw?path=${encodeURIComponent(rawPath)}`;
-    downloadUrl = `${backendBase}/api/files/download?path=${encodeURIComponent(rawPath)}`;
+    previewUrl = `${backendBase}/files/raw?path=${encodeURIComponent(rawPath)}`;
+    downloadUrl = `${backendBase}/files/download?path=${encodeURIComponent(rawPath)}`;
   }
+
+  const needsAuthFetch = Boolean(
+    rawPath && !rawPath.startsWith("http://") && !rawPath.startsWith("https://")
+  );
+
+  useEffect(() => {
+    if (!needsAuthFetch) return;
+    let revoked: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(previewUrl, { headers: getAuthHeader() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        // 显式指定 charset:HTML 无 <meta charset> 时,部分浏览器对 blob 会猜错编码导致乱码
+        const buf = await resp.arrayBuffer();
+        const ctype = resp.headers.get("content-type") ?? "application/octet-stream";
+        const isHtmlFile = /\.(html?|htm)$/i.test(rawPath) || ctype.includes("html");
+        const type = isHtmlFile && !/charset/i.test(ctype) ? "text/html;charset=utf-8" : ctype;
+        const blob = new Blob([buf], { type });
+        if (cancelled) {
+          URL.revokeObjectURL(URL.createObjectURL(blob));
+          return;
+        }
+        revoked = URL.createObjectURL(blob);
+        setBlobUrl(revoked);
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "加载失败");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsAuthFetch, previewUrl]);
 
   const handleCopyPath = () => {
     if (!rawPath) return;
@@ -80,9 +120,17 @@ export function FileRenderer({ block }: { block: ContentBlock }) {
 
       {/* 快捷操作动作条 */}
       <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs">
-        {isHtml && previewUrl && (
+        {needsAuthFetch && loadError && (
+          <span className="rounded bg-rose-50 px-2 py-1 text-rose-700 border border-rose-200">
+            ⚠️ 文件加载失败: {loadError}
+          </span>
+        )}
+        {needsAuthFetch && !blobUrl && !loadError && (
+          <span className="rounded bg-slate-50 px-2 py-1 text-slate-500">文件加载中...</span>
+        )}
+        {isHtml && (rawPath.startsWith("http") ? Boolean(previewUrl) : Boolean(blobUrl)) && (
           <a
-            href={previewUrl}
+            href={blobUrl ?? previewUrl}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white shadow-2xs hover:bg-emerald-700 transition"
@@ -91,9 +139,9 @@ export function FileRenderer({ block }: { block: ContentBlock }) {
           </a>
         )}
 
-        {downloadUrl && (
+        {(rawPath.startsWith("http") ? Boolean(downloadUrl) : Boolean(blobUrl)) && (
           <a
-            href={downloadUrl}
+            href={blobUrl ?? downloadUrl}
             download={name}
             target="_blank"
             rel="noreferrer"
