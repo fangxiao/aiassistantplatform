@@ -13,15 +13,22 @@ import { BlockRenderer } from "../renderers/BlockRenderer";
  */
 function splitEnglishPreamble(text: string): [string, string] {
   if (!text) return ["", ""];
-  // 找第一处中文或首个表格/标题/代码块结构的位置
-  const m = text.search(/[\u4e00-\u9fff]|\n#{1,3} |\n\||```/);
+  // <think> 标签块(部分网关模型把推理内联在 content 里)→ 整体归入思考
+  const thinkTag = /<think>([\s\S]*?)<\/think>\s*/i.exec(text);
+  if (thinkTag) return [thinkTag[1].trim(), text.slice(thinkTag[0].length).trimStart()];
+  // 锚点:首个内容结构(标题/表格/代码块/【/加粗/控件伪调用),而非首个中文字符——
+  // 混排 meta 推理(如 "audience: 技术小白… let's call the tool.")含中文字段值,
+  // 以中文字符锚点会过早截断导致漏判(2026-09-26 泄露事故)
+  const m = text.search(/\n#{1,3} |\n\||```|【|\*\*|input\.form/);
   if (m <= 0) return ["", text];
   const head = text.slice(0, m).trim();
   if (!head) return ["", text];
-  // 前导需"足够像思考":全英文句式 + 长度阈值 + 含决策动词特征
+  // 前导需"足够像思考":含决策动词/元规划特征(字段枚举、调用意图)
+  const thinky =
+    /(should|let me|i'll|i will|let's|need to|the user|my role|first|alternatively|given that|call the tool|the form|collect\b|audience\s*:|length\s*:|tone\s*:|topic\s*:)/i.test(head);
   const ascii = (head.match(/[\x00-\x7f]/g) || []).length / head.length;
-  const thinky = /(should|let me|i'll|need to|the user|my role|first|alternatively|given that)/i.test(head);
-  if (ascii > 0.85 && head.length > 60 && thinky) {
+  const fieldEnum = /^[a-z_]+\s*:/im.test(head);
+  if (head.length > 40 && thinky && (ascii > 0.6 || fieldEnum)) {
     return [head, text.slice(m).replace(/^\s+/, "")];
   }
   return ["", text];
