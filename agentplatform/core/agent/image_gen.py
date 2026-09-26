@@ -107,7 +107,13 @@ async def run(args: dict) -> str:
         if isinstance(raw, bytes):
             path = _uploads_dir() / f"{_uuid.uuid4().hex}.png"
             path.write_bytes(raw)
-            url = f"/api/files/raw?path={path}"
+            # 签名 URL:HTML 产物 <img>/blob 预览页无法携带 Bearer,签名免头访问;
+            # public_api_base 配置时拼绝对地址(blob 页源=WebUI 源,相对 /api 会落到前端 404)
+            from agentplatform.api.files import sign_file_path
+
+            url = sign_file_path(str(path))
+            if settings.public_api_base:
+                url = settings.public_api_base.rstrip("/") + url
         else:
             url = raw
         images.append({"url": url})
