@@ -80,9 +80,18 @@ export function FileRenderer({ block }: { block: ContentBlock }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsAuthFetch, previewUrl]);
 
-  const handleCopyPath = () => {
+  const handleCopyPath = async () => {
     if (!rawPath) return;
-    navigator.clipboard.writeText(rawPath);
+    let text = rawPath;
+    try {
+      const resp = await fetch(`${API_BASE}/sign?path=${encodeURIComponent(rawPath)}`, {
+        headers: getAuthHeader(),
+      });
+      if (resp.ok) text = (await resp.json()).url ?? rawPath;
+    } catch {
+      /* 换取失败退回复制原始路径 */
+    }
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -157,7 +166,7 @@ export function FileRenderer({ block }: { block: ContentBlock }) {
             onClick={handleCopyPath}
             className="inline-flex items-center gap-1 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 font-medium text-slate-600 hover:bg-slate-100 transition"
           >
-            <span>{copied ? "✅ 路径已复制" : "📋 复制本地路径"}</span>
+            <span>{copied ? "✅ 链接已复制" : "🔗 复制链接"}</span>
           </button>
         )}
       </div>

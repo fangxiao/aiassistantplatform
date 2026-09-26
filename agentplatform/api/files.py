@@ -181,6 +181,19 @@ async def proxy_image(
     return FileResponse(cached, media_type=media_type or "image/png", headers={"Cache-Control": "public, max-age=604800"})
 
 
+@router.get("/sign")
+async def sign_file_url(
+    path: str = Query(..., description="白名单内的文件路径"),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """为白名单内文件生成带签名的免头访问 URL(登录用户专用)。"""
+    target = _resolve_file_path(path)  # 复用白名单校验
+    signed = sign_file_path(str(target))
+    if settings.public_api_base:
+        signed = settings.public_api_base.rstrip("/") + signed
+    return {"url": signed}
+
+
 @router.post("/upload")
 async def upload_image(
     file: UploadFile,
