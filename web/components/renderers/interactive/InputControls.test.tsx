@@ -49,11 +49,22 @@ describe("InputFormRenderer", () => {
     const [, value] = onInteract.mock.calls[0];
     expect(value.fields).toEqual([
       { id: "topic", label: "文章主题 *", value: "中秋" },
-      { id: "tone", label: "语气风格", value: "" },
+      { id: "tone", label: "语气风格", value: "专业" }, // select 显示首选项,所见即所提交
       { id: "length", label: "目标字数", value: "" },
     ]);
   });
 });
+
+  it("未交互字段提交其显示的默认值(select 缺省值缺陷回归)", () => {
+    const onInteract = vi.fn();
+    render(<InputFormRenderer block={REAL_FORM_BLOCK} onInteract={onInteract} />);
+    // 仅填主题,其余字段不碰——语气风格 select 显示默认第一项,也应随提交带出
+    fireEvent.change(screen.getByLabelText("文章主题 *"), { target: { value: "中秋" } });
+    fireEvent.click(screen.getByText("🚀 开始撰写"));
+    const [, value] = onInteract.mock.calls[0];
+    const tone = value.fields.find((f: any) => f.id === "tone");
+    expect(tone.value).toBe("专业"); // select 无 default 时回落第一选项
+  });
 
 describe("parsePseudoForm(伪调用确定性兜底)", () => {
   it("解析模型裸写的 input.form 伪调用(2026-09-26 用户实录)", () => {

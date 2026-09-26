@@ -173,6 +173,7 @@ async def agent_stream_for_session(
         history=prior,
         owner_id=str(sess.user_id) if sess.user_id else None,
         plugin_desc=(plugin.manifest or {}).get("description") if plugin else None,
+        display_name=(plugin.manifest or {}).get("display_name") if plugin else None,
         allowed_kb_ids=allowed_kb_ids,
         memories=memories,
         images=images,

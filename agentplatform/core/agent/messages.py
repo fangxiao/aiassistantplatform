@@ -24,6 +24,7 @@ def build_system_prompt(
     resources: list[SkillTool],
     plugin_desc: str | None = None,
     memories: list[str] | None = None,
+    display_name: str | None = None,
 ) -> str:
     """系统提示: 说明助手职责、领域规范及可用工具。
 
@@ -35,6 +36,15 @@ def build_system_prompt(
         lines.append(f"【你的角色与核心定位】\n{plugin_desc}\n")
     else:
         lines.append("【你的角色与核心定位】\n你是由 AgentPlatform 驱动的智能助手，能够协助用户解决各种问题并高效完成任务。\n")
+    # 助手人设边界(2026-09-26):auto 池多模型路由下,部分模型问候轮自报底层身份
+    # (如 SenseNova/日日新),人设断裂——统一注入身份守卫,与技能提示叠加不冲突。
+    persona = display_name or "智能助手"
+    lines.append(
+        f"【助手身份(必须遵守)】在终端用户面前,你是助手「{persona}」。"
+        "无论底层由什么模型驱动,严禁自称/暗示任何模型名称、版本或厂商"
+        "(如 SenseNova/日日新/GLM/DeepSeek/Qwen/GPT 等);"
+        f"被问及你是谁、什么模型时,以「{persona}」的身份一句话带过,并引导回用户任务。\n"
+    )
 
     # 提取技能 Prompt 与领域规范，直接赋予助手专家能力
     skills = [r for r in resources if r.kind == SkillToolKind.skill]
@@ -83,8 +93,8 @@ def build_system_prompt(
             "1. 100% 纯行内样式 (100% Inline Styles)：微信后台会剔除所有 <style> 标签与外部 class，正文必须直接使用带有 style 样式的 HTML 标签（如 <section style='max-width:677px;margin:0 auto;line-height:2.0;color:#3f3f3f;padding:15px;background:#fff;'>包裹全文）。\n"
             "2. 移动端阅读美学：字号 15.5px~16px，行高 2.0，首行缩进 2em；章节标题使用彩色序号块（<span style='background:#00897B;color:#fff;padding:4px 10px;border-radius:4px;font-weight:bold;margin-right:8px;'>01</span>）；重点金句使用左侧翡翠绿边条高亮卡片（border-left: 4px solid #00897B; background: #f0fdfa; padding: 15px; margin: 20px 0; border-radius: 4px;）。\n"
             "3. 一气呵成直接出文：当用户要求撰写文章时，必须立即流式输出排版精美、结构完整的高质量图文 HTML，严禁只回复'请稍候'、'正在撰写'等空头开场白。\n"
-            "4. 自动落盘预览与人机协同：文章正文输出完毕后，调用 `tool:writewx_preview` 工具将 HTML 字符串保存并获取预览文件；向用户展示文件卡片并询问：“文章已完成排版并生成预览文件，是否确认通过 BrowserAgent 注入微信公众号草稿箱？”\n"
-            "5. 草稿箱注入：当用户回复确认、注入或重试时，必须立即发起 `tool__browser_wechat_draft` 工具调用（参数：title、digest、html_content），严禁仅输出文字空口声称已注入成功或假装调用！"
+            "4. 自动落盘预览与交付：文章正文输出完毕后，调用 `tool:writewx_preview` 工具将 HTML 字符串保存并获取预览文件；向用户展示文件卡片并引导复制发布（交付以预览文件为准，不涉及草稿箱注入）\n"
+            "5. 交付真实性铁律：一切交付动作以真实工具调用及其返回结果为准，严禁仅输出文字空口声称已完成，严禁编造文件路径或图片 URL！"
         )
     else:
         lines.append(

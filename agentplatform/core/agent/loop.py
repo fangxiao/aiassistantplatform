@@ -82,6 +82,7 @@ async def run_agent(
     owner_id: str | None = None,
     allowed_kb_ids: list[uuid.UUID] | None = None,
     memories: list[str] | None = None,
+    display_name: str | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
@@ -97,6 +98,7 @@ async def run_agent(
         owner_id=owner_id,
         allowed_kb_ids=allowed_kb_ids,
         memories=memories,
+        display_name=display_name,
     ):
         if ev.type == "delta" and ev.text:
             text_parts.append(ev.text)
@@ -161,6 +163,7 @@ async def stream_agent(
     allowed_kb_ids: list[uuid.UUID] | None = None,
     memories: list[str] | None = None,
     images: list[str] | None = None,
+    display_name: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
@@ -189,7 +192,8 @@ async def stream_agent(
     await session.commit()
 
     system = build_system_prompt(
-        list(resources.values()), plugin_desc=plugin_desc, memories=memories
+        list(resources.values()), plugin_desc=plugin_desc, memories=memories,
+        display_name=display_name,
     )
     messages = build_messages(system, history, user_message, images=images)
 

@@ -151,7 +151,7 @@ export function InputNumberRenderer({ block, onInteract }: ControlProps) {
 // 4. input.select
 export function InputSelectRenderer({ block, onInteract }: ControlProps) {
   const options = normalizeOptions(block.data?.options);
-  const [val, setVal] = useState(String(block.data?.default ?? options[0]?.value ?? ""));
+  const [val, setVal] = useState(String(block.data?.default ?? block.data?.defaultValue ?? options[0]?.value ?? ""));
   const { nested, report } = useFieldReport(block, onInteract);
   const action = String(block.data?.action ?? "input.select");
   const inputId = useId();
@@ -497,7 +497,8 @@ function normalizeFormField(f: any, i: number): ContentBlock {
       placeholder: f?.placeholder,
       required: Boolean(f?.required),
       options: Array.isArray(f?.options) ? f.options : undefined,
-      defaultValue: f?.default,
+      // select 控件初始显示第一项:default 缺省时同步兜底,保证"所见即所提交"
+      defaultValue: f?.default ?? (kind === "select" && Array.isArray(f?.options) && f.options.length ? f.options[0] : undefined),
     },
   };
 }
@@ -518,17 +519,20 @@ export function InputFormRenderer({ block, onInteract }: ControlProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // 结构化提交:fields 列表(id/label/value)——后端 interact 服务按此渲染
-    // 表格回执并注入会话;缺省字段带空值,保证 agent 拿到完整字段清单
-    const fields = rawFields.map((f, i) => {
-      const key = String(f?.id ?? f?.name ?? f?.key ?? `field_${i}`);
+    // 表格回执并注入会话;未交互字段回退其 default(控件显示什么就提交什么,
+    // 修复 select 显示默认值但提交为空的缺陷);无 default 才落空值
+    // 用规范化后的字段组装(其 defaultValue 已含 default/select 首选项兜底),
+    // 保证"控件显示什么,未交互就提交什么"
+    const fieldsPayload = fields.map((f) => {
+      const key = String(f.data?.id ?? f.data?.action ?? `field_${f.data?.id}`);
       const entry = formValues[key];
       return {
         id: key,
-        label: String(f?.label ?? f?.name ?? key),
-        value: entry?.value ?? entry ?? "",
+        label: String(f.data?.label ?? key),
+        value: entry?.value ?? entry ?? f.data?.defaultValue ?? "",
       };
     });
-    onInteract?.(action, { fields }, block.data?.args);
+    onInteract?.(action, { fields: fieldsPayload }, block.data?.args);
   };
 
   return (
