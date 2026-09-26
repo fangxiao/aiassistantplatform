@@ -73,7 +73,10 @@ async def make_llm_client(
                 raise ChatError(f"未配置可用 LLM 端点(模型: {model or '默认'})")
 
     if settings.fallback_openai_base_url and settings.fallback_openai_api_key:
-        if endpoint.base_url.rstrip("/") != settings.fallback_openai_base_url.rstrip("/"):
+        same_base = endpoint.base_url.rstrip("/") == settings.fallback_openai_base_url.rstrip("/")
+        # 兜底条件:不同网关,或同网关但模型不同——后者覆盖"单模型上游故障"
+        # (2026-09-26 glm-5.3-flash 上游 502 反复出现,同网关换模型即可续跑)
+        if not same_base or endpoint.model != settings.fallback_default_model:
             fallbacks.append(
                 LlmEndpoint(
                     name="fallback_env",

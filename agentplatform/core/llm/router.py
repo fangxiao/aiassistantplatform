@@ -16,16 +16,15 @@ _model_cycler: Iterator[str] | None = None
 
 
 def normalize_model(model: str | None) -> str:
-    """把 auto/round_robin/default/空 统一翻译为平台默认强模型。
+    """模型名归一:auto 透传网关(网关侧自行路由);空值回平台默认模型。
 
-    背景(2026-09-26 writewx 会话劣化事故):此前 "auto" 被原样透传给网关,
-    网关在多模型池里按请求自行路由,质量等于抽签,且平台无法感知实际模型。
-    现在 "auto" 的语义收口为「平台默认模型」——路由决策收归平台侧,确定性优先。
-    需要网关侧自动路由时,请在端点/助手中显式指定网关支持的路由模型名。
+    2026-09-26 决策修订:曾一度把 auto 收口为平台默认强模型(网关抽签质量不可控);
+    用户裁决改回**网关 auto 透传**——路由智能归网关,弱模型排除通过与网关沟通
+    在其 auto 池配置黑名单解决(平台侧黑名单无法感知网关实际池构成)。
     """
     from agentplatform.config import settings
 
-    if not model or model.lower() in ("auto", "round_robin", "default"):
+    if not model:
         return settings.default_model
     return model
 
