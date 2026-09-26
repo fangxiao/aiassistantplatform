@@ -125,3 +125,35 @@ class TestFetchAndCache:
         monkeypatch.setattr(ip.Path, "home", staticmethod(lambda: tmp_path))
         with pytest.raises(ValueError, match="10MB"):
             await fetch_and_cache("https://cdn.example.com/big.png")
+
+
+class TestRewriteChecked:
+    def _head_mock(self, monkeypatch, status_by_url: dict):
+        def handler(request: httpx.Request) -> httpx.Response:
+            st = status_by_url.get(str(request.url), 200)
+            return httpx.Response(st, headers={"content-type": "image/jpeg"})
+        class C(httpx.Client):
+            def __init__(self, **kw):
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(**kw)
+        import httpx as _h
+        monkeypatch.setattr(_h, "Client", C)
+
+    def test_dead_link_replaced_with_placeholder(self, monkeypatch, tmp_path) -> None:
+        _mock_dns(monkeypatch)
+        self._head_mock(monkeypatch, {
+            "https://cdn.example.com/alive.jpg": 200,
+            "https://ark.cos.myqcloud.com/dead.jpg": 404,
+        })
+        monkeypatch.setattr(ip.Path, "home", staticmethod(lambda: tmp_path))
+        html = ('<img src="https://cdn.example.com/alive.jpg">'
+                '<img src="https://ark.cos.myqcloud.com/dead.jpg">')
+        out, warnings = ip.rewrite_html_checked(html)
+        assert "/api/files/img?u=" in out          # 活链 → 代理
+        assert "data:image/svg+xml" in out          # 死链 → 占位图
+        assert len(warnings) == 1 and "已失效" in warnings[0]
+
+    def test_all_platform_urls_skip_check(self, monkeypatch) -> None:
+        html = '<img src="/api/files/raw?path=/x.png">'
+        out, warnings = ip.rewrite_html_checked(html)
+        assert out == html and warnings == []

@@ -109,3 +109,69 @@ def rewrite_html(html: str) -> str:
         return f'{m.group(1)}{signed_img_url(url)}{m.group(3)}'
 
     return _IMG_SRC_RE.sub(_repl, html)
+
+
+# 死链占位图:灰色"图片不可用"SVG(data URI,不依赖网络)
+_DEAD_PLACEHOLDER = (
+    "data:image/svg+xml;charset=utf-8,"
+    + (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300">'
+        '<rect width="100%" height="100%" fill="#f1f5f9"/>'
+        '<text x="50%" y="50%" text-anchor="middle" fill="#94a3b8" '
+        'font-family="sans-serif" font-size="20">图片不可用(原链接已失效)</text>'
+        '</svg>'
+    ).replace("#", "%23").replace('"', "'")
+)
+
+
+def rewrite_html_checked(html: str, timeout: float = 6.0) -> tuple[str, list[str]]:
+    """改写 + 验活:外链图先 HEAD 探活,死链替换为占位图并返回警告列表。
+
+    背景(2026-09-26):文章引用的外链图可能已 404(对象删除/过期,
+    甚至是模型编造的"看似合理"链接),代理无法凭空取回——写盘前就地
+    替换为占位图,避免用户看到裂图。验活并发执行(线程池),不逐个阻塞。
+    """
+    warnings: list[str] = []
+    matches = list(_IMG_SRC_RE.finditer(html))
+    if not matches:
+        return html, warnings
+
+    candidates: dict[str, bool | None] = {}
+    urls = []
+    for m in matches:
+        url = m.group(2)
+        if "/api/files/" in url or not is_public_http_url(url):
+            candidates[url] = None  # 平台文件/非公网:跳过验活,按原逻辑处理
+        else:
+            urls.append(url)
+
+    def _alive(u: str) -> bool:
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                resp = client.head(u)
+                if resp.status_code in (405, 501):  # 不支持 HEAD 则退化为范围 GET
+                    resp = client.get(u, headers={"Range": "bytes=0-0"})
+                return resp.status_code < 400
+        except Exception:  # noqa: BLE001
+            return False
+
+    if urls:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for u, alive in zip(urls, pool.map(_alive, urls)):
+                candidates[u] = alive
+
+    def _repl(m: re.Match[str]) -> str:
+        url = m.group(2)
+        alive = candidates.get(url)
+        if alive is None:
+            if "/api/files/" in url:
+                return m.group(0)
+            return m.group(0)  # 非公网 URL 保持原样
+        if alive:
+            return f'{m.group(1)}{signed_img_url(url)}{m.group(3)}'
+        warnings.append(f"图片不可用(上游 {url} 已失效),已替换为占位图")
+        return f'{m.group(1)}{_DEAD_PLACEHOLDER}{m.group(3)}'
+
+    return _IMG_SRC_RE.sub(_repl, html), warnings
