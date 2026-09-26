@@ -167,7 +167,7 @@ export default function Composer({
       />
       <button
         type="button"
-        className="rounded-xl bg-slate-900 px-5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 shadow-xs flex items-center justify-center min-w-[72px]"
+        className="self-stretch rounded-xl bg-slate-900 px-5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 shadow-xs flex items-center justify-center min-w-[72px]"
         onClick={disabled && onStop ? onStop : submit}
         disabled={disabled && !onStop}
       >
