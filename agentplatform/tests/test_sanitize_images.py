@@ -27,6 +27,16 @@ class TestSanitizeModelImages:
         html = f'<img src="/api/files/raw?path={f}">'
         assert sanitize_model_images(html) == html  # 真实产物保留
 
+    def test_host_namespace_path_translated(self, monkeypatch, tmp_path) -> None:
+        """T18.16:宿主机形态路径(/Users/x/.agentplatform/...)翻译到本服务数据根后按真实文件保留。"""
+        uploads = tmp_path / ".agentplatform" / "uploads"
+        uploads.mkdir(parents=True)
+        f = uploads / "ns.png"
+        f.write_bytes(_PNG_1PX)
+        monkeypatch.setattr(ip.Path, "home", staticmethod(lambda: tmp_path))
+        html = '<img src="/api/files/raw?path=/Users/somebody/.agentplatform/uploads/ns.png">'
+        assert sanitize_model_images(html) == html  # 翻译后存在 → 保留
+
     def test_raw_url_missing_file_replaced(self, monkeypatch, tmp_path) -> None:
         monkeypatch.setattr(ip.Path, "home", staticmethod(lambda: tmp_path))
         out = sanitize_model_images('<img src="/api/files/raw?path=/root/.agentplatform/uploads/ghost.png">')

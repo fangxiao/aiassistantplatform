@@ -242,11 +242,14 @@ def sanitize_model_images(text: str) -> str:
             from pathlib import Path as _P
 
             p = _P(raw_path)
-            under_data = any(
-                r in p.parents or p == r
-                for r in (_P.home() / ".agentplatform",)
-            )
-            if p.is_absolute() and under_data and p.exists() and p.is_file():
+            data_root = _P.home() / ".agentplatform"
+            # T18.16 命名空间翻译:任何主机的 .../.agentplatform/<rest> 形态
+            # 统一映射到本服务数据根再验存在性(本地 CLI 宿主机路径 → 容器数据根)
+            if p.is_absolute() and not p.exists() and ".agentplatform" in p.parts:
+                parts = p.parts
+                idx = parts.index(".agentplatform")
+                p = data_root / Path(*parts[idx + 1 :])
+            if p.is_absolute() and (data_root in p.parents) and p.exists() and p.is_file():
                 return m.group(0)
             warnings.append(f"图片溯源失败({url} 非平台产物或文件不存在),已替换为占位图")
             return f"{m.group(1)}{_DEAD_PLACEHOLDER}{m.group(3)}"

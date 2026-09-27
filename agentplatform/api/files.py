@@ -77,6 +77,14 @@ def _resolve_file_path(raw_path: str) -> Path:
 
     if p.is_absolute():
         p = p.resolve()
+        # 数据目录路径翻译(T18.16):本地 CLI(宿主机)产出的 /Users/<u>/.agentplatform/...
+        # 在服务端(容器)按字面解析不存在——统一映射到本服务数据根;翻译后仍受白名单约束
+        if not p.exists() and ".agentplatform" in p.parts:
+            parts = p.parts
+            idx = parts.index(".agentplatform")
+            translated = Path.home() / ".agentplatform" / Path(*parts[idx + 1 :])
+            if translated.exists():
+                p = translated
     else:
         # 相对路径:在白名单根下找第一个命中的文件(保持旧版候选目录语义)
         found = next(
