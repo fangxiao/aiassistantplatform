@@ -94,6 +94,26 @@ async def fetch_and_cache(url: str) -> Path:
     return cache
 
 
+def _is_platform_file_url(url: str) -> bool:
+    """判定是否平台自身文件 URL(相对/绝对/编码形态均覆盖)。
+
+    双保险:原始串与解码串子串匹配 + 解析后的 path 匹配——单靠子串在
+    整段百分号编码等形态下会漏判,导致自家 raw 通道被当外链签名
+    (writewx 20260927-2320 缺陷反馈的硬化项)。
+    """
+    from urllib.parse import unquote
+
+    for form in (url, unquote(url)):
+        if "/api/files/" in form:
+            return True
+        try:
+            if "/api/files/" in httpx.URL(form).path:
+                return True
+        except Exception:  # noqa: BLE001  非法 URL 按子串结论
+            continue
+    return False
+
+
 def rewrite_html(html: str) -> str:
     """把 HTML 中全部外链 <img src> 改写为平台代理签名 URL(幂等)。
 
@@ -102,7 +122,7 @@ def rewrite_html(html: str) -> str:
 
     def _repl(m: re.Match[str]) -> str:
         url = m.group(2)
-        if "/api/files/" in url or "/api/files/img" in url:
+        if _is_platform_file_url(url):
             return m.group(0)
         if not is_public_http_url(url):
             return m.group(0)  # 非公网 URL 保持原样(签名代理也不可达)
@@ -140,7 +160,7 @@ def rewrite_html_checked(html: str, timeout: float = 6.0) -> tuple[str, list[str
     urls = []
     for m in matches:
         url = m.group(2)
-        if "/api/files/" in url or not is_public_http_url(url):
+        if _is_platform_file_url(url) or not is_public_http_url(url):
             candidates[url] = None  # 平台文件/非公网:跳过验活,按原逻辑处理
         else:
             urls.append(url)
@@ -166,7 +186,7 @@ def rewrite_html_checked(html: str, timeout: float = 6.0) -> tuple[str, list[str
         url = m.group(2)
         alive = candidates.get(url)
         if alive is None:
-            if "/api/files/" in url:
+            if _is_platform_file_url(url):
                 return m.group(0)
             return m.group(0)  # 非公网 URL 保持原样
         if alive:

@@ -148,7 +148,7 @@ async def download_file(
     )
 
 
-@router.get("/img")
+@router.api_route("/img", methods=["GET", "HEAD"])
 async def proxy_image(
     u: str = Query(..., description="外链图片 URL"),
     exp: str | None = Query(None, description="签名过期时间戳"),
