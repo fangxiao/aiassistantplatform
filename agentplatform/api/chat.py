@@ -257,6 +257,10 @@ async def send_message(
                         },
                     )
             final_text = "".join(text_parts)
+            # T18.15 图片溯源清洗:编造/失效的 <img> 确定性替换占位图(最终防线)
+            from agentplatform.core.agent.img_proxy import sanitize_model_images
+
+            final_text = sanitize_model_images(final_text)
             final_blocks: list[dict] = []
             if final_text.strip():
                 final_blocks.append({"type": "markdown", "data": {"text": final_text}})
@@ -402,6 +406,10 @@ async def regenerate_last(
                         {"id": t.id, "name": t.name, "arguments": json.dumps(t.args, ensure_ascii=False), "result": t.result},
                     )
             final_text = "".join(text_parts)
+            # T18.15 图片溯源清洗:编造/失效的 <img> 确定性替换占位图(最终防线)
+            from agentplatform.core.agent.img_proxy import sanitize_model_images
+
+            final_text = sanitize_model_images(final_text)
             final_blocks: list[dict] = []
             if final_text.strip():
                 final_blocks.append({"type": "markdown", "data": {"text": final_text}})
@@ -478,6 +486,10 @@ async def continue_after_interaction(
                     usage_total = ev.usage.get("total_tokens")
 
             final_text = "".join(text_parts)
+            # T18.15 图片溯源清洗:编造/失效的 <img> 确定性替换占位图(最终防线)
+            from agentplatform.core.agent.img_proxy import sanitize_model_images
+
+            final_text = sanitize_model_images(final_text)
             final_blocks: list[dict] = []
             if final_text.strip():
                 final_blocks.append({"type": "markdown", "data": {"text": final_text}})

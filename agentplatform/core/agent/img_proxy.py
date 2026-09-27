@@ -14,6 +14,7 @@ import ipaddress
 import re
 import socket
 from pathlib import Path
+from urllib.parse import unquote
 
 import httpx
 
@@ -195,3 +196,66 @@ def rewrite_html_checked(html: str, timeout: float = 6.0) -> tuple[str, list[str
         return f'{m.group(1)}{_DEAD_PLACEHOLDER}{m.group(3)}'
 
     return _IMG_SRC_RE.sub(_repl, html), warnings
+
+_IMG_ALL_RE = re.compile(r'(<img[^>]*?\bsrc=")([^"]+)(")', re.IGNORECASE)
+
+
+def _raw_path_from_url(url: str) -> str | None:
+    """从 /api/files/raw URL(相对或绝对)提取 path 参数;非该通道返回 None。"""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    u = unquote(url)
+    try:
+        parsed = urlparse(u if "://" in u else f"http://_local{u if u.startswith('/') else '/' + u}")
+        if not parsed.path.endswith("/files/raw"):
+            return None
+        qs = parse_qs(parsed.query)
+        return qs.get("path", [None])[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def sanitize_model_images(text: str) -> str:
+    """模型输出图片溯源清洗(T18.15,最终防线):对最终回复中的 <img src> 逐个校验。
+
+    规则:
+    - /api/files/raw?path=P:白名单内文件必须真实存在,否则替换占位图;
+    - /api/files/img 代理 URL / data: 内联 / 外链 http(s):保留(外链验活归 preview/checkup);
+    - 其余形态(相对伪路径如 /images/x.png、裸词等,即模型编造的典型形态):
+      替换占位图并附 imgproxy-warnings 注释供 checkup 提取。
+    背景(20260927-2320 后续):模型未调 image_gen 却宣称"封面已生成"并嵌入
+    编造路径(404),提示词拦不住,平台侧确定性拦截。
+    """
+    if not text or "<img" not in text.lower():
+        return text
+    warnings: list[str] = []
+
+    def _repl(m: re.Match[str]) -> str:
+        url = m.group(2)
+        low = url.lower()
+        if low.startswith("data:") or low.startswith("blob:"):
+            return m.group(0)
+        if "/api/files/img" in url or "/api/files/img" in unquote(url):
+            return m.group(0)  # 平台代理 URL:验活发生在改写时
+        raw_path = _raw_path_from_url(url)
+        if raw_path:
+            from pathlib import Path as _P
+
+            p = _P(raw_path)
+            under_data = any(
+                r in p.parents or p == r
+                for r in (_P.home() / ".agentplatform",)
+            )
+            if p.is_absolute() and under_data and p.exists() and p.is_file():
+                return m.group(0)
+            warnings.append(f"图片溯源失败({url} 非平台产物或文件不存在),已替换为占位图")
+            return f"{m.group(1)}{_DEAD_PLACEHOLDER}{m.group(3)}"
+        if low.startswith("http://") or low.startswith("https://") or url.startswith("//"):
+            return m.group(0)  # 外链:不在本防线处置(验活归 preview 改写/checkup)
+        warnings.append(f"图片溯源失败(编造形态 {url}),已替换为占位图")
+        return f"{m.group(1)}{_DEAD_PLACEHOLDER}{m.group(3)}"
+
+    out = _IMG_ALL_RE.sub(_repl, text)
+    if warnings:
+        out += "\n<!-- imgproxy-warnings: " + " | ".join(warnings) + " -->"
+    return out
