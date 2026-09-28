@@ -420,7 +420,11 @@ async def stream_agent(
                 missing = required - executed_tool_ids
                 _log_orchestration(required, executed_tool_ids, executed_skill_ids, missing)
                 stale: set[str] = set()
-                if not missing and required and "<img" in accumulated_text.lower():
+                if not missing and required:
+                    # freshness 独立判定(20260928-1348):不再以"正文含 <img>"为前提——
+                    # 定向场景正文可以只有"完成"两字,产物未被任何通道消费才是判定依据。
+                    # 消费定义:产物 URL 出现在 chat 正文,或被任一后续工具入参引用
+                    # (交付链,如 preview 的 html_content)。
                     produced = _run_state.produced_urls
                     consumed = _run_state.consumed_urls
                     stale = required - {
