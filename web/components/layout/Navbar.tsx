@@ -52,6 +52,7 @@ export function Navbar() {
     { href: "/kb", label: "📚 知识库" },
     { href: "/developer", label: "🛠️ 开发者中心" },
     { href: "/status", label: "🩺 系统诊断" },
+    ...(user?.role === "admin" ? [{ href: "/admin", label: "⚙️ 管理后台" }] : []),
   ];
 
   const [showTokenModal, setShowTokenModal] = useState(false);
@@ -126,7 +127,7 @@ export function Navbar() {
               <div className="hidden sm:flex flex-col text-right text-xs">
                 <span className="font-medium text-slate-800">{user.email}</span>
                 <span className="text-[10px] text-slate-400 capitalize">
-                  {user.role === "developer" ? "开发者" : "普通用户"}
+                  {user.role === "admin" ? "平台管理员" : user.role === "developer" ? "开发者" : "普通用户"}
                 </span>
               </div>
               <button

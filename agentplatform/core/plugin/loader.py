@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.plugin.errors import DependencyError, PluginValidationError
 from agentplatform.core.plugin.manifest import PluginManifest, ResourceDef, validate_manifest
-from agentplatform.core.plugin.model import Plugin, PluginStatus
+from agentplatform.core.plugin.model import Plugin, PluginReviewStatus, PluginStatus
 from agentplatform.core.registry.model import SkillTool, SkillToolKind, SkillToolSource
 from agentplatform.core.registry.service import check_dependencies, register
 
@@ -51,6 +51,11 @@ async def deploy_plugin(
         existing.manifest = manifest.model_dump()
         existing.status = PluginStatus.active
         existing.deployed_at = datetime.now(UTC)
+        # ADR 0008 保守策略:重新部署一律退回待审,防"过审后偷换内容"
+        existing.review_status = PluginReviewStatus.pending_review
+        existing.last_review_reason = None
+        existing.reviewed_by = None
+        existing.reviewed_at = None
         plugin = existing
         await session.flush()
     else:
@@ -60,6 +65,7 @@ async def deploy_plugin(
             manifest=manifest.model_dump(),
             status=PluginStatus.active,
             owner_id=owner_id,
+            review_status=PluginReviewStatus.pending_review,
         )
         session.add(plugin)
         await session.flush()
@@ -138,6 +144,46 @@ async def _register_resource(
 async def list_plugins(session: AsyncSession) -> list[Plugin]:
     rows = await session.scalars(select(Plugin).order_by(Plugin.deployed_at.desc()))
     return list(rows)
+
+
+def is_plugin_owner(plugin: Plugin, user) -> bool:
+    """当前用户是否该插件 owner(admin 豁免,015 §4.2)。"""
+    from agentplatform.core.auth.dependencies import is_admin
+
+    return user is not None and (
+        is_admin(user) or plugin.owner_id == str(user.id)
+    )
+
+
+def is_plugin_visible(plugin: Plugin, user) -> bool:
+    """全员可见性判定(015 §5,收敛点):active+approved,owner/admin 全量可见。
+
+    未来付费分层(access_tier)只在此处扩展。
+    """
+    from agentplatform.core.auth.dependencies import is_admin
+
+    if user is not None and (is_admin(user) or plugin.owner_id == str(user.id)):
+        return True
+    return (
+        plugin.status == PluginStatus.active
+        and plugin.review_status == PluginReviewStatus.approved
+    )
+
+
+async def set_review(
+    session: AsyncSession,
+    plugin: Plugin,
+    status: PluginReviewStatus,
+    reviewer_id: str,
+    reason: str | None = None,
+) -> Plugin:
+    """审批动作留痕(015 §5);重提/过审清空驳回原因。"""
+    plugin.review_status = status
+    plugin.reviewed_by = reviewer_id
+    plugin.reviewed_at = datetime.now(UTC)
+    plugin.last_review_reason = reason if status == PluginReviewStatus.rejected else None
+    await session.flush()
+    return plugin
 
 
 async def get_plugin(session: AsyncSession, plugin_id: uuid.UUID) -> Plugin | None:

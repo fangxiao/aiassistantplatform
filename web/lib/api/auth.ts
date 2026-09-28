@@ -8,7 +8,7 @@ import { apiGet, apiPost } from "./client";
 export interface AuthUser {
   id: string;
   email: string;
-  role: "user" | "developer";
+  role: "user" | "developer" | "admin";
   created_at: string;
 }
 

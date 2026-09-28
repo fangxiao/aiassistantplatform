@@ -1,6 +1,8 @@
-"""用户 ORM 模型(设计 004 §users)。
+"""用户 ORM 模型(设计 004 §users / 015 §2)。
 
-password_hash 存 bcrypt 哈希,明文不落库;role 为用户/开发者。
+password_hash 存 bcrypt 哈希,明文不落库;role 为用户/开发者/管理员,
+层级制 admin ⊃ developer ⊃ user(ADR 0008);disabled_at 非空即禁用
+(登录与令牌校验均拒绝)。
 """
 
 import uuid
@@ -15,10 +17,11 @@ from agentplatform.core.db.base import Base
 
 
 class UserRole(str, Enum):
-    """用户角色。"""
+    """用户角色(层级:admin ⊃ developer ⊃ user)。"""
 
     user = "user"
     developer = "developer"
+    admin = "admin"
 
 
 class User(Base):
@@ -40,4 +43,8 @@ class User(Base):
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(UTC),
+    )
+    # 禁用时间(非空即禁用;015 §2):登录/token 校验拒绝
+    disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )

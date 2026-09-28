@@ -48,6 +48,15 @@ async def lifespan(app: FastAPI):
             await seed_builtin(db)
     except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
         logger.warning("内置资源补种跳过: %s", exc)
+    # T20.2 用户体系 bootstrap:首个 admin 幂等引导(未配置 INITIAL_ADMIN_EMAIL 跳过)
+    from agentplatform.core.auth.service import ensure_initial_admin
+
+    try:
+        async with _DbSession() as db:
+            await ensure_initial_admin(db)
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
+        logger.warning("管理员 bootstrap 跳过: %s", exc)
     await kb_pipeline.start_worker()
     # M13:连接器轮询调度器(启动即扫一轮,重启恢复;设计 009 §6)
     from agentplatform.core.kb.connectors import scheduler as connector_scheduler

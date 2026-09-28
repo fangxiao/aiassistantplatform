@@ -645,14 +645,30 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     import httpx
 
     print(f"🚀 正在向平台服务部署插件 ({target}/api/plugins/deploy)...")
+    # 平台已收紧为登录部署(015 §4.2,deploy 必须 developer);令牌与远程调试同源
+    from agentplatform.cli.dev import _load_dev_token
+
+    headers = {}
+    token = _load_dev_token(target)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    else:
+        print("⚠️  未配置平台令牌(export AGENTPLATFORM_TOKEN 或 ~/.agentplatform/config.json),将无法部署。")
     try:
         resp = httpx.post(
             f"{target}/api/plugins/deploy",
             json=manifest,
+            headers=headers,
             timeout=30,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"部署失败(网络): {exc}")
+        return 1
+    if resp.status_code == 401:
+        print("部署失败: 未认证。请先 export AGENTPLATFORM_TOKEN=\"<平台 JWT>\"(Web 登录后 /auth/me 可见)。")
+        return 1
+    if resp.status_code == 403:
+        print("部署失败: 当前账号无开发者权限,请联系平台管理员分配 developer 角色。")
         return 1
     if resp.status_code != 201:
         print(f"部署失败: {resp.status_code} {resp.text}")

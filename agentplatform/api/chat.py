@@ -37,6 +37,8 @@ from agentplatform.core.message.service import (
     message_text,
     save_assistant_message,
 )
+from agentplatform.core.plugin.loader import is_plugin_visible
+from agentplatform.core.plugin.model import Plugin
 from agentplatform.core.session.model import Session
 from agentplatform.core.session.service import (
     create_session,
@@ -108,7 +110,14 @@ async def create_chat_session(
     session: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_user),
 ) -> SessionOut:
-    """创建会话(关联插件助手);response_model 负责序列化。"""
+    """创建会话(关联插件助手);未过审助手仅 owner/admin 可开(015 §5)。"""
+    if payload.plugin_id is not None:
+        plugin = await session.get(Plugin, payload.plugin_id)
+        if plugin is not None and not is_plugin_visible(plugin, user):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"助手不存在或未启用: {payload.plugin_id}"},
+            )
     mounted = await _validate_mounted_kbs(session, payload.mounted_kb_ids, user)
     mounted = await _with_default_shared_kb(session, mounted, user)
     row = await create_session(

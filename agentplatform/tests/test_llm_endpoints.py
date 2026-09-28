@@ -27,7 +27,7 @@ ENDPOINT = LlmEndpointCreate(
 
 @pytest.fixture
 async def _dev_override(client, session):
-    """admin 端点已收紧 developer,旧用例以 developer 身份执行。"""
+    """平台端点已收紧 admin(015 §4.2),旧用例以 admin 身份执行。"""
     from agentplatform.core.auth.dependencies import get_current_user
     from agentplatform.core.auth.model import UserRole
     from agentplatform.core.auth.service import create_user as cu
@@ -36,8 +36,8 @@ async def _dev_override(client, session):
 
     orig = _app.dependency_overrides.get(get_current_user)
     user = orig() if orig else None
-    if user is None or user.role != UserRole.developer:
-        user = await cu(session, f"dev-{_u.uuid4()}@t.dev", "p", UserRole.developer)
+    if user is None or user.role != UserRole.admin:
+        user = await cu(session, f"admin-{_u.uuid4()}@t.dev", "p", UserRole.admin)
     _app.dependency_overrides[get_current_user] = lambda: user
     yield
     if orig is not None:

@@ -9,7 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from agentplatform.core.plugin.manifest import infer_display_name
-from agentplatform.core.plugin.model import Plugin, PluginStatus
+from agentplatform.core.plugin.model import Plugin, PluginReviewStatus, PluginStatus
 
 
 class PluginOut(BaseModel):
@@ -18,6 +18,9 @@ class PluginOut(BaseModel):
     display_name: str | None = None
     version: str
     status: PluginStatus
+    review_status: PluginReviewStatus
+    last_review_reason: str | None = None
+    owner_id: str | None = None
     description: str | None = None
     model: str | None = None
     mounted_kb_ids: list[uuid.UUID] = []
@@ -34,6 +37,9 @@ def to_out(plugin: Plugin) -> PluginOut:
         display_name=display_name,
         version=plugin.version,
         status=plugin.status,
+        review_status=plugin.review_status,
+        last_review_reason=plugin.last_review_reason,
+        owner_id=plugin.owner_id,
         description=m.get("description"),
         model=m.get("model"),
         mounted_kb_ids=[uuid.UUID(k) for k in (plugin.mounted_kb_ids or [])],

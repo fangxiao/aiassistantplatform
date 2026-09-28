@@ -34,6 +34,8 @@ export interface SessionInfo {
   updated_at?: string;
 }
 
+export type ReviewStatus = "pending_review" | "approved" | "rejected";
+
 export interface AssistantInfo {
   id: string;
   name: string;
@@ -44,6 +46,8 @@ export interface AssistantInfo {
   model: string | null;
   depends_on: string[];
   mounted_kb_ids?: string[]; // 助手运行时挂载的已发布知识库 (T12.17)
+  review_status?: ReviewStatus; // 发布审批(owner/admin 可见未过审项,M20)
+  last_review_reason?: string | null;
   deployed_at: string;
   manifest: Record<string, any>;
 }
@@ -54,10 +58,21 @@ export interface PluginInfo {
   display_name?: string | null;
   version: string;
   status: "active" | "disabled";
+  review_status?: ReviewStatus;
+  last_review_reason?: string | null;
   owner_id: string | null;
   mounted_kb_ids?: string[]; // 助手运行时挂载的已发布知识库 (T12.17)
   deployed_at: string;
   manifest: Record<string, any>;
+}
+
+export interface UserAdminInfo {
+  id: string;
+  email: string;
+  nickname?: string | null;
+  role: "user" | "developer" | "admin";
+  disabled: boolean;
+  created_at: string;
 }
 
 export interface LlmEndpointInfo {

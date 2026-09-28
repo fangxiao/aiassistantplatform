@@ -1,6 +1,6 @@
 """LLM 端点管理 API(设计 005 §7)。
 
-需登录访问(M1 认证接入);MVP 不做细粒度 role 限制,登录即可管理端点。
+平台级配置,仅 admin(require_admin,ADR 0008);个人模型走 /llm/my-models。
 """
 
 import uuid
@@ -8,8 +8,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentplatform.core.auth.dependencies import get_current_user
-from agentplatform.core.auth.model import User, UserRole
+from agentplatform.core.auth.dependencies import require_admin
+from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.llm.schemas import (
@@ -29,11 +29,9 @@ router = APIRouter(prefix="/admin/llm-endpoints", tags=["admin"])
 @router.get("", response_model=list[LlmEndpointOut])
 async def get_endpoints(
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ) -> list[LlmEndpoint]:
-    """平台共享端点列表(developer);response_model 负责脱敏序列化。"""
-    if user.role != UserRole.developer:
-        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "平台端点仅 developer 可管理;个人模型请在「我的模型」添加"})
+    """平台共享端点列表(仅 admin);response_model 负责脱敏序列化。"""
     return await list_endpoints(session)
 
 
@@ -41,11 +39,9 @@ async def get_endpoints(
 async def post_endpoint(
     payload: LlmEndpointCreate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ) -> LlmEndpoint:
-    """新增平台共享端点(developer);api_key 加密存储。"""
-    if user.role != UserRole.developer:
-        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "仅 developer 可管理平台端点"})
+    """新增平台共享端点(仅 admin);api_key 加密存储。"""
     endpoint = await create_endpoint(session, **payload.model_dump())
     await session.commit()
     return endpoint
@@ -56,9 +52,9 @@ async def patch_endpoint(
     endpoint_id: uuid.UUID,
     payload: LlmEndpointUpdate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ) -> LlmEndpoint:
-    """更新端点(部分字段);is_default=true 会抢占默认。"""
+    """更新端点(部分字段,仅 admin);is_default=true 会抢占默认。"""
     endpoint = await update_endpoint(
         session, endpoint_id, **payload.model_dump(exclude_unset=True)
     )

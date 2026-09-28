@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentplatform.core.auth.dependencies import get_current_user
-from agentplatform.core.auth.model import User, UserRole
+from agentplatform.core.auth.dependencies import get_current_user, is_admin
+from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
 from agentplatform.core.notify import service as notify_service
 from agentplatform.core.notify.model import NotificationChannel
@@ -81,9 +81,9 @@ async def create_channel(
     _validate(payload.type, payload.config)
     owner = None
     if payload.platform:
-        if user.role != UserRole.developer:
+        if not is_admin(user):
             raise HTTPException(
-                status_code=403, detail={"code": "forbidden", "message": "平台级通道仅 developer 可创建"}
+                status_code=403, detail={"code": "forbidden", "message": "平台级通道仅管理员可创建"}
             )
     else:
         owner = str(user.id)
@@ -106,8 +106,8 @@ async def delete_channel(
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "通道不存在"})
     is_platform = row.user_id is None
-    if is_platform and user.role != UserRole.developer:
-        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "平台级通道仅 developer 可删除"})
+    if is_platform and not is_admin(user):
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "平台级通道仅管理员可删除"})
     if not is_platform and row.user_id != str(user.id):
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "通道不存在"})
     row.enabled = False  # 软删:任务引用不断,发送时跳过

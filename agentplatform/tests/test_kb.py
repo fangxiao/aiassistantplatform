@@ -116,11 +116,12 @@ async def test_shared_kb_member_permissions(session, dev_user, normal_user):
 
 
 def _act_as(client, user) -> None:
-    """切换 client 的当前身份(client fixture 覆盖了 get_current_user)。"""
-    from agentplatform.core.auth.dependencies import get_current_user
+    """切换 client 的当前身份(get_current_user 与 get_optional_current_user 一并覆盖)。"""
+    from agentplatform.core.auth.dependencies import get_current_user, get_optional_current_user
     from agentplatform.main import app
 
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_optional_current_user] = lambda: user
 
 
 async def test_shared_kb_not_publishable_and_public_manage_by_developer(session, client, dev_user, normal_user):
@@ -524,9 +525,13 @@ async def test_api_kb_flow_and_mount_isolation(session, client, dev_user, normal
     )
     assert r4.status_code == 201, r4.text
 
-    # client fixture 默认 user 角色,不可发布 public
-    r5 = await client.post(f"/api/kb/kbs/{own_kb_id}/publish")
-    assert r5.status_code == 403
+    # 普通用户不可发布 public(015 §4.1:发布需 developer,admin 层级放行)
+    # normal_user 自建 private 库(过可见性)后发布 → 命中角色门槛 403
+    _act_as(client, normal_user)
+    r5 = await client.post("/api/kb/kbs", json={"name": "n", "slug": f"u_{uuid.uuid4().hex[:8]}"})
+    assert r5.status_code == 201, r5.text
+    r6 = await client.post(f"/api/kb/kbs/{r5.json()['id']}/publish")
+    assert r6.status_code == 403
 
 
 async def test_api_from_text_and_can_write(session, client, dev_user, normal_user):

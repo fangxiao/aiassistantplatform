@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     # 安全收敛(2026-09-17)
     file_serve_roots: list[str] = []  # /api/files 允许访问的额外根目录(绝对路径);默认仅 cwd 与 ~/.agentplatform
     allow_self_promote_developer: bool = False  # 注册接口是否允许自选 developer 角色(仅本地开发开)
+    # 用户体系 bootstrap(T20.2,设计 015 §6):首个 admin 幂等引导
+    initial_admin_email: str = ""  # 空=跳过 bootstrap
+    initial_admin_password: str = ""  # 空=创建时随机生成并日志提示
     # 联网搜索(M15 P1):provider=tavily(需 WEB_SEARCH_API_KEY)/searxng(自托管,免费无限)
     web_search_api_key: str = ""
     web_search_provider: str = "tavily"

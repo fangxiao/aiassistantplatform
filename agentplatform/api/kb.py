@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentplatform.core.auth.dependencies import get_current_user
-from agentplatform.core.auth.model import User, UserRole
+from agentplatform.core.auth.dependencies import get_current_user, is_developer
+from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
 from agentplatform.core.kb import pipeline as kb_pipeline
 from agentplatform.core.kb import service as kb_service
@@ -450,7 +450,7 @@ async def publish_kb(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> KbOut:
-    """发布公共库版本(仅 developer 角色;bump semver + 登记 skill_tools kind=kb)。"""
+    """发布公共库版本(仅 developer,admin 层级放行;bump semver + 登记 skill_tools kind=kb)。"""
     kb = await _get_visible_kb(kb_id, db, user)
     if kb.visibility == KbVisibility.shared:
         # shared 是团队资产,不进注册表(008 §12.1);防止误操作把团队库公开
@@ -458,7 +458,7 @@ async def publish_kb(
             status_code=400,
             detail={"code": "kb_error", "message": "共享库不参与发布;如需公开请新建 public 库迁移内容"},
         )
-    if user.role != UserRole.developer:
+    if not is_developer(user):
         raise HTTPException(
             status_code=403, detail={"code": "forbidden", "message": "仅 developer 角色可发布公共知识库"}
         )

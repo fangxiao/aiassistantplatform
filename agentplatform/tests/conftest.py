@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from agentplatform.core.auth.dependencies import get_current_user
-from agentplatform.core.auth.model import User  # noqa: F401  表注册进 metadata
+from agentplatform.core.auth.model import User, UserRole  # noqa: F401  表注册进 metadata
 from agentplatform.core.auth.service import create_access_token, create_user
 from agentplatform.core.db.base import Base
 from agentplatform.core.db.session import get_session
@@ -95,10 +95,12 @@ async def session(db_engine) -> AsyncIterator[AsyncSession]:
 async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
     """API 测试客户端:get_session 依赖覆盖为测试库会话。
 
-    同时覆盖 get_current_user 固定返回一个测试用户,使现有业务 API 测试
-    默认携带合法身份;认证本身的 401/注册/登录见 test_auth_api。
+    同时覆盖 get_current_user 固定返回一个 admin 测试用户(层级制下同时满足
+    require_admin/require_developer,015 §3),使现有业务 API 测试默认携带
+    合法身份;认证本身的 401/注册/登录见 test_auth_api,角色矩阵见
+    test_user_roles_api(低权限用例自建身份并切换 override)。
     """
-    user = await create_user(session, f"unit-{id(session)}@test.dev", "password123")
+    user = await create_user(session, f"unit-{id(session)}@test.dev", "password123", UserRole.admin)
     await session.commit()
 
     app.dependency_overrides[get_session] = lambda: session

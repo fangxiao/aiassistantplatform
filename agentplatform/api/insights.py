@@ -1,4 +1,9 @@
-"""洞察 API(产品成熟度①③):成本汇总 + 管理面板数据。"""
+"""洞察 API(产品成熟度①③):成本汇总 + 管理面板数据。
+
+角色拆两档(015 §4.1,ADR 0008):
+- admin:全平台口径(/insights/costs 无过滤、管理面板全部端点);
+- developer:仅自己插件口径(/insights/costs 按 owner_id 过滤)。
+"""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -8,8 +13,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentplatform.core.auth.dependencies import get_current_user
-from agentplatform.core.auth.model import User, UserRole
+from agentplatform.core.auth.dependencies import (
+    get_current_user,
+    is_admin,
+    is_developer,
+    require_admin,
+)
+from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
 from agentplatform.core.message.model import Message
 from agentplatform.core.plugin.model import Plugin
@@ -19,11 +29,10 @@ from agentplatform.core.session.model import Session
 router = APIRouter(prefix="/insights", tags=["insights"])
 
 
-def _ensure_developer(user: User) -> None:
-    if user.role != UserRole.developer:
-        raise HTTPException(
-            status_code=403, detail={"code": "forbidden", "message": "仅 developer 角色可访问"}
-        )
+async def _own_plugin_ids(db: AsyncSession, user: User) -> list[uuid.UUID]:
+    """developer 自己名下的插件 id 集合(insights 范围过滤)。"""
+    rows = await db.scalars(select(Plugin.id).where(Plugin.owner_id == str(user.id)))
+    return list(rows)
 
 
 class CostSummary(BaseModel):
@@ -42,21 +51,31 @@ async def cost_summary(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> CostSummary:
-    """成本汇总(全平台,developer):对话/定时任务 token,按日/助手/任务分布。"""
-    _ensure_developer(user)
+    """成本汇总:admin 全平台;developer 仅自己插件(对话/定时任务 token,按日/助手/任务分布)。"""
+    if not is_developer(user):
+        raise HTTPException(
+            status_code=403, detail={"code": "forbidden", "message": "仅管理员或开发者可访问"}
+        )
+    scope_own: list[uuid.UUID] | None = None if is_admin(user) else await _own_plugin_ids(db, user)
+    own_sessions = None
+    own_tasks = None
+    if scope_own is not None:
+        own_sessions = select(Session.id).where(Session.plugin_id.in_(scope_own or [uuid.uuid4()]))
+        own_tasks = select(ScheduledTask.id).where(
+            ScheduledTask.plugin_id.in_(scope_own or [uuid.uuid4()])
+        )
     since = datetime.now(UTC) - timedelta(days=days)
 
     # 对话 token:assistant 消息 join sessions 取 plugin 名称
-    chat_total = await db.scalar(
-        select(func.coalesce(func.sum(Message.tokens), 0)).where(Message.role == "assistant")
-    ) or 0
-    chat_7d = await db.scalar(
-        select(func.coalesce(func.sum(Message.tokens), 0)).where(
-            Message.role == "assistant", Message.created_at >= datetime.now(UTC) - timedelta(days=7)
-        )
-    ) or 0
+    chat_stmt = select(func.coalesce(func.sum(Message.tokens), 0)).where(Message.role == "assistant")
+    chat_7d_stmt = chat_stmt.where(Message.created_at >= datetime.now(UTC) - timedelta(days=7))
+    if own_sessions is not None:
+        chat_stmt = chat_stmt.where(Message.session_id.in_(own_sessions))
+        chat_7d_stmt = chat_7d_stmt.where(Message.session_id.in_(own_sessions))
+    chat_total = await db.scalar(chat_stmt) or 0
+    chat_7d = await db.scalar(chat_7d_stmt) or 0
 
-    by_day_rows = await db.execute(
+    by_day_stmt = (
         select(
             func.date_trunc("day", Message.created_at).label("d"),
             func.sum(Message.tokens).label("t"),
@@ -65,9 +84,12 @@ async def cost_summary(
         .group_by("d")
         .order_by("d")
     )
+    if own_sessions is not None:
+        by_day_stmt = by_day_stmt.where(Message.session_id.in_(own_sessions))
+    by_day_rows = await db.execute(by_day_stmt)
     by_day = [{"date": str(r[0].date()), "tokens": int(r[1] or 0)} for r in by_day_rows]
 
-    by_asst_rows = await db.execute(
+    by_asst_stmt = (
         select(
             func.coalesce(Plugin.name, "平台通用助手").label("name"),
             func.sum(Message.tokens).label("t"),
@@ -80,12 +102,13 @@ async def cost_summary(
         .order_by(func.sum(Message.tokens).desc().nullslast())
         .limit(10)
     )
+    if own_sessions is not None:
+        by_asst_stmt = by_asst_stmt.where(Session.plugin_id.in_(scope_own or [uuid.uuid4()]))
+    by_asst_rows = await db.execute(by_asst_stmt)
     by_assistant = [{"name": r[0], "tokens": int(r[1] or 0), "sessions": int(r[2])} for r in by_asst_rows]
 
-    task_total = await db.scalar(
-        select(func.coalesce(func.sum(TaskRun.tokens), 0))
-    ) or 0
-    by_task_rows = await db.execute(
+    task_total_stmt = select(func.coalesce(func.sum(TaskRun.tokens), 0))
+    by_task_stmt = (
         select(
             func.coalesce(ScheduledTask.name, "(已删除任务)").label("name"),
             func.sum(TaskRun.tokens).label("t"),
@@ -96,6 +119,11 @@ async def cost_summary(
         .order_by(func.sum(TaskRun.tokens).desc().nullslast())
         .limit(10)
     )
+    if own_tasks is not None:
+        task_total_stmt = task_total_stmt.where(TaskRun.task_id.in_(own_tasks))
+        by_task_stmt = by_task_stmt.where(TaskRun.task_id.in_(own_tasks))
+    task_total = await db.scalar(task_total_stmt) or 0
+    by_task_rows = await db.execute(by_task_stmt)
     by_task = [{"name": r[0], "tokens": int(r[1] or 0), "runs": int(r[2])} for r in by_task_rows]
 
     return CostSummary(
@@ -122,10 +150,9 @@ class AdminUserRow(BaseModel):
 @router.get("/admin/users", response_model=list[AdminUserRow])
 async def admin_users(
     db: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> list[AdminUserRow]:
-    """用户列表与用量(管理面板,developer)。"""
-    _ensure_developer(user)
+    """用户列表与用量(管理面板,仅 admin)。"""
     from agentplatform.core.auth.model import User as UserModel
 
     users = list(await db.scalars(select(UserModel).order_by(UserModel.created_at.desc())))
@@ -164,10 +191,9 @@ class PlatformOverview(BaseModel):
 @router.get("/admin/overview", response_model=PlatformOverview)
 async def platform_overview(
     db: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> PlatformOverview:
-    """平台总览卡片(管理面板)。"""
-    _ensure_developer(user)
+    """平台总览卡片(管理面板,仅 admin)。"""
     from agentplatform.core.auth.model import User as UserModel
     from agentplatform.core.kb.model import KbDocument, KbDocumentStatus, KnowledgeBase
 
@@ -202,10 +228,9 @@ class ActionLogRow(BaseModel):
 async def action_logs(
     limit: int = 50,
     db: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> list[ActionLogRow]:
-    """动作审计记录(产品成熟度④/M17 P1):http_request 执行/拒绝/取消留痕。"""
-    _ensure_developer(user)
+    """动作审计记录(产品成熟度④/M17 P1,仅 admin):http_request 执行/拒绝/取消留痕。"""
     from agentplatform.core.agent.action_log import ActionLog
 
     rows = await db.scalars(

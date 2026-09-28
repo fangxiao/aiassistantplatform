@@ -17,6 +17,7 @@ from agentplatform.api import (
     diagnostics,
     files,
     insights,
+    admin_users,
     health,
     kb,
     llm_user,
@@ -37,6 +38,7 @@ api_router.include_router(auth.router)
 api_router.include_router(assistants.router)
 api_router.include_router(registry.router)
 api_router.include_router(admin_llm.router)
+api_router.include_router(admin_users.router)
 api_router.include_router(plugins.router)
 api_router.include_router(chat.router)
 api_router.include_router(specs.router)

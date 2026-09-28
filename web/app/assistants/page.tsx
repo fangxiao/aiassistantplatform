@@ -17,6 +17,20 @@ export default function AssistantsPage() {
   const [opsTarget, setOpsTarget] = useState<{ assistant: AssistantInfo; url: string; stats?: Record<string, unknown> } | null>(null);
   const [opsBusy, setOpsBusy] = useState(false);
 
+  const resubmit = async (assistant: AssistantInfo) => {
+    try {
+      setOpsBusy(true);
+      await apiFetch(`/plugins/${assistant.id}/resubmit`, { method: "POST" });
+      setAssistants((prev) =>
+        prev.map((a) => (a.id === assistant.id ? { ...a, review_status: "pending_review", last_review_reason: null } : a)),
+      );
+    } catch (err) {
+      alert(`重新提交失败: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
   const publishAccess = async (assistant: AssistantInfo) => {
     try {
       setOpsBusy(true);
@@ -143,6 +157,16 @@ export default function AssistantsPage() {
                           <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
                             v{item.version}
                           </span>
+                          {item.review_status === "pending_review" && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
+                              待审核
+                            </span>
+                          )}
+                          {item.review_status === "rejected" && (
+                            <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 border border-rose-200">
+                              已驳回
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -156,6 +180,18 @@ export default function AssistantsPage() {
                   <p className="mt-3 text-xs leading-relaxed text-slate-600 line-clamp-3">
                     {item.description || "暂无描述"}
                   </p>
+
+                  {item.review_status === "rejected" && item.last_review_reason && (
+                    <p className="mt-2 rounded-lg bg-rose-50 border border-rose-100 px-2.5 py-1.5 text-[10px] text-rose-700">
+                      驳回原因:{item.last_review_reason}
+                    </p>
+                  )}
+
+                  {item.review_status === "pending_review" && (
+                    <p className="mt-2 rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-1.5 text-[10px] text-amber-700">
+                      审核通过前仅自己与管理员可见
+                    </p>
+                  )}
 
                   {item.depends_on && item.depends_on.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1">
@@ -174,15 +210,28 @@ export default function AssistantsPage() {
                 <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
                   <span>作者: {item.author || "官方平台"}</span>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void publishAccess(item)}
-                      disabled={opsBusy}
-                      title="生成独立访问链接(给你的用户直接使用)"
-                      className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition disabled:opacity-40"
-                    >
-                      🔗 独立链接
-                    </button>
+                    {item.review_status === "rejected" && (
+                      <button
+                        type="button"
+                        onClick={() => void resubmit(item)}
+                        disabled={opsBusy}
+                        title="按驳回原因修改后重新提交审核"
+                        className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-medium text-rose-600 hover:bg-rose-100 transition disabled:opacity-40"
+                      >
+                        ↻ 重新提交
+                      </button>
+                    )}
+                    {item.review_status === "approved" && (
+                      <button
+                        type="button"
+                        onClick={() => void publishAccess(item)}
+                        disabled={opsBusy}
+                        title="生成独立访问链接(给你的用户直接使用)"
+                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition disabled:opacity-40"
+                      >
+                        🔗 独立链接
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleStartChat(item)}

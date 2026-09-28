@@ -79,8 +79,44 @@ async def create_user(
 async def authenticate(
     session: AsyncSession, email: str, password: str
 ) -> User | None:
-    """校验登录;返回用户或 None(不区分"邮箱不存在/密码错误",避免用户枚举)。"""
+    """校验登录;返回用户或 None(不区分"邮箱不存在/密码错误",避免用户枚举)。
+
+    禁用账号(disabled_at 非空,015 §2)一律拒绝,同样不区分凭据对错。
+    """
     user = await get_user_by_email(session, email.lower().strip())
-    if user is None or not verify_password(password, user.password_hash):
+    if user is None or user.disabled_at is not None:
+        return None
+    if not verify_password(password, user.password_hash):
         return None
     return user
+
+
+async def ensure_initial_admin(session: AsyncSession) -> None:
+    """bootstrap 首个 admin(015 §6):INITIAL_ADMIN_EMAIL 存在则升级,否则创建。
+
+    幂等:已是 admin 无操作;未配置环境变量则跳过。仅创建场景用
+    INITIAL_ADMIN_PASSWORD,未提供时随机生成并日志提示(提示一次性)。
+    """
+    import logging
+    import secrets
+
+    from agentplatform.config import settings
+
+    if not settings.initial_admin_email:
+        return
+    log = logging.getLogger(__name__)
+    email = settings.initial_admin_email.lower().strip()
+    user = await get_user_by_email(session, email)
+    if user is None:
+        password = settings.initial_admin_password or secrets.token_urlsafe(16)
+        user = await create_user(session, email, password, UserRole.admin)
+        if settings.initial_admin_password:
+            log.info("bootstrap: 已创建初始管理员 %s", email)
+        else:
+            log.warning("bootstrap: 已创建初始管理员 %s,临时密码: %s(请尽快登录修改)", email, password)
+    elif user.role != UserRole.admin:
+        user.role = UserRole.admin
+        log.info("bootstrap: 已将既有用户 %s 升级为 admin", email)
+    else:
+        return
+    await session.flush()

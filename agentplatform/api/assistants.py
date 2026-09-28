@@ -17,6 +17,7 @@ from agentplatform.core.auth.dependencies import (
 )
 from agentplatform.core.auth.model import User
 from agentplatform.core.db.session import get_session
+from agentplatform.core.plugin.loader import is_plugin_visible
 from agentplatform.core.plugin.manifest import infer_display_name
 from agentplatform.core.plugin.model import Plugin, PluginStatus
 
@@ -35,6 +36,7 @@ class AssistantOut(BaseModel):
     model: str | None = None
     depends_on: list[str] = []
     mounted_kb_ids: list[uuid.UUID] = []
+    review_status: str = "approved"  # 审批标记(owner/admin 可见未过审项,前端徽标用)
     deployed_at: datetime
     manifest: dict[str, Any]
 
@@ -52,6 +54,7 @@ def _plugin_to_assistant(p: Plugin) -> AssistantOut:
         model=manifest.get("model"),
         depends_on=manifest.get("depends_on", []),
         mounted_kb_ids=[uuid.UUID(k) for k in (p.mounted_kb_ids or [])],
+        review_status=getattr(p.review_status, "value", "approved"),
         deployed_at=p.deployed_at,
         manifest=manifest,
     )
@@ -63,13 +66,14 @@ async def list_assistants(
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_current_user),
 ) -> list[AssistantOut]:
-    """获取可用助手列表(ADR 0007:name 全局唯一,一个助手一行,version 为最近部署标签)。"""
+    """获取可用助手列表(ADR 0007:name 全局唯一;ADR 0008:全员可见 = active+approved,
+    owner/admin 全量含未过审——可见性判断收敛于 loader.is_plugin_visible,015 §5)。"""
     stmt = (
         select(Plugin)
         .where(Plugin.status == PluginStatus.active)
         .order_by(Plugin.deployed_at.desc())
     )
-    rows = list((await session.scalars(stmt)).all())
+    rows = [p for p in (await session.scalars(stmt)).all() if is_plugin_visible(p, user)]
 
     results = [_plugin_to_assistant(p) for p in rows]
     if query:
@@ -91,9 +95,9 @@ async def get_assistant_detail(
     user: User | None = Depends(get_optional_current_user),
 ) -> AssistantOut:
 
-    """获取单个助手详情。"""
+    """获取单个助手详情(未过审仅 owner/admin 可见,015 §5)。"""
     plugin = await session.get(Plugin, assistant_id)
-    if plugin is None or plugin.status != PluginStatus.active:
+    if plugin is None or plugin.status != PluginStatus.active or not is_plugin_visible(plugin, user):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"助手不存在或未启用: {assistant_id}"},

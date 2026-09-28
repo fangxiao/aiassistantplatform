@@ -31,7 +31,18 @@ async def test_assistants_workflow(
         skills=[],
         tools=[],
     )
-    await deploy_plugin(session, manifest)
+    plugin = await deploy_plugin(session, manifest)
+    await session.commit()
+
+    # ADR 0008:部署默认 pending_review,未过审不出现在广场
+    res = await client.get("/api/assistants")
+    assert res.status_code == 200
+    assert not any(a["name"] == "test-assistant" for a in res.json())
+
+    from agentplatform.core.plugin.loader import set_review
+    from agentplatform.core.plugin.model import PluginReviewStatus
+
+    await set_review(session, plugin, PluginReviewStatus.approved, "admin")
     await session.commit()
 
     res = await client.get("/api/assistants")
