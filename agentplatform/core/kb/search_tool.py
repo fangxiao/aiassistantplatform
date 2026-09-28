@@ -188,9 +188,13 @@ async def _rewrite_query(db: AsyncSession, query: str, history: list[dict]) -> s
         from agentplatform.core.chat.service import make_llm_client
 
         client = await make_llm_client(db, None)
-        parts: list[str] = []
-        async for ev in asyncio.wait_for(
-            _stream(
+
+        # 修复(20260928-1023):asyncio.wait_for 不能直接包 async generator
+        # (协程从未被等待→RuntimeWarning,且超时保护实际未生效);
+        # 把流式消费收进内部协程再整体限时。
+        async def _collect() -> str:
+            parts: list[str] = []
+            async for ev in _stream(
                 client,
                 [
                     {
@@ -205,12 +209,12 @@ async def _rewrite_query(db: AsyncSession, query: str, history: list[dict]) -> s
                     }
                 ],
                 None,
-            ),
-            timeout=8,
-        ):
-            if ev.type == "delta" and ev.text:
-                parts.append(ev.text)
-        out = "".join(parts).strip().strip('"“”')
+            ):
+                if ev.type == "delta" and ev.text:
+                    parts.append(ev.text)
+            return "".join(parts)
+
+        out = (await asyncio.wait_for(_collect(), timeout=8)).strip().strip('"“”')
         return out[:200] or None
     except Exception:  # noqa: BLE001  改写失败回退原 query
         return None
