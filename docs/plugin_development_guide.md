@@ -172,6 +172,31 @@ Agent 对**多步工具编排**的执行遵循度是概率性的:同一份含"�
 
 ---
 
+## 🧰 4.2 插件环境搭建与网络坑(实战回流)
+
+**红线提醒**:插件环境只允许 `agentplatform`(SDK/CLI)+ 自身声明依赖,
+严禁安装平台服务端依赖(sqlalchemy/asyncpg/fastapi/redis 等)。
+
+**标准姿势(SDK 独立 wheel 落地前的过渡方案)**:`/api/specs/package.tar.gz`
+当前是完整服务端包,直接安装会把服务端依赖拖进插件环境(踩红线)——
+SDK 部分(`agentplatform/sdk/`)实际纯 stdlib 零依赖,用 `--no-deps` 只装包体:
+
+```bash
+python3 -m venv .venv
+uv pip install --python .venv/bin/python --no-deps http://localhost:8000/api/specs/package.tar.gz
+uv pip install --python .venv/bin/python pytest pyyaml <插件自身依赖>
+```
+
+**PyPI 直连超时的镜像兜底**(files.pythonhosted.org 抖动时 pip/uv 默认
+重试都熬不过,实测切换后秒装):
+
+```bash
+UV_HTTP_TIMEOUT=120 uv pip install --python .venv/bin/python \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple pytest pyyaml
+```
+
+> 依赖下载超时先切国内镜像,别在网络抖动上空转(实测代价:半小时)。
+
 ## 🚀 5. AI-Native CLI 全流程命令速查
 
 ```bash
