@@ -210,6 +210,19 @@ async def stream_agent(
                 await skill_delta_queue.put(e.text)
         return "".join(chunks)
 
+    async def execute(resource: SkillTool | None, arguments: str) -> str:
+        """执行入口:包装 _execute_inner,采集工具产出的 URL(新鲜度校验用)。"""
+        result = await _execute_inner(resource, arguments)
+        if resource is not None and resource.id and resource.kind == SkillToolKind.tool:
+            import re as _re
+
+            urls = set(
+                _re.findall(r'https?://[^\s"<>]+|/api/files/raw\?[^\s"<>]+', result or "")
+            )
+            if urls:
+                _run_state.produced_urls.setdefault(resource.id, set()).update(urls)
+        return result
+
     # M17 P1:写操作确认框积攒区(执行后由 block_meta 通道下发)
     pending_confirm_blocks: list[dict] = []
     # T18.3 编排保障:本轮已执行的 tool/skill id(终答前 required_tools 校验用)
@@ -217,13 +230,21 @@ async def stream_agent(
     executed_skill_ids: set[str] = set()
     orchestration_nudged = False
 
-    async def execute(resource: SkillTool | None, arguments: str) -> str:
+    class _RunState:
+        """跨内部函数共享的可变状态(produced_urls: tool id → 其结果产出的 URL 集合)。"""
+
+        produced_urls: dict[str, set[str]] = {}
+
+    _run_state = _RunState()
+
+    async def _execute_inner(resource: SkillTool | None, arguments: str) -> str:
         """执行单个 tool_call,任何异常都回填为文本(让 LLM 可自纠)。"""
         if resource is None:
             return "错误:未找到该资源"
         args = _parse_args(arguments)
         if resource.id:
             (executed_skill_ids if resource.kind == SkillToolKind.skill else executed_tool_ids).add(resource.id)
+
         try:
             if resource.id == KB_SEARCH_TOOL_ID:
                 # 知识库检索:需要会话允许范围,不走通用 executor(设计 008 §3.3);
@@ -345,8 +366,9 @@ async def stream_agent(
             calls = _extract_text_tool_calls(accumulated_text, resources)
 
         if not calls:
-            # T18.3 编排保障:已执行的 skill 若声明了 required_tools 且本轮未覆盖,
-            # 注入一次系统校验提示并续跑补调(有界一次;writewx 七轮实测配图触发 3/7)
+            # T18.3 编排保障:已执行 skill 的 required_tools 终答前校验;两类违规同款有界补调(一次):
+            # ① 缺失——必经工具本轮未被调用;② 不新鲜——已调用但产物 URL 未嵌入正文
+            #    (复用历史旧图等形态,writewx 20260928-1201 验收发现)
             if not orchestration_nudged:
                 required: set[str] = set()
                 for sid in executed_skill_ids:
@@ -355,22 +377,34 @@ async def stream_agent(
                     if isinstance(rt, list):
                         required |= {str(x) for x in rt}
                 missing = required - executed_tool_ids
-                if missing:
+                stale: set[str] = set()
+                if not missing and required and "<img" in accumulated_text.lower():
+                    produced = _run_state.produced_urls
+                    stale = required - {
+                        tid for tid in required
+                        if any(u in accumulated_text for u in produced.get(tid, set()))
+                    }
+                if missing or stale:
                     orchestration_nudged = True
+                    target = sorted(missing or stale)
+                    reason = (
+                        "你的交付遗漏了必经步骤" if missing
+                        else "你的交付未使用必经工具本会话产出的资源(疑似复用旧资源)"
+                    )
                     messages.append(
                         {
                             "role": "user",
                             "content": (
-                                "【系统校验】你的交付遗漏了必经步骤: "
-                                + "、".join(sorted(missing))
-                                + "。请立即真实调用上述工具补齐(严禁只口头声称已完成),"
-                                "补齐后重新给出完整交付内容;若确无法调用,如实说明原因。"
+                                f"【系统校验】{reason}: "
+                                + "、".join(target)
+                                + "。请立即真实调用上述工具并在交付中引用其本次产物"
+                                "(严禁只口头声称或复用旧资源);若确无法调用,如实说明原因。"
                             ),
                         }
                     )
                     yield AgentEvent(
                         type="delta",
-                        text="\n\n*(系统:检测到遗漏必经步骤,已要求助手补齐)*\n\n",
+                        text="\n\n*(系统:检测到交付校验未过,已要求助手补齐)*\n\n",
                     )
                     continue
             # 没有工具调用: 本轮对话流式生成完毕，直接退出

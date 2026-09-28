@@ -151,3 +151,40 @@ class TestOrchestrationGuard:
             not any("系统校验" in (m.get("content") or "") for m in msgs)
             for msgs in client.seen_prompts
         )
+
+    async def test_stale_image_reuse_triggers_freshness_nudge(self, session, monkeypatch) -> None:
+        """必经工具已调用但产物 URL 未嵌入正文(复用历史旧图形态)→ 新鲜度补调。"""
+        import re
+
+        skill = _skill("skill:w", {"required_tools": ["tool:must"]})
+        tool = _tool("tool:must")
+        await _register_rows(session, skill, tool)
+        from agentplatform.core.agent import loop as loop_mod
+
+        async def _fake_skill(res, args, skill_call=None):
+            return "技能执行完成"
+
+        monkeypatch.setattr(loop_mod, "execute_skill", _fake_skill)
+
+        fresh_url = "/api/files/raw?path=/root/.agentplatform/uploads/fresh.png"
+        stale_url = "/api/files/raw?path=/root/.agentplatform/uploads/old.png"
+
+        async def _fake_tool(res, args):
+            return json.dumps({"ok": True, "images": [{"url": fresh_url}]})
+
+        monkeypatch.setattr(loop_mod, "execute_tool", _fake_tool)
+        client = _ScriptedClient([
+            "CALL:skill__w",
+            "CALL:tool__must",
+            f"文章完成 <img src=\"{stale_url}\"> 旧图复用",  # 调了工具但嵌的是旧图 → 新鲜度补调
+            "CALL:tool__must",
+            f"文章完成 <img src=\"{fresh_url}\"> 已用新图",
+        ])
+        result = await run_agent(session, client, resource_ids=[skill.id, tool.id],
+                                 user_message="做交付")
+        assert fresh_url in result.text
+        nudge_rounds = sum(
+            1 for msgs in client.seen_prompts
+            if msgs and "系统校验" in (msgs[-1].get("content") or "")
+        )
+        assert nudge_rounds == 1  # 新鲜度补调恰好一次
