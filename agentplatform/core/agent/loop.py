@@ -212,12 +212,18 @@ async def stream_agent(
 
     # M17 P1:写操作确认框积攒区(执行后由 block_meta 通道下发)
     pending_confirm_blocks: list[dict] = []
+    # T18.3 编排保障:本轮已执行的 tool/skill id(终答前 required_tools 校验用)
+    executed_tool_ids: set[str] = set()
+    executed_skill_ids: set[str] = set()
+    orchestration_nudged = False
 
     async def execute(resource: SkillTool | None, arguments: str) -> str:
         """执行单个 tool_call,任何异常都回填为文本(让 LLM 可自纠)。"""
         if resource is None:
             return "错误:未找到该资源"
         args = _parse_args(arguments)
+        if resource.id:
+            (executed_skill_ids if resource.kind == SkillToolKind.skill else executed_tool_ids).add(resource.id)
         try:
             if resource.id == KB_SEARCH_TOOL_ID:
                 # 知识库检索:需要会话允许范围,不走通用 executor(设计 008 §3.3);
@@ -339,6 +345,34 @@ async def stream_agent(
             calls = _extract_text_tool_calls(accumulated_text, resources)
 
         if not calls:
+            # T18.3 编排保障:已执行的 skill 若声明了 required_tools 且本轮未覆盖,
+            # 注入一次系统校验提示并续跑补调(有界一次;writewx 七轮实测配图触发 3/7)
+            if not orchestration_nudged:
+                required: set[str] = set()
+                for sid in executed_skill_ids:
+                    row = resources.get(sid)
+                    rt = ((getattr(row, "schema_", None) or {}).get("required_tools")) if row else None
+                    if isinstance(rt, list):
+                        required |= {str(x) for x in rt}
+                missing = required - executed_tool_ids
+                if missing:
+                    orchestration_nudged = True
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "【系统校验】你的交付遗漏了必经步骤: "
+                                + "、".join(sorted(missing))
+                                + "。请立即真实调用上述工具补齐(严禁只口头声称已完成),"
+                                "补齐后重新给出完整交付内容;若确无法调用,如实说明原因。"
+                            ),
+                        }
+                    )
+                    yield AgentEvent(
+                        type="delta",
+                        text="\n\n*(系统:检测到遗漏必经步骤,已要求助手补齐)*\n\n",
+                    )
+                    continue
             # 没有工具调用: 本轮对话流式生成完毕，直接退出
             break
 

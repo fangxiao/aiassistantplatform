@@ -82,6 +82,11 @@ async def _register_resource(
     manifest: PluginManifest,
 ) -> None:
     impl_path = res.file
+    # T18.3:交付必经步骤声明随 schema_ 持久化(loop 终答前校验用,免独立列)
+    if getattr(res, "required_tools", None):
+        merged_schema = dict(res.schema_ or {})
+        merged_schema["required_tools"] = list(res.required_tools)
+        res.schema_ = merged_schema
     if res.code:
         storage_dir = (
             Path.home()

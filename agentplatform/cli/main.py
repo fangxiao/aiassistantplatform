@@ -520,6 +520,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def _build_manifest(root: Path, resources: list[dict]) -> dict:
     raw = yaml_io.load_manifest(root / "plugin.yaml")
     by_kind: dict[str, list[dict]] = {"skill": [], "tool": []}
+    raw_skills = {s.get("id"): s for s in (raw.get("skills") or []) if isinstance(s, dict)}
     for r in resources:
         file_path_str = r.get("file", "")
         code_content: str | None = None
@@ -529,15 +530,18 @@ def _build_manifest(root: Path, resources: list[dict]) -> dict:
                 with suppress(OSError, UnicodeDecodeError):
                     code_content = p.read_text(encoding="utf-8")
 
-        by_kind[r["kind"]].append(
-            {
-                "id": r["id"],
-                "file": file_path_str,
-                "code": code_content,
-                "description": r.get("description", ""),
-                "schema": r.get("schema", {"type": "object", "properties": {}}),
-            }
-        )
+        entry = {
+            "id": r["id"],
+            "file": file_path_str,
+            "code": code_content,
+            "description": r.get("description", ""),
+            "schema": r.get("schema", {"type": "object", "properties": {}}),
+        }
+        # T18.3:plugin.yaml skill 条目的 required_tools 透传
+        rt = (raw_skills.get(r["id"]) or {}).get("required_tools")
+        if isinstance(rt, list) and rt:
+            entry["required_tools"] = [str(x) for x in rt]
+        by_kind[r["kind"]].append(entry)
     return {
         "name": raw.get("name"),
         # 展示名透传(20260928-0954 修复):此前被丢弃,服务端 infer_display_name
