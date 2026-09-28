@@ -14,6 +14,19 @@ export function Navbar() {
 
   useEffect(() => {
     setUserState(getUser());
+    // 角色实时校准(2026-09-28):localStorage 缓存的 user.role 可能过期
+    // (管理员直接改库提升角色后,旧会话仍显示"普通用户")——以 /auth/me 为准刷新一次
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api"}/auth/me`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("agentplatform_token")}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        if (u && u.role) {
+          localStorage.setItem("agentplatform_user", JSON.stringify(u));
+          setUserState(u);
+        }
+      })
+      .catch(() => undefined);
     setAuthed(isAuthed());
     broadcastAuthSync();
 
