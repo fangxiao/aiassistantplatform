@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "../../components/layout/Navbar";
-import { apiGet, apiPost } from "../../lib/api/client";
+import { apiFetch, apiGet, apiPost } from "../../lib/api/client";
 import { isAuthed } from "../../lib/api/auth";
 import type { AssistantInfo, SessionInfo } from "../../lib/types";
 
@@ -13,6 +13,30 @@ export default function AssistantsPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // T18.20 助手独立运营:访问链接发布 + 使用统计
+  const [opsTarget, setOpsTarget] = useState<{ assistant: AssistantInfo; url: string; stats?: Record<string, unknown> } | null>(null);
+  const [opsBusy, setOpsBusy] = useState(false);
+
+  const publishAccess = async (assistant: AssistantInfo) => {
+    try {
+      setOpsBusy(true);
+      const r = await apiFetch<{ url: string }>(`/assistant-access/plugins/${assistant.id}/publish`, { method: "POST" });
+      const stats = await apiFetch<Record<string, unknown>>(`/assistant-access/plugins/${assistant.id}/stats`).catch(() => undefined);
+      setOpsTarget({ assistant, url: `${window.location.origin}${r.url}`, stats });
+    } catch (err) {
+      alert(`发布失败: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
+  const refreshStats = async () => {
+    if (!opsTarget) return;
+    try {
+      const stats = await apiFetch<Record<string, unknown>>(`/assistant-access/plugins/${opsTarget.assistant.id}/stats`);
+      setOpsTarget({ ...opsTarget, stats });
+    } catch { /* 保持旧值 */ }
+  };
 
   useEffect(() => {
     if (!isAuthed()) {
@@ -149,18 +173,64 @@ export default function AssistantsPage() {
 
                 <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
                   <span>作者: {item.author || "官方平台"}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleStartChat(item)}
-                    className="rounded-lg bg-slate-900 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800 transition"
-                  >
-                    开始对话 →
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void publishAccess(item)}
+                      disabled={opsBusy}
+                      title="生成独立访问链接(给你的用户直接使用)"
+                      className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition disabled:opacity-40"
+                    >
+                      🔗 独立链接
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartChat(item)}
+                      className="rounded-lg bg-slate-900 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800 transition"
+                    >
+                      开始对话 →
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
+      {opsTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setOpsTarget(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-slate-800">🔗 {opsTarget.assistant.display_name || opsTarget.assistant.name} · 独立运营</h3>
+            <div className="mt-3 rounded-xl bg-slate-50 p-3">
+              <div className="text-[11px] text-slate-400">访问链接(发给你的用户,打开即是纯聊天页)</div>
+              <div className="mt-1 flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-white px-2 py-1.5 font-mono text-[11px] text-slate-700">{opsTarget.url}</code>
+                <button
+                  type="button"
+                  onClick={() => { void navigator.clipboard.writeText(opsTarget.url); alert("已复制"); }}
+                  className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11px] font-medium text-white"
+                >
+                  复制
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-4 gap-2 text-center">
+              {[
+                ["用户", String(opsTarget.stats?.users ?? "–")], ["会话", String(opsTarget.stats?.sessions ?? "–")],
+                ["消息", String(opsTarget.stats?.messages ?? "–")], ["Tokens", String(opsTarget.stats?.tokens ?? "–")],
+              ].map(([label, v]) => (
+                <div key={String(label)} className="rounded-xl border border-slate-100 py-2.5">
+                  <div className="text-lg font-bold text-slate-800">{v ?? "–"}</div>
+                  <div className="text-[10px] text-slate-400">{label}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-between">
+              <button type="button" onClick={() => void refreshStats()} className="text-[11px] text-slate-400 hover:text-slate-600">刷新统计</button>
+              <button type="button" onClick={() => setOpsTarget(null)} className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-medium text-white">完成</button>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     </div>
   );

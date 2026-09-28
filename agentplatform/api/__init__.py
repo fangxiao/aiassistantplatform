@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from agentplatform.api import (
     admin_llm,
+    assistant_access,
     assistants,
     auth,
     browser,
@@ -30,6 +31,7 @@ from agentplatform.api import (
 )
 
 api_router = APIRouter()
+api_router.include_router(assistant_access.router)
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(assistants.router)

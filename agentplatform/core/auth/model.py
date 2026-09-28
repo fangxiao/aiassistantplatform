@@ -24,6 +24,8 @@ class UserRole(str, Enum):
 class User(Base):
     """平台用户。"""
 
+    nickname: Mapped[str | None] = mapped_column(Text, nullable=True)  # 展示昵称(轻注册)
+
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
