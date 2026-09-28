@@ -15,6 +15,8 @@ import logging
 
 import httpx
 
+from agentplatform.config import settings
+
 from agentplatform.core.llm.http_client import make_http_client
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.llm.service import get_api_key
@@ -88,7 +90,7 @@ class OpenAIClient:
                 "model": ep_model,
                 "messages": messages,
                 "stream": True,
-                "max_tokens": 8192,
+                "max_tokens": settings.llm_max_tokens,
                 # 打磨:采集 token usage(OpenAI 兼容;个别网关不支持时在其分支报错可定位)
                 "stream_options": {"include_usage": True},
             }
