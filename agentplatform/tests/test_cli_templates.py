@@ -36,3 +36,15 @@ def test_templates_api_contract() -> None:
         assert "plugin.yaml" in tpl["files"]
         assert any(f.startswith("test/") for f in tpl["files"]), tid
         assert "{plugin_name}" in tpl["files"]["plugin.yaml"]  # 占位符待替换
+
+
+def test_build_manifest_keeps_display_name(tmp_path):
+    """deploy manifest 必须透传 display_name(20260928-0954:丢弃致展示名回落插件名)。"""
+    from agentplatform.cli.main import _build_manifest
+
+    (tmp_path / "plugin.yaml").write_text(
+        "name: demo\ndisplay_name: 演示助手\nversion: 0.1.0\ndescription: d\n",
+        encoding="utf-8",
+    )
+    m = _build_manifest(tmp_path, [])
+    assert m["display_name"] == "演示助手"

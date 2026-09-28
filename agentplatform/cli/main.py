@@ -508,6 +508,9 @@ def _build_manifest(root: Path, resources: list[dict]) -> dict:
         )
     return {
         "name": raw.get("name"),
+        # 展示名透传(20260928-0954 修复):此前被丢弃,服务端 infer_display_name
+        # 对长 description 截不出中文名,所有插件部署后展示名回落插件名
+        "display_name": raw.get("display_name") or raw.get("title"),
         "version": raw.get("version"),
         "description": raw.get("description"),
         "author": raw.get("author"),
