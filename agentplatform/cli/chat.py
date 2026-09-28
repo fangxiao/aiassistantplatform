@@ -18,6 +18,35 @@ from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.registry.model import SkillToolKind, SkillToolSource
 from agentplatform.core.registry.service import register
 
+def _check_revision_drift() -> None:
+    """本地包与平台部署水位比对(T18.21):落后时提示一次 agentplatform update。
+
+    动机:平台热更后本地 CLI 不同步,缺陷修复被误判为"未修"
+    (writewx 20260928-1357 报告,当日第三次)。提示不阻塞,失败静默。
+    """
+    import os
+    from pathlib import Path as _P
+
+    try:
+        import httpx
+
+        from agentplatform.config import settings as _s
+
+        local_rev = ""
+        rev_file = _P(__file__).resolve().parent.parent / "REVISION"
+        if rev_file.exists():
+            local_rev = rev_file.read_text(encoding="utf-8").strip()[:12]
+        r = httpx.get(
+            f"{os.environ.get('AGENTPLATFORM_TARGET', 'http://localhost:8000')}/api/specs/revision",
+            timeout=3,
+        )
+        remote = r.json().get("rev", "") if r.status_code == 200 else ""
+        if remote and remote != "unknown" and local_rev and remote != local_rev:
+            print(f"⚠️ 平台已更新(部署 {remote},本地包 {local_rev})——先执行 agentplatform update 再验证修复,避免误判")
+    except Exception:  # noqa: BLE001  水位检查任何失败都不影响会话
+        pass
+
+
 HISTORY_FILE = ".chat_history.json"
 
 
@@ -46,6 +75,8 @@ async def run_single_chat(
             history = json.loads(history_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             history = []
+
+    _check_revision_drift()
 
     val_res = validate_project(root)
     if not val_res["ok"]:

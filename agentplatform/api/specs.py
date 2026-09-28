@@ -53,8 +53,29 @@ async def download_package() -> Response:
     return Response(
         content=buf.getvalue(),
         media_type="application/gzip",
-        headers={"Content-Disposition": "attachment; filename=agentplatform.tar.gz"},
+        headers={
+            "Content-Disposition": "attachment; filename=agentplatform.tar.gz",
+            # 部署水位(T18.21):CLI 比对此值判断本地包是否落后,避免
+            # "平台热更已生效但本地 CLI 未同步"被误判为缺陷未修(今日三次)
+            "X-Agentplatform-Rev": _deployed_rev(),
+        },
     )
+
+
+def _deployed_rev() -> str:
+    """当前部署水位:REVISION 文件(镜像构建/热更时写入)> 环境变量 > 'unknown'。"""
+    import os
+
+    rev_file = Path(__file__).resolve().parent.parent.parent / "REVISION"
+    if rev_file.exists():
+        return rev_file.read_text(encoding="utf-8").strip()[:12]
+    return os.environ.get("AGENTPLATFORM_REV", "unknown")[:12]
+
+
+@router.get("/revision")
+async def deployed_revision() -> dict:
+    """部署水位查询(轻量):CLI 启动时 HEAD 比对,不一致提示 agentplatform update。"""
+    return {"rev": _deployed_rev()}
 
 
 INSTALL_SH_TEMPLATE = """\
