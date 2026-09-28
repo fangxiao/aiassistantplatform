@@ -4,7 +4,7 @@
  * 助手独立访问页(T18.20):/a/{access_token} —— 开发者运营自有用户的白牌入口。
  * 纯聊天体验:无导航/抽屉/工作台,用户不感知平台;轻注册(昵称即用)。
  */
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Composer from "../../../components/chat/Composer";
 import MessageList from "../../../components/chat/MessageList";
 import { API_BASE, getAuthHeader } from "../../../lib/api/client";
@@ -24,8 +24,8 @@ interface Entry {
 
 const ENTRY_KEY = "agentplatform_assist_entry";
 
-export default function AssistantAccessPage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = use(params);
+export default function AssistantAccessPage({ params }: { params: { token: string } }) {
+  const { token } = params;
   const [info, setInfo] = useState<AccessInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needJoin, setNeedJoin] = useState(false);

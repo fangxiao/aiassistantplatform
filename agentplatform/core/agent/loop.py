@@ -238,13 +238,20 @@ async def stream_agent(
         return "".join(chunks)
 
     async def execute(resource: SkillTool | None, arguments: str) -> str:
-        """执行入口:包装 _execute_inner,采集工具产出的 URL(新鲜度校验用)。"""
+        """执行入口:包装 _execute_inner,采集产物 URL 与入参消费(freshness 校验用)。"""
+        import re as _re
+
+        # 入参引用了平台文件 URL(签名/编码形态)→ 记为已消费(交付链:
+        # 如 image_gen 的图被嵌进 preview 的 html_content)
+        arg_urls = set(
+            _re.findall(r'https?://[^\s\"<>]+|/api/files/raw\?[^\s\"<>]+', arguments or "")
+        )
+        if arg_urls:
+            _run_state.consumed_urls.update(u for u in arg_urls if "%" in u or "sig=" in u)
         result = await _execute_inner(resource, arguments)
         if resource is not None and resource.id and resource.kind == SkillToolKind.tool:
-            import re as _re
-
             urls = set(
-                _re.findall(r'https?://[^\s"<>]+|/api/files/raw\?[^\s"<>]+', result or "")
+                _re.findall(r'https?://[^\s\"<>]+|/api/files/raw\?[^\s\"<>]+', result or "")
             )
             if urls:
                 _run_state.produced_urls.setdefault(resource.id, set()).update(urls)
@@ -258,9 +265,14 @@ async def stream_agent(
     orchestration_nudged = False
 
     class _RunState:
-        """跨内部函数共享的可变状态(produced_urls: tool id → 其结果产出的 URL 集合)。"""
+        """跨内部函数共享的可变状态。
+        produced_urls: tool id → 其结果产出的 URL 集合;
+        consumed_urls: 后续工具入参中出现过的平台 URL(交付链消费,
+        如 image_gen 产物被嵌进 preview 的 html_content——freshness 判"已使用")。
+        """
 
         produced_urls: dict[str, set[str]] = {}
+        consumed_urls: set[str] = set()
 
     _run_state = _RunState()
 
@@ -410,9 +422,13 @@ async def stream_agent(
                 stale: set[str] = set()
                 if not missing and required and "<img" in accumulated_text.lower():
                     produced = _run_state.produced_urls
+                    consumed = _run_state.consumed_urls
                     stale = required - {
                         tid for tid in required
-                        if any(u in accumulated_text for u in produced.get(tid, set()))
+                        if any(
+                            u in accumulated_text or u in consumed
+                            for u in produced.get(tid, set())
+                        )
                     }
                 if missing or stale:
                     orchestration_nudged = True
