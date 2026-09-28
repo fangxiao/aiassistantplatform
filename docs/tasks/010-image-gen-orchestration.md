@@ -6,14 +6,16 @@
 |---|---|---|---|---|
 | T18.1 | `tool:image_gen` 公共生图工具:OpenAI 兼容 /images/generations,b64 落盘 uploads 经 /api/files/raw 回 URL;凭据缺省复用主网关(零配置);loop 特判 + RESOURCE impl_path 显式声明(双执行路径可达);测试 7 项 | M15(uploads 通道) | P0 | ✅ 2026-09-26 |
 | T18.2 | 开发规范 4.1「多步工具编排的模型遵循度」:确定性兜底/降级安全/提示词写法/关键校验不交给模型 | T18.1 | P0 | ✅ 2026-09-26 |
-| T18.3 | 平台级"必须调用"步骤编排保障机制(step-wise 执行校验/漏调重试)+ 工具执行状态统一渲染(「成功」类结论只能来自真实 tool trace,模型口头宣布不渲染/不打勾)——来源:2026-09-26 writewx WebUI 会话编造"注入草稿箱完成"事故 | T18.2 | P1 | 📋 待裁决 |
+| T18.3 | 平台级"必须调用"步骤编排保障(2026-09-28 落地):plugin.yaml skill 声明 required_tools → 终答前 loop 校验 tool trace,缺失注入一次【系统校验】续跑补调(有界);验收证据=writewx 七轮实测矩阵(触发率 3/7 → 待其声明后复测)。工具执行状态统一渲染已由 chip 真实化(T18.9)覆盖 | T18.2 | P1 | ✅ 2026-09-28 |
 | T18.5 | ~~模型路由收口~~ → **决策修订(2026-09-26 用户裁决)**:改回网关 auto 透传——路由智能归网关;弱模型排除通过与网关沟通,在其 auto 池配置黑名单(平台侧黑名单无法感知网关实际池构成)。同日两起 glm-5.3-flash 上游 502 事故反证了 auto 的价值:网关可在池内自动重路由。配套:容灾端点机制修正为"同网关换模型也触发 fallback"(make_llm_client),`.deploy.env` 已配 deepseek-v4.1-flash 兜底 | T18.2 | P1 | ✅ |
 | T18.6 | 部署持久化修复:compose api 挂载 `~/.agentplatform:/root/.agentplatform`——此前部署插件写容器临时 FS,重建即丢(实现文件消失而 DB 路径仍在 → 插件全面瘫痪);顺带持久化 uploads(生图产物) | — | P0 | ✅ 2026-09-26 |
 | T18.7 | 交互回填自动续跑:新增 `POST /continue` SSE 端点(以最后 user 回填消息触发 agent,不落新消息),前端表单提交/确认后自动续跑,无需用户手动输入"继续" | — | P1 | ✅ 2026-09-26 |
 | T18.8 | 端侧注入兜底安全化:NL 意图兜底仅在当前消息携带真实文章 HTML 时触发且按契约补全 title/html_content;"注入成功"话术/能力介绍不再触发幽灵注入(此前空参数注入有污染用户草稿箱风险) | — | P0 | ✅ 2026-09-26 |
 | T18.9 | 工具 chip 状态真实化:失败结果显示"❌ xxx失败",output_block 显示"🧩 下发交互控件";不再一律"✅完成" | T18.8 | P1 | ✅ 2026-09-26 |
 | T18.10 | 诊断接口增加"已注册插件实现文件完整性校验":impl_path 指向本地文件的逐个核验存在性,缺失显式告警(不再静默降级)——writewx 建议 | T18.6 | P2 | 📋 待实现 |
-| T18.11 | deploy 打包修复:当前仅内联上传 skill/tool 代码文件,根级支持文件(如插件共享 config.py)不进包,部署态工具 import 插件根模块必失败;需扩展打包为"根级 *.py 一并上传落盘" | T18.6 | P1 | 📋 待实现 |
+| T18.17 | tool:html_render 公共渲染工具(sidecar 方案):独立 render 容器(Playwright+Chromium+python-pptx)承载 PDF/PNG/PPTX,主镜像零渲染依赖;hash 路由 #print/#/N 与插件契约一致;产物签名 URL。spec 来源 plugin-sharestudy,立项→E2E 上线 1 小时 | — | P1 | ✅ 2026-09-28 |
+| T18.18 | init 自动接入 agent-hub(HUB_CLI 配置时 register+init,幂等);修复 python -m 入口潜伏 NameError(模块级守卫位置);开发机 CLI 改仓库 venv 直连启动器(uv tool --editable 实为快照) | — | P2 | ✅ 2026-09-28 |
+| T18.11 | deploy 打包修复:当前仅内联上传 skill/tool 代码文件,根级支持文件(如插件共享 config.py)不进包,部署态工具 import 插件根模块必失败;需扩展打包为"根级 *.py 一并上传落盘";配套构建校验=测试覆盖/import 冒烟/运行依赖清单(sidecar DNS 仅容器内可达类环境差异提前暴露,sharestudy 建议) | T18.6 | P1 | 📋 待实现 |
 | T18.12 | 文件签名 URL:files/raw+download 支持 sig/exp HMAC 豁免鉴权(7 天有效,SECRET_KEY 签名,路径绑定);image_gen 与图片上传返回签名绝对 URL(PUBLIC_API_BASE 拼接)——HTML 产物 `<img>`、blob 预览页等无 Bearer 上下文访问文件的唯一可行通道(用户实测文章配图全裂根因) | — | P0 | ✅ 2026-09-26 |
 | T18.4 | 控件伪调用确定性兜底:模型把 `input.form({...})` 当文本输出时,前端 MarkdownRenderer 识别并转换为真实表单控件(复用 input.form 交互回填链路);交互规范提示词同步强化(禁止伪调用文本) | T18.2 | P1 | ✅ 2026-09-26 |
 
