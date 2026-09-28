@@ -62,7 +62,7 @@ async def join(token: str, payload: JoinIn, session: AsyncSession = Depends(get_
     user.nickname = nickname
     await session.commit()
     return {
-        "token": create_access_token(user),
+        "token": create_access_token(str(user.id), user.role.value),
         "user": {"id": str(user.id), "nickname": nickname},
         "plugin_id": str(plugin.id),
     }

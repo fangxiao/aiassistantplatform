@@ -48,6 +48,8 @@ class Plugin(Base):
     owner_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 助手运行时挂载的已发布知识库(uuid 字符串;设计 008 §4.3);重部署覆盖时保留
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # 独立访问令牌(T18.20):/a/{token} 白牌入口;空=未发布
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     deployed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
