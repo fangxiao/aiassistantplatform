@@ -711,6 +711,19 @@ def cmd_update(args: argparse.Namespace) -> int:
                         if proc.returncode == 0:
                             installed = True
                             print("✅ 已从远程平台成功安装最新 SDK 代码包！")
+                            # T18.21 部署水位:记录已同步的远端 rev(chat 启动比对用)
+                            try:
+                                from pathlib import Path as _P
+
+                                rev_resp = httpx.get(f"{target}/api/specs/revision", timeout=5)
+                                if rev_resp.status_code == 200:
+                                    rev = rev_resp.json().get("rev", "")
+                                    if rev and rev != "unknown":
+                                        f = _P.home() / ".agentplatform" / "installed_rev"
+                                        f.parent.mkdir(parents=True, exist_ok=True)
+                                        f.write_text(rev, encoding="utf-8")
+                            except Exception:  # noqa: BLE001  水位记录失败不影响更新
+                                pass
                             break
                     except FileNotFoundError:
                         continue

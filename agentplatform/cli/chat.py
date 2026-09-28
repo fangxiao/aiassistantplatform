@@ -33,7 +33,7 @@ def _check_revision_drift() -> None:
         from agentplatform.config import settings as _s
 
         local_rev = ""
-        rev_file = _P(__file__).resolve().parent.parent / "REVISION"
+        rev_file = _P.home() / ".agentplatform" / "installed_rev"
         if rev_file.exists():
             local_rev = rev_file.read_text(encoding="utf-8").strip()[:12]
         r = httpx.get(
