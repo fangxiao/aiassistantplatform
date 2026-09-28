@@ -57,6 +57,16 @@ services:
       - default
       - search-net   # 直连 SearXNG(容器名解析;deploy --with-search 启动)
 
+  render:
+    # html_render sidecar(T18.17):Playwright+Chromium+python-pptx,内网专用
+    build:
+      context: ./render_service
+      dockerfile: Dockerfile
+    expose:
+      - "8001"
+    networks:
+      - default
+
   web:
     build:
       context: ./web

@@ -116,6 +116,8 @@ class Settings(BaseSettings):
     image_gen_base_url: str = ""  # 空=复用 openai_base_url
     image_gen_api_key: str = ""  # 空=复用 openai_api_key
     image_gen_size: str = "1024x1024"
+    # html_render 渲染 sidecar(T18.17):内网服务地址,独立容器承载 Playwright+Chromium
+    render_service_url: str = "http://render:8001"
     # 平台 API 公网/浏览器可达基址(空=返回相对 /api 路径):签名文件 URL 由此拼绝对地址,
     # 供 HTML 产物 <img>、blob 预览页等无法携带 Bearer 的消费方直接访问
     public_api_base: str = ""
