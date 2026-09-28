@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from contextlib import suppress
 from pathlib import Path
 
@@ -124,12 +125,34 @@ async def run_single_chat(
         dep_ids = [split_dependency(d)[0] for d in raw_m.get("depends_on", []) or []]
         resource_ids = list(dict.fromkeys(dep_ids + [r["id"] for r in val_res["resources"]]))
 
+        # KB 检索范围(20260928-0959 修复):对齐服务端 chat 语义——本地 CLI
+        # 此前不组装 allowed_kb_ids,kb_search 空范围必然零命中,风格学习
+        # 等依赖知识库的能力在本地调试态静默失效(dev/prod 行为漂移)。
+        allowed_kb: list = []
+        try:
+            from sqlalchemy import select as _select
+
+            from agentplatform.core.plugin.model import Plugin
+
+            prow = (
+                await session.scalar(_select(Plugin).where(Plugin.name == raw_m.get("name")))
+            )
+            allowed_kb = [uuid.UUID(k) for k in (getattr(prow, "mounted_kb_ids", None) or [])]
+        except Exception:  # noqa: BLE001  本地无该插件登记时不影响普通调试
+            allowed_kb = []
+        if allowed_kb:
+            from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID
+
+            if KB_SEARCH_TOOL_ID not in resource_ids:
+                resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
+
         result = await run_agent(
             session,
             client,
             resource_ids=resource_ids,
             user_message=message,
             history=history,
+            allowed_kb_ids=allowed_kb or None,
         )
 
     # 更新并保存历史

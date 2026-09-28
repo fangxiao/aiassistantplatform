@@ -66,13 +66,26 @@ async def embed_texts(
 async def _embed_batch(
     texts: list[str], endpoint: LlmEndpoint, client: httpx.AsyncClient
 ) -> list[list[float]]:
-    """单批调用 OpenAI 兼容 /embeddings。"""
+    """单批调用 OpenAI 兼容 /embeddings。
+
+    宿主机回退(20260928-0959):端点用 host.docker.internal(容器视角)时,
+    宿主机进程(本地 CLI 调试)解析不了该域名——连接失败自动以 localhost
+    重试一次(同一服务的两个名字);容器内原域名本就可达,不受影响。
+    """
+    url = f"{endpoint.base_url.rstrip('/')}/embeddings"
+    headers = {"Authorization": f"Bearer {get_api_key(endpoint)}"}
+    payload = {"model": endpoint.model, "input": texts}
     try:
-        resp = await client.post(
-            f"{endpoint.base_url.rstrip('/')}/embeddings",
-            json={"model": endpoint.model, "input": texts},
-            headers={"Authorization": f"Bearer {get_api_key(endpoint)}"},
-        )
+        try:
+            resp = await client.post(url, json=payload, headers=headers)
+        except httpx.ConnectError:
+            if "host.docker.internal" not in url:
+                raise
+            resp = await client.post(
+                url.replace("host.docker.internal", "localhost"),
+                json=payload,
+                headers=headers,
+            )
     except httpx.HTTPError as exc:
         raise EmbeddingError(f"embedding 请求失败: {exc}") from exc
     if resp.status_code != 200:
