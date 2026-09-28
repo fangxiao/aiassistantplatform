@@ -114,3 +114,21 @@ export async function createShare(sid: string, days = 7): Promise<{ share_token:
 export async function revokeShare(sid: string): Promise<void> {
   await apiDelete(`/chat/sessions/${sid}/share`);
 }
+
+// 会话级模型动态切换(T18.19):auto 池列表 + 覆盖/清除
+export async function fetchAutoPool(): Promise<string[]> {
+  const { apiGet } = await import("./client");
+  const d = await apiGet<{ models: string[] }>("/llm/auto-pool");
+  return d.models ?? [];
+}
+
+export async function setSessionModel(
+  sid: string,
+  model: string | null,
+): Promise<void> {
+  const { apiFetch } = await import("./client");
+  await apiFetch(`/chat/sessions/${sid}`, {
+    method: "PATCH",
+    body: model ? { model_override: model } : { model_override_clear: true },
+  });
+}

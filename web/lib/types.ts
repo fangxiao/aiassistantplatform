@@ -29,6 +29,7 @@ export interface SessionInfo {
   plugin_id: string | null;
   title: string | null;
   mounted_kb_ids?: string[]; // 会话挂载知识库 (M12)
+  model_override?: string | null; // 会话级模型动态切换 (T18.19)
   created_at?: string;
   updated_at?: string;
 }

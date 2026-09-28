@@ -107,3 +107,27 @@ async def model_catalog(
     if settings.default_model:
         add(settings.default_model, "env_default", None, True)
     return {"models": models}
+
+
+@router.get("/auto-pool")
+async def auto_pool_models(user: User = Depends(get_current_user)) -> dict:
+    """网关 auto 池主力模型列表(会话模型选择器数据源,T18.19)。
+
+    代理网关 GET /v1/models?auto_pool=true(黑名单后的真实调度池),
+    平台不自维护池清单(会漂移);网关不可达返回明确错误。
+    """
+    from agentplatform.core.llm.http_client import make_http_client
+
+    base = settings.openai_base_url.rstrip("/")
+    key = settings.openai_api_key
+    if not base or not key:
+        raise HTTPException(status_code=503, detail="未配置网关端点")
+    async with make_http_client(timeout=15) as c:
+        resp = await c.get(
+            f"{base}/models?auto_pool=true",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"网关返回 {resp.status_code}")
+    ids = [m.get("id") for m in resp.json().get("data", []) if m.get("id")]
+    return {"models": ids}

@@ -115,7 +115,8 @@ async def agent_stream_for_session(
 
     plugin = await get_plugin(session, sess.plugin_id) if sess.plugin_id else None
     manifest = (plugin.manifest or {}) if plugin else None
-    model = (manifest or {}).get("model")
+    # 模型优先级(T18.19):会话覆盖 > 助手声明 > 平台默认(auto)
+    model = sess.model_override or (manifest or {}).get("model")
     # 多模态路由(设计 012):含图消息切换到多模态模型——不支持视觉的模型传图直接报错
     if images:
         from agentplatform.config import settings as _settings

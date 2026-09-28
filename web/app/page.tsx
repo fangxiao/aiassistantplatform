@@ -23,6 +23,8 @@ import {
   regenerateLast,
   sendMessage,
   updateSessionKbs,
+  fetchAutoPool,
+  setSessionModel,
 } from "../lib/api/chat";
 import { apiGet } from "../lib/api/client";
 import { isAuthed } from "../lib/api/auth";
@@ -408,6 +410,31 @@ function ChatHome() {
 
   const currentAssistant = assistants.find((a) => a.id === current?.plugin_id);
 
+  // 会话级模型动态切换(T18.19):auto 池下拉,override 即时生效
+  const [autoPool, setAutoPool] = useState<string[]>([]);
+  const [poolLoading, setPoolLoading] = useState(false);
+  useEffect(() => {
+    if (!current || autoPool.length > 0 || poolLoading) return;
+    setPoolLoading(true);
+    fetchAutoPool()
+      .then(setAutoPool)
+      .catch(() => setAutoPool([]))
+      .finally(() => setPoolLoading(false));
+  }, [current, autoPool.length, poolLoading]);
+  const changeSessionModel = useCallback(
+    async (model: string) => {
+      if (!current) return;
+      try {
+        await setSessionModel(current.id, model === "auto" ? null : model);
+        setCurrent({ ...current, model_override: model === "auto" ? null : model });
+        void refreshSessions();
+      } catch (err) {
+        alert(`模型切换失败: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+    [current, refreshSessions],
+  );
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navbar />
@@ -521,8 +548,23 @@ function ChatHome() {
                         ℹ️
                       </button>
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate max-w-sm">
-                      {current?.title || "专属助手会话"}
+                    <div className="flex items-center gap-2">
+                      <div className="text-[11px] text-slate-400 truncate max-w-sm">
+                        {current?.title || "专属助手会话"}
+                      </div>
+                      {current && (autoPool.length > 0 || current.model_override) && (
+                        <select
+                          value={current.model_override || "auto"}
+                          onChange={(e) => void changeSessionModel(e.target.value)}
+                          className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300"
+                          title="会话模型:切换后下一条消息生效(auto=平台智能路由)"
+                        >
+                          <option value="auto">⚡ auto(智能路由)</option>
+                          {autoPool.filter((m) => m !== "auto").map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -27,6 +27,8 @@ class Session(Base):
     share_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 运行时挂载的知识库 id 列表(M12,设计 008 §4.2);服务端写入前校验可读
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # 会话级模型动态切换(T18.19):None=按助手声明/auto;优先级见 chat service
+    model_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

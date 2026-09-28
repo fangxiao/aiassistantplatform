@@ -156,7 +156,11 @@ async def rename_session(
         if payload.mounted_kb_ids is not None
         else None
     )
-    row = await update_session(session, sid, title=payload.title, mounted_kb_ids=mounted)
+    row = await update_session(
+        session, sid, title=payload.title, mounted_kb_ids=mounted,
+        model_override=payload.model_override,
+        model_override_clear=payload.model_override_clear,
+    )
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "会话不存在"})
     out = SessionOut.model_validate(row, from_attributes=True)

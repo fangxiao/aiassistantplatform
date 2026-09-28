@@ -75,13 +75,19 @@ async def update_session(
     *,
     title: str | None = None,
     mounted_kb_ids: list[uuid.UUID] | None = None,
+    model_override: str | None = None,
+    model_override_clear: bool = False,
 ) -> Session | None:
-    """按需更新标题与挂载知识库(M12);mounted_kb_ids 传 [] 表示清空。"""
+    """按需更新标题/挂载知识库/会话模型(M12/T18.19);mounted_kb_ids 传 [] 清空。"""
     row = await session.get(Session, session_id)
     if row is None:
         return None
     if title is not None:
         row.title = title
+    if model_override_clear:
+        row.model_override = None  # 恢复按助手声明/auto
+    elif model_override:
+        row.model_override = model_override
     if mounted_kb_ids is not None:
         row.mounted_kb_ids = [str(k) for k in mounted_kb_ids]  # JSONB 存字符串形式,读侧转 UUID
     await session.flush()

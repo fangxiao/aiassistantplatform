@@ -26,6 +26,23 @@ function handleUnauthorized(): void {
   }
 }
 
+export async function apiFetch<T>(
+  path: string,
+  init: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: init.method ?? "GET",
+    headers: { ...getAuthHeader(), "Content-Type": "application/json" },
+    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+  });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  return (await resp.json().catch(() => undefined)) as T;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, { headers: getAuthHeader() });
   if (resp.status === 401) {

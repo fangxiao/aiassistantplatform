@@ -13,6 +13,7 @@ class CreateSession(BaseModel):
 
 class SessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    model_override: str | None = None  # 会话级模型(T18.19)
 
     id: uuid.UUID
     plugin_id: uuid.UUID | None = None
@@ -25,6 +26,8 @@ class SessionOut(BaseModel):
 class UpdateSession(BaseModel):
     title: str | None = None
     mounted_kb_ids: list[uuid.UUID] | None = None  # None=不修改;[] =清空挂载
+    model_override: str | None = None  # 会话级模型切换(T18.19);model_override_clear=True 恢复默认
+    model_override_clear: bool = False
 
 
 class SendMessage(BaseModel):
