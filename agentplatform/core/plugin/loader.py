@@ -64,6 +64,14 @@ async def deploy_plugin(
         session.add(plugin)
         await session.flush()
 
+    # T18.3 插件级必经步骤:并入每个自有资源(任一执行即触发终答校验)
+    plugin_level_rt = [str(x) for x in (getattr(manifest, "required_tools", None) or [])]
+    if plugin_level_rt:
+        for r in [*manifest.skills, *manifest.tools]:
+            merged = dict(r.schema_ or {})
+            own = [str(x) for x in (merged.get("required_tools") or [])]
+            merged["required_tools"] = list(dict.fromkeys(own + plugin_level_rt))
+            r.schema_ = merged
     for r in manifest.skills:
         await _register_resource(session, r, SkillToolKind.skill, manifest)
     for r in manifest.tools:

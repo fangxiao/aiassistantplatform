@@ -109,13 +109,16 @@ async def run_single_chat(
         await seed_builtin(session)
 
         raw_skill_defs = {d.get("id"): d for d in (raw_m.get("skills") or []) if isinstance(d, dict)}
+        plugin_level_rt = [str(x) for x in (raw_m.get("required_tools") or [])]
         for r in val_res["resources"]:
             schema = dict(r["schema"] or {})
             # T18.3:plugin.yaml 的 required_tools 合入本地注册行(与服务端 deploy 同语义,
             # 否则编排保障仅在服务端会话生效——writewx 20260928-1201 验收发现的覆盖缺口)
             rt = (raw_skill_defs.get(r["id"]) or {}).get("required_tools")
-            if r["kind"] == "skill" and isinstance(rt, list) and rt:
-                schema["required_tools"] = [str(x) for x in rt]
+            own = [str(x) for x in rt] if isinstance(rt, list) else []
+            combined = list(dict.fromkeys(own + plugin_level_rt))
+            if combined:
+                schema["required_tools"] = combined
             await register(
                 session,
                 resource_id=r["id"],

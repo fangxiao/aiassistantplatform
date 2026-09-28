@@ -552,6 +552,7 @@ def _build_manifest(root: Path, resources: list[dict]) -> dict:
         "author": raw.get("author"),
         "model": raw.get("model"),
         "depends_on": raw.get("depends_on", []),
+        "required_tools": [str(x) for x in (raw.get("required_tools") or [])],
         "skills": by_kind["skill"],
         "tools": by_kind["tool"],
     }

@@ -34,6 +34,9 @@ class PluginManifest(BaseModel):
     author: str | None = None
     model: str | None = None
     depends_on: list[str] = []
+    # T18.3 插件级必经步骤:该插件任一 skill/tool 被执行即纳入终答校验
+    # (覆盖"模型不经 skill 直接产出"的形态——writewx 二轮验收发现)
+    required_tools: list[str] = []
     skills: list[ResourceDef] = []
     tools: list[ResourceDef] = []
 

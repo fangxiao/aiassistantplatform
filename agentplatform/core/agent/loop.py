@@ -33,6 +33,33 @@ from agentplatform.core.workbench.todo_tool import run as todo_run
 
 MAX_ITERATIONS = 6
 
+
+def _log_orchestration(required: set, tools: set, skills: set, missing: set) -> None:
+    """T18.3 评估日志:每次终答校验落一行 JSON(~/.agentplatform/orchestration.log)。
+
+    双方可观测:writewx 验收需要核对"机制是否触发/为何未触发"——
+    executed_source 为空即"模型未调用任何带声明的资源"形态。
+    """
+    import json as _json
+    import time as _time
+
+    try:
+        from pathlib import Path as _P
+
+        f = _P.home() / ".agentplatform" / "orchestration.log"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps({
+                "ts": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "required": sorted(required),
+                "executed_tools": sorted(tools),
+                "executed_skills": sorted(skills),
+                "missing": sorted(missing),
+            }, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001  日志失败不影响主流程
+        pass
+
+
 # 端侧工具标记:impl_path 以该前缀开头表示"非本地执行,下发到端侧(浏览器/扩展)等待结果回传"
 ENDPOINT_PREFIX = "endpoint:"
 
@@ -371,12 +398,15 @@ async def stream_agent(
             #    (复用历史旧图等形态,writewx 20260928-1201 验收发现)
             if not orchestration_nudged:
                 required: set[str] = set()
-                for sid in executed_skill_ids:
-                    row = resources.get(sid)
+                # 声明来源:已执行的 skill 行 + tool 行(插件级声明并入每个资源行,
+                # 覆盖"模型不经 skill 直接产出"形态)
+                for rid in executed_skill_ids | executed_tool_ids:
+                    row = resources.get(rid)
                     rt = ((getattr(row, "schema_", None) or {}).get("required_tools")) if row else None
                     if isinstance(rt, list):
                         required |= {str(x) for x in rt}
                 missing = required - executed_tool_ids
+                _log_orchestration(required, executed_tool_ids, executed_skill_ids, missing)
                 stale: set[str] = set()
                 if not missing and required and "<img" in accumulated_text.lower():
                     produced = _run_state.produced_urls
