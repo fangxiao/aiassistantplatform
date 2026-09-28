@@ -298,6 +298,36 @@ dev = [
 """
 
 
+
+def _wire_hub(root: Path, plugin_name: str) -> None:
+    """开发态接入 agent-hub 协作总线(可选,幂等)。
+
+    动机:插件的开发会话需要与 platform 等协作方在总线上沟通;init 时自动
+    接入免去"新插件不知道要配 hub"的心智负担。定位是**开发态**便利——
+    插件运行时与 hub 无依赖;未配置 HUB_CLI(如外部开源开发者)时跳过并留提示。
+    """
+    import subprocess
+
+    from agentplatform.config import settings as _settings
+
+    hub = (_settings.hub_cli or "").strip()
+    if not hub:
+        print("💡 提示:在 ~/.agentplatform/.env 配置 HUB_CLI=<hub 命令路径> 后,init 可自动接入协作总线(可选)")
+        return
+    agent = f"plugin-{plugin_name}"
+    # 顺序:hub 要求先 register 登记,再 init 写入项目配置
+    for cmd in (
+        [hub, "register", agent, "--role", f"平台插件-{plugin_name}", "--desc", f"{plugin_name} 插件开发会话"],
+        [hub, "init", str(root), "--agent", agent],
+    ):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+        except Exception as exc:  # noqa: BLE001  hub 不可用不阻塞 init
+            print(f"⚠️ hub 接入跳过({cmd[1]}: {type(exc).__name__});可稍后手动执行 {hub} init {root} --agent {agent}")
+            return
+    print(f"🔌 已接入 agent-hub 协作总线(身份 {agent},CLAUDE.md 协作段已生成)")
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     root = Path(args.name)
     if root.exists() and any(root.iterdir()):
@@ -346,6 +376,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         f"---\nname: agentplatform-plugin-dev\ndescription: AgentPlatform 插件开发与共享能力指南\n---\n\n{agents_content}",
         encoding="utf-8",
     )
+
+    _wire_hub(root, plugin_name)
 
     print(f"🎉 已成功初始化 AgentPlatform 插件脚手架: {root}")
     print("📁 生成文件清单:")
@@ -865,10 +897,6 @@ def main(argv: list[str] | None = None) -> int:
     return args.func(args)
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def _init_from_template(
     args: argparse.Namespace,
     root: Path,
@@ -1098,3 +1126,7 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
     print("🩺 验收:访问 /status 确认诊断全绿")
     print("🎉 升级完成")
     return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

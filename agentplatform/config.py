@@ -121,7 +121,9 @@ class Settings(BaseSettings):
     # 平台 API 公网/浏览器可达基址(空=返回相对 /api 路径):签名文件 URL 由此拼绝对地址,
     # 供 HTML 产物 <img>、blob 预览页等无法携带 Bearer 的消费方直接访问
     public_api_base: str = ""
-    memory_max_per_user: int = 50  # 每用户长期记忆条数上限(超出淘汰最旧)
+    memory_max_per_user: int = 50
+    # agent-hub CLI 路径(空=init 不接入总线;开发态便利,见 cli/main._wire_hub)
+    hub_cli: str = ""  # 每用户长期记忆条数上限(超出淘汰最旧)
     # 通用动作(M17):允许 agent 调用的域名白名单;空=工具禁用(安全默认)
     action_http_allowlist: list[str] = []
     action_require_confirm: bool = True  # 写操作(POST/PUT/PATCH/DELETE)须用户在确认框确认
