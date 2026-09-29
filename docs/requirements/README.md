@@ -11,6 +11,7 @@
 | 003 | [003-message-rendering.md](./003-message-rendering.md) | 消息展示扩展 / 21 种 renderer(增量) | v1.0 定稿 | [003-ui-components.md](../design/003-ui-components.md) |
 | 004 | [004-remote-dev.md](./004-remote-dev.md) | 远程开发与调试(增量) | v0.1 已实现 | [007-remote-dev.md](../design/007-remote-dev.md) |
 | 005 | [005-knowledge-base.md](./005-knowledge-base.md) | 知识库(个人库 + 公共库,增量) | v0.1 草稿待评审 | 008(待产出) |
+| 011 | [011-harness-robustness.md](./011-harness-robustness.md) | Agent Harness 加固(断线恢复/并发重构/上下文管理/错误体系) | v0.1 已确认 | [016-harness-robustness.md](../design/016-harness-robustness.md) |
 
 ## 阅读路径
 
