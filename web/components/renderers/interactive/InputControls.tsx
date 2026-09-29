@@ -43,7 +43,7 @@ export function InputTextRenderer({ block, onInteract }: ControlProps) {
   const placeholder = String(block.data?.placeholder ?? "请输入...");
 
   return (
-    <div className="my-2 max-w-md rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-md"}`}>
       {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <input
@@ -81,7 +81,7 @@ export function InputTextareaRenderer({ block, onInteract }: ControlProps) {
   const placeholder = String(block.data?.placeholder ?? "请输入多行文本...");
 
   return (
-    <div className="my-2 max-w-md rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-md"}`}>
       {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <textarea
         id={inputId}
@@ -118,7 +118,7 @@ export function InputNumberRenderer({ block, onInteract }: ControlProps) {
   const label = block.data?.label ? String(block.data.label) : null;
 
   return (
-    <div className="my-2 max-w-xs rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-xs"}`}>
       {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <input
@@ -158,7 +158,7 @@ export function InputSelectRenderer({ block, onInteract }: ControlProps) {
   const label = block.data?.label ? String(block.data.label) : null;
 
   return (
-    <div className="my-2 max-w-xs rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-sm"}`}>
       {label && <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <select
@@ -168,7 +168,7 @@ export function InputSelectRenderer({ block, onInteract }: ControlProps) {
             setVal(e.target.value);
             report(e.target.value);
           }}
-          className="flex-1 rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-800 focus:border-slate-500 focus:outline-none"
+          className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-800 focus:border-slate-500 focus:outline-none"
         >
           {options.map((opt, i) => (
             <option key={i} value={opt.value}>
@@ -199,7 +199,7 @@ export function InputRadioRenderer({ block, onInteract }: ControlProps) {
   const label = block.data?.label ? String(block.data.label) : null;
 
   return (
-    <div className="my-2 max-w-sm rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-sm"}`}>
       {label && <label className="mb-2 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="space-y-1.5">
         {options.map((opt, i) => (
@@ -248,7 +248,7 @@ export function InputCheckboxRenderer({ block, onInteract }: ControlProps) {
   };
 
   return (
-    <div className="my-2 max-w-sm rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-sm"}`}>
       {label && <label className="mb-2 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="space-y-1.5">
         {options.map((opt, i) => (
@@ -296,7 +296,7 @@ export function InputToggleRenderer({ block, onInteract }: ControlProps) {
   };
 
   return (
-    <div className="my-2 flex max-w-xs items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-xs"}`}>
       <span className="text-xs font-medium text-slate-700">{label}</span>
       <button
         type="button"
@@ -323,7 +323,7 @@ export function InputDateRenderer({ block, onInteract }: ControlProps) {
   const label = block.data?.label ? String(block.data.label) : null;
 
   return (
-    <div className="my-2 max-w-xs rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-xs"}`}>
       {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <input
@@ -367,7 +367,7 @@ export function InputDatetimeRenderer({ block, onInteract }: ControlProps) {
   };
 
   return (
-    <div className="my-2 max-w-sm rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`my-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm ${nested ? "w-full" : "max-w-sm"}`}>
       {label && <label className="mb-1 block text-xs font-semibold text-slate-700">{label}</label>}
       <div className="flex gap-2">
         <input
@@ -538,7 +538,7 @@ export function InputFormRenderer({ block, onInteract }: ControlProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="my-3 max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+      className="my-3 w-full rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
     >
       {title && <h4 className="mb-3 text-sm font-bold text-slate-800">{title}</h4>}
       <NestingContext.Provider value={1}>
