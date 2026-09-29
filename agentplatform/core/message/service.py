@@ -70,6 +70,7 @@ async def save_assistant_message(
     session_id: uuid.UUID,
     content: str | list[dict],
     tokens: int | None = None,
+    is_draft: bool = False,
 ) -> Message:
     if isinstance(content, list):
         blocks = content
@@ -80,10 +81,61 @@ async def save_assistant_message(
         role=MessageRole.assistant,
         blocks=blocks,
         tokens=tokens,
+        is_draft=is_draft,
     )
     session.add(msg)
     await session.flush()
     return msg
+
+
+async def latest_draft_message(
+    session: AsyncSession, session_id: uuid.UUID
+) -> Message | None:
+    """会话中最后一条草稿助手消息(ADR 0009 检查点;无则 None)。"""
+    return await session.scalar(
+        select(Message)
+        .where(
+            Message.session_id == session_id,
+            Message.role == MessageRole.assistant,
+            Message.is_draft.is_(True),
+        )
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+    )
+
+
+def message_text_of(m: Message) -> str:
+    """提取消息正文文本(blocks 内 markdown 拼接)。"""
+    parts = []
+    for b in m.blocks or []:
+        if isinstance(b, dict) and b.get("type") == "markdown":
+            parts.append((b.get("data") or {}).get("text", ""))
+    return "".join(parts)
+
+
+async def finalize_draft_message(
+    session: AsyncSession,
+    draft: Message,
+    blocks: list[dict],
+    tokens: int | None = None,
+) -> Message:
+    """草稿 finalize:以最终内容覆盖草稿行并转正式消息(ADR 0009 收口)。"""
+    draft.blocks = blocks or [{"type": "markdown", "data": {"text": ""}}]
+    if tokens is not None:
+        draft.tokens = (draft.tokens or 0) + tokens
+    draft.is_draft = False
+    await session.flush()
+    return draft
+
+
+async def update_draft_progress(
+    session: AsyncSession,
+    draft: Message,
+    blocks: list[dict],
+) -> None:
+    """检查点 flush:以累计内容覆盖草稿行(调用方负责 commit)。"""
+    draft.blocks = blocks or [{"type": "markdown", "data": {"text": ""}}]
+    await session.flush()
 
 
 

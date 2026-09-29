@@ -20,6 +20,7 @@ import {
   sendFeedbackEvent,
   createShare,
   continueChat,
+  resumeChat,
   regenerateLast,
   sendMessage,
   updateSessionKbs,
@@ -302,21 +303,79 @@ function ChatHome() {
             const d = ev.data as { message_id?: string };
             patch((m) => ({ ...m, id: d.message_id ?? m.id, reasoning: undefined }));
           } else if (ev.event === "error") {
-            const d = ev.data as { message?: string };
-            patch((m) => ({
-              ...m,
-              text: m.text + `\n\n[错误] ${d.message ?? "未知"}`,
-            }));
+            const d = ev.data as { message?: string; resumable?: boolean; message_id?: string };
+            if (d.resumable && d.message_id) {
+              // 断点续跑(ADR 0009):检查点已落库,标记该消息可从断点继续
+              patch((m) => ({
+                ...m,
+                resumable: d.message_id ?? null,
+                text: m.text + "\n\n[连接中断,已保留以上内容]",
+              }));
+            } else {
+              patch((m) => ({
+                ...m,
+                text: m.text + `\n\n[错误] ${d.message ?? "未知"}`,
+              }));
+            }
           }
         }
       } catch (e) {
-        patch((m) => ({ ...m, text: m.text + `\n\n[错误] ${String(e)}` }));
+        // 用户主动停止(AbortError):服务端已把 partial 转正式,不标可续跑;
+        // 其他异常(网络断开等):服务端留有检查点草稿,标记可从断点续跑
+        const aborted = e instanceof DOMException && e.name === "AbortError";
+        patch((m) => ({
+          ...m,
+          resumable: !aborted ? (m.resumable ?? "latest") : m.resumable,
+          text: aborted ? m.text || "[已中断]" : m.text + `\n\n[错误] ${String(e)}`,
+        }));
       } finally {
         setStreaming(false);
         refreshSessions();
       }
     },
     [current, streaming, refreshSessions]
+  );
+  // 断点续跑(设计 016 §2 / ADR 0009):从中断草稿处继续,产物原地并入该气泡
+  const handleResumeDraft = useCallback(
+    async (bubbleId: string, draftId: string) => {
+      if (!current || streaming) return;
+      setStreaming(true);
+      let target = bubbleId;
+      const patch = (fn: (m: ChatMessage) => ChatMessage) =>
+        setMessages((ms) => ms.map((m) => (m.id === target ? fn(m) : m)));
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        for await (const ev of resumeChat(current.id, controller.signal)) {
+          if (ev.event === "resume_started") {
+            // 气泡 id 原地切换为服务端草稿行 id,后续事件继续命中
+            const d = ev.data as { message_id?: string };
+            const newId = d.message_id ?? target;
+            setMessages((ms) => ms.map((m) => (m.id === target ? { ...m, id: newId } : m)));
+            target = newId;
+          } else if (ev.event === "delta") {
+            const d = ev.data as { text?: string };
+            patch((m) => ({ ...m, text: m.text + (d.text ?? "") }));
+          } else if (ev.event === "block_meta") {
+            const block = ev.data as ContentBlock;
+            patch((m) => ({ ...m, blocks: [...(m.blocks ?? []), block] }));
+          } else if (ev.event === "tool_call") {
+            const d = ev.data as ToolCallInfo;
+            patch((m) => ({ ...m, toolCalls: [...(m.toolCalls ?? []), d] }));
+          } else if (ev.event === "done") {
+            patch((m) => ({ ...m, resumable: null }));
+          } else if (ev.event === "error") {
+            const d = ev.data as { message?: string };
+            patch((m) => ({ ...m, text: m.text + `\n\n[错误] ${d.message ?? "未知"}` }));
+          }
+        }
+      } catch (e) {
+        patch((m) => ({ ...m, text: m.text + `\n\n[错误] ${String(e)}` }));
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [current, streaming]
   );
 
   // 保存会话挂载知识库 (M12, T12.13)
@@ -405,8 +464,16 @@ function ChatHome() {
               const d = ev.data as { message_id?: string };
               patch((m) => ({ ...m, id: d.message_id ?? m.id, reasoning: undefined }));
             } else if (ev.event === "error") {
-              const d = ev.data as { message?: string };
-              patch((m) => ({ ...m, text: m.text + `\n\n[错误] ${d.message ?? "未知"}` }));
+              const d = ev.data as { message?: string; resumable?: boolean };
+              if (d.resumable) {
+                patch((m) => ({
+                  ...m,
+                  resumable: m.resumable ?? "latest",
+                  text: m.text + "\n\n[连接中断,已保留以上内容]",
+                }));
+              } else {
+                patch((m) => ({ ...m, text: m.text + `\n\n[错误] ${d.message ?? "未知"}` }));
+              }
             }
           }
         } catch {
@@ -633,6 +700,9 @@ function ChatHome() {
             messages={messages}
             streaming={streaming}
             onInteract={handleInteract}
+            onResume={(m) => {
+              if (m.resumable) void handleResumeDraft(m.id, m.resumable);
+            }}
             onRegenerate={() => void handleRegenerate(messages[messages.length - 1]?.id ?? "")}
             onSaveToKb={(content) =>
               setKbSaveTarget({ content, source: { app: "platform", session_id: current?.id } })

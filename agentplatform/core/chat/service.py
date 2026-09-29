@@ -98,10 +98,13 @@ async def agent_stream_for_session(
     images: list[str] | None = None,
     save_input: bool = True,
     docs: list[str] | None = None,
+    prior_history: list[dict] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """为一次发消息构建 agent 流(供 API SSE 消费)。
 
     流程:保存用户消息 -> 解析插件资源 -> 解析 LLM 端点 -> stream_agent。
+    prior_history:外部提供的前文历史(resume 续跑用,ADR 0009)——提供时
+    user_message 原样作为当前轮输入,不从 build_history 拆尾。
     """
     sess = await get_session(session, session_id)
     if sess is None:
@@ -157,10 +160,12 @@ async def agent_stream_for_session(
     from agentplatform.core.memory import service as memory_service
 
     memories = await memory_service.memories_for_prompt(session, str(sess.user_id)) if sess.user_id else []
-    history = await build_history(session, session_id)
+    history = await build_history(session, session_id) if prior_history is None else prior_history
     # history 末尾是刚保存的用户消息,拆出作为 user_message,其余作为前文
-    if history:
+    if history and prior_history is None:
         prior = history[:-1]
+    elif prior_history is not None:
+        prior = prior_history
     else:
         prior = []
     effective_message = (

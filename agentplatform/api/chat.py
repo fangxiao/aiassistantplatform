@@ -32,10 +32,15 @@ from agentplatform.core.interact.schemas import (
     InteractResponse,
 )
 from agentplatform.core.interact.service import handle_interaction, record_event
+from agentplatform.core.message.model import Message, MessageRole
 from agentplatform.core.message.service import (
+    build_history,
+    finalize_draft_message,
+    latest_draft_message,
     list_messages,
     message_text,
     save_assistant_message,
+    update_draft_progress,
 )
 from agentplatform.core.plugin.loader import is_plugin_visible
 from agentplatform.core.plugin.model import Plugin
@@ -198,6 +203,166 @@ async def history_messages(
     ]
 
 
+_DRAFT_FLUSH_CHARS = 4000  # 检查点 flush 的正文增量阈值(工具边界为主,此为纯长文本兜底)
+
+
+async def _checkpointed_agent_sse(
+    session: AsyncSession,
+    sid: uuid.UUID,
+    agent_events,
+    *,
+    draft: Message | None = None,
+    is_resume: bool = False,
+    title_source: str | None = None,
+):
+    """消费 agent 事件流转 SSE,附草稿检查点(设计 016 §2 / ADR 0009 / P1)。
+
+    - 流开始若无草稿则创建(is_draft=True);
+    - tool_call 边界与正文增量阈值处 flush 草稿——断线时已产出内容留存为检查点;
+    - done:finalize 草稿转正式消息;
+    - 用户取消(CancelledError):partial 转正式(与既有"停止生成"行为一致);
+    - 其他异常:partial 留在草稿(is_draft 保持),error 事件带 resumable + message_id,
+      取代旧"rollback 整轮丢弃"行为(20260929 断流事故的整轮消失即源于此)。
+    """
+    text_parts: list[str] = []
+    blocks: list[dict] = []
+    # resume 时保留草稿已有内容为前缀,续跑产物追加其后
+    base_blocks: list[dict] = list(draft.blocks or []) if draft is not None else []
+    usage_total: int | None = None
+    flushed_len = 0
+
+    def _composed(is_final: bool) -> list[dict]:
+        final_text = "".join(text_parts)
+        if is_final:
+            from agentplatform.core.agent.img_proxy import sanitize_model_images
+
+            final_text = sanitize_model_images(final_text)
+        composed = [*base_blocks]
+        if final_text.strip():
+            composed.append({"type": "markdown", "data": {"text": final_text}})
+        composed.extend(blocks)
+        return composed
+
+    async def _ensure_draft() -> None:
+        """惰性建草稿:首个内容事件时才落库——agent_stream_for_session 是惰性
+        生成器,用户消息在首次迭代时才保存;草稿必须晚于它创建,否则
+        list_messages 按 created_at 排序会把 assistant 排到 user 之前。
+        首 token 前断开本就无可检查点内容,惰性创建无损失。"""
+        nonlocal draft
+        if draft is not None:
+            return
+        draft = await save_assistant_message(
+            session, sid, [{"type": "markdown", "data": {"text": ""}}], is_draft=True
+        )
+        # 与用户消息可能同微秒落库,后移 2ms 保证 user → assistant 严格顺序
+        from datetime import timedelta as _td
+
+        draft.created_at = draft.created_at + _td(microseconds=2000)
+        await session.flush()
+        await session.commit()
+
+    async def _flush(is_final: bool = False) -> None:
+        nonlocal draft
+        if draft is None and not (text_parts or blocks):
+            return  # 无内容不建空草稿(避免污染会话与 resume 定位)
+        await _ensure_draft()
+        if is_final:
+            await finalize_draft_message(session, draft, _composed(True), tokens=usage_total)
+        else:
+            await update_draft_progress(session, draft, _composed(False))
+
+    try:
+        if draft is not None and is_resume:
+            yield sse("resume_started", {"message_id": str(draft.id)})
+        async for ev in agent_events:
+            if ev.type == "reasoning" and ev.text:
+                yield sse("reasoning", {"text": ev.text})
+            elif ev.type == "delta" and ev.text:
+                text_parts.append(ev.text)
+                yield sse("delta", {"block_index": 0, "text": ev.text})
+                if sum(map(len, text_parts)) - flushed_len >= _DRAFT_FLUSH_CHARS:
+                    await _flush()
+                    await session.commit()
+                    flushed_len = sum(map(len, text_parts))
+            elif ev.type == "block_meta" and ev.block:
+                blocks.append(ev.block)
+                yield sse("block_meta", ev.block)
+            elif ev.type == "await_external" and ev.block:
+                blocks.append(ev.block)
+                yield sse("await_external", ev.block)
+            elif ev.type == "tool_call" and ev.tool_trace is not None:
+                t = ev.tool_trace
+                # 先 flush 后 yield:客户端恰在此事件处断开时,检查点必须已落库
+                await _flush()
+                await session.commit()
+                flushed_len = sum(map(len, text_parts))
+                yield sse(
+                    "tool_call",
+                    {
+                        "kind": t.id.split(":", 1)[0],
+                        "name": t.id,
+                        "args": t.args,
+                        "result": t.result,
+                    },
+                )
+            elif ev.type == "done" and ev.usage:
+                usage_total = ev.usage.get("total_tokens") or usage_total
+        await _flush(is_final=True)
+        await session.commit()
+        if title_source is not None:
+            import asyncio as _asyncio
+
+            _asyncio.get_running_loop().create_task(
+                _generate_title_logged(sid, title_source)
+            )
+        done_payload = {"message_id": str(draft.id), "tokens": usage_total}
+        if is_resume:
+            done_payload["resume_of"] = str(draft.id)
+        yield sse("done", done_payload)
+
+    except asyncio.CancelledError:
+        # 用户"停止生成"/客户端断开:已产出部分转正式(与既有行为一致),草稿关闭
+        try:
+            await _flush(is_final=True)
+            await session.commit()
+        except Exception:  # noqa: BLE001
+            await session.rollback()
+        raise
+
+    except ChatError as exc:
+        try:
+            await _flush()
+            await session.commit()
+        except Exception:  # noqa: BLE001
+            await session.rollback()
+        yield sse(
+            "error",
+            {
+                "code": "chat_error",
+                "kind": "internal",
+                "message": str(exc),
+                "resumable": draft is not None,
+                "message_id": str(draft.id) if draft is not None else None,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001  SSE 内兜底,避免连接悬挂
+        try:
+            await _flush()
+            await session.commit()
+        except Exception:  # noqa: BLE001
+            await session.rollback()
+        yield sse(
+            "error",
+            {
+                "code": "agent_error",
+                "kind": "internal",
+                "message": str(exc),
+                "resumable": draft is not None,
+                "message_id": str(draft.id) if draft is not None else None,
+            },
+        )
+
+
 @router.post("/sessions/{sid}/messages")
 async def send_message(
     sid: uuid.UUID,
@@ -239,80 +404,13 @@ async def send_message(
             )
 
     async def event_stream():
-        text_parts: list[str] = []
-        blocks: list[dict] = []
-
-        try:
-            usage_total: int | None = None
-            async for ev in agent_stream_for_session(session, sid, payload.content, images=payload.images, docs=payload.docs):
-                if ev.type == "reasoning" and ev.text:
-                    yield sse("reasoning", {"text": ev.text})
-                elif ev.type == "delta" and ev.text:
-                    text_parts.append(ev.text)
-                    yield sse("delta", {"block_index": 0, "text": ev.text})
-                elif ev.type == "block_meta" and ev.block:
-                    blocks.append(ev.block)
-                    yield sse("block_meta", ev.block)
-                elif ev.type == "await_external" and ev.block:
-                    blocks.append(ev.block)
-                    yield sse("await_external", ev.block)
-                elif ev.type == "done" and ev.usage:
-                    usage_total = ev.usage.get("total_tokens")
-                elif ev.type == "tool_call" and ev.tool_trace is not None:
-                    t = ev.tool_trace
-                    yield sse(
-                        "tool_call",
-                        {
-                            "kind": t.id.split(":", 1)[0],
-                            "name": t.id,
-                            "args": t.args,
-                            "result": t.result,
-                        },
-                    )
-            final_text = "".join(text_parts)
-            # T18.15 图片溯源清洗:编造/失效的 <img> 确定性替换占位图(最终防线)
-            from agentplatform.core.agent.img_proxy import sanitize_model_images
-
-            final_text = sanitize_model_images(final_text)
-            final_blocks: list[dict] = []
-            if final_text.strip():
-                final_blocks.append({"type": "markdown", "data": {"text": final_text}})
-            final_blocks.extend(blocks)
-            usage_tokens = (usage_total or None)
-            msg = await save_assistant_message(
-                session, sid, final_blocks if final_blocks else final_text, tokens=usage_tokens
-            )
-            await session.commit()
-            # 打磨:会话标题自动生成(独立会话/短任务,失败静默)
-            import asyncio as _asyncio
-
-            from agentplatform.core.message.service import generate_session_title
-
-            _asyncio.get_running_loop().create_task(_generate_title_logged(sid, payload.content))
-            yield sse(
-                "done",
-                {"message_id": str(msg.id), "tokens": usage_tokens},
-            )
-
-        except asyncio.CancelledError:
-            # 打磨②:用户"停止生成"——已产出的部分文本落库(刷新不丢),再向上传播取消
-            try:
-                partial = "".join(text_parts)
-                if partial.strip():
-                    final_blocks: list[dict] = [{"type": "markdown", "data": {"text": partial}}]
-                    final_blocks.extend(blocks)
-                    await save_assistant_message(session, sid, final_blocks)
-                    await session.commit()
-            except Exception:  # noqa: BLE001
-                await session.rollback()
-            raise
-
-        except ChatError as exc:
-            await session.rollback()
-            yield sse("error", {"code": "chat_error", "message": str(exc)})
-        except Exception as exc:  # noqa: BLE001  SSE 内兜底,避免连接悬挂
-            await session.rollback()
-            yield sse("error", {"code": "agent_error", "message": str(exc)})
+        agent_events = agent_stream_for_session(
+            session, sid, payload.content, images=payload.images, docs=payload.docs
+        )
+        async for chunk in _checkpointed_agent_sse(
+            session, sid, agent_events, title_source=payload.content
+        ):
+            yield chunk
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -459,74 +557,94 @@ async def continue_after_interaction(
     await _ensure_session_owned(session, sid, user.id)
 
     async def event_stream():
-        text_parts: list[str] = []
-        blocks: list[dict] = []
-        try:
-            from agentplatform.core.message.service import MessageRole
+        from agentplatform.core.message.service import MessageRole
 
-            msgs = await list_messages(session, sid)
-            last_user = next((m for m in reversed(msgs) if m.role == MessageRole.user), None)
-            if last_user is None:
-                yield sse("error", {"code": "chat_error", "message": "没有可续跑的交互回填消息"})
-                return
-            content = ""
-            for b in last_user.blocks or []:
-                if b.get("type") == "markdown":
-                    content = (b.get("data") or {}).get("text", "")
+        msgs = await list_messages(session, sid)
+        last_user = next((m for m in reversed(msgs) if m.role == MessageRole.user), None)
+        if last_user is None:
+            yield sse("error", {"code": "chat_error", "message": "没有可续跑的交互回填消息"})
+            return
+        content = ""
+        for b in last_user.blocks or []:
+            if b.get("type") == "markdown":
+                content = (b.get("data") or {}).get("text", "")
+        agent_events = agent_stream_for_session(session, sid, content, save_input=False)
+        async for chunk in _checkpointed_agent_sse(session, sid, agent_events):
+            yield chunk
 
-            usage_total: int | None = None
-            async for ev in agent_stream_for_session(session, sid, content, save_input=False):
-                if ev.type == "reasoning" and ev.text:
-                    yield sse("reasoning", {"text": ev.text})
-                elif ev.type == "delta" and ev.text:
-                    text_parts.append(ev.text)
-                    yield sse("delta", {"block_index": 0, "text": ev.text})
-                elif ev.type == "block_meta" and ev.block:
-                    blocks.append(ev.block)
-                    yield sse("block_meta", ev.block)
-                elif ev.type == "tool_call" and ev.tool_trace is not None:
-                    t = ev.tool_trace
-                    yield sse(
-                        "tool_call",
-                        {
-                            "kind": t.id.split(":", 1)[0],
-                            "name": t.id,
-                            "args": t.args,
-                            "result": t.result,
-                        },
-                    )
-                elif ev.type == "done" and ev.usage:
-                    usage_total = ev.usage.get("total_tokens")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
-            final_text = "".join(text_parts)
-            # T18.15 图片溯源清洗:编造/失效的 <img> 确定性替换占位图(最终防线)
-            from agentplatform.core.agent.img_proxy import sanitize_model_images
 
-            final_text = sanitize_model_images(final_text)
-            final_blocks: list[dict] = []
-            if final_text.strip():
-                final_blocks.append({"type": "markdown", "data": {"text": final_text}})
-            final_blocks.extend(blocks)
-            msg = await save_assistant_message(
-                session, sid, final_blocks if final_blocks else final_text, tokens=usage_total
+@router.post("/sessions/{sid}/resume")
+async def resume_interrupted(
+    sid: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """断点续跑(设计 016 §2 / ADR 0009 / P1):定位最后一条草稿消息,以
+    「含草稿的完整历史 + 内部续跑指令」重启 agent,产物原地并入草稿 finalize。
+    已完成轮次与工具调用随历史保留,不重跑、不重复计费。
+    """
+    await _ensure_session_owned(session, sid, user.id)
+
+    draft = await latest_draft_message(session, sid)
+    if draft is None:
+        # 无草稿:中断发生在首个产出之前(用户消息已落库,LLM 未答)——
+        # 回退为重跑最后一条用户消息,同样实现"无需手动重发"(A1 完整闭环)
+        msgs = await list_messages(session, sid)
+        last_user = next(
+            (m for m in reversed(msgs) if m.role == MessageRole.user), None
+        )
+        if last_user is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "no_draft", "message": "没有可续跑的中断草稿"},
             )
-            await session.commit()
-            yield sse("done", {"message_id": str(msg.id), "tokens": usage_total})
-        except asyncio.CancelledError:
-            try:
-                partial = "".join(text_parts)
-                if partial.strip():
-                    await save_assistant_message(session, sid, [{"type": "markdown", "data": {"text": partial}}])
-                    await session.commit()
-            except Exception:  # noqa: BLE001
-                await session.rollback()
-            raise
-        except ChatError as exc:
-            await session.rollback()
-            yield sse("error", {"code": "chat_error", "message": str(exc)})
-        except Exception as exc:  # noqa: BLE001
-            await session.rollback()
-            yield sse("error", {"code": "agent_error", "message": str(exc)})
+        fallback_content = message_text(last_user)
+        if not fallback_content.strip():
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "no_draft", "message": "没有可续跑的中断草稿"},
+            )
+
+        async def event_stream():
+            history = await build_history(session, sid)
+            agent_events = agent_stream_for_session(
+                session,
+                sid,
+                fallback_content,
+                save_input=False,
+                prior_history=history[:-1] if history else [],
+            )
+            async for chunk in _checkpointed_agent_sse(session, sid, agent_events):
+                yield chunk
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    async def event_stream():
+        # 历史含草稿内容(build_history 收 assistant 消息),模型从部分回答处继续
+        history = await build_history(session, sid)
+        directive = (
+            "【系统】上一条回复因连接中断未完成。请从中断处继续完成回答,"
+            "不要重复已输出的内容,保持风格与结构连贯。"
+        )
+        agent_events = agent_stream_for_session(
+            session,
+            sid,
+            directive,
+            save_input=False,
+            prior_history=history,
+        )
+        async for chunk in _checkpointed_agent_sse(session, sid, agent_events, draft=draft, is_resume=True):
+            yield chunk
 
     return StreamingResponse(
         event_stream(),

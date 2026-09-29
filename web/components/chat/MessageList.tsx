@@ -12,6 +12,7 @@ interface MessageListProps {
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
   onSaveToKb?: (content: string) => void;
   onRegenerate?: () => void;
+  onResume?: (message: ChatMessage) => void;
 }
 
 export default function MessageList({
@@ -20,6 +21,7 @@ export default function MessageList({
   onInteract,
   onSaveToKb,
   onRegenerate,
+  onResume,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +49,7 @@ export default function MessageList({
           onRegenerate={
             index === messages.length - 1 && m.role === "assistant" ? onRegenerate : undefined
           }
+          onResume={m.resumable && onResume ? () => onResume(m) : undefined}
         />
       ))}
       <div ref={bottomRef} />

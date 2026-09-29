@@ -39,6 +39,7 @@ interface MessageItemProps {
   isStreaming?: boolean;
   isLast?: boolean;
   onRegenerate?: () => void;
+  onResume?: () => void;
   onInteract?: (action: string, value: any, args?: Record<string, any>) => void;
   onSaveToKb?: (content: string) => void;
 }
@@ -48,6 +49,7 @@ export default function MessageItem({
   isStreaming = false,
   isLast = false,
   onRegenerate,
+  onResume,
   onInteract,
   onSaveToKb,
 }: MessageItemProps) {
@@ -198,6 +200,17 @@ export default function MessageItem({
             {blocks.map((block, i) => (
               <BlockRenderer key={i} block={block} onInteract={onInteract} />
             ))}
+            {/* 断点续跑(ADR 0009):中断草稿可从断点继续 */}
+            {!isStreaming && message.role === "assistant" && message.resumable && onResume && (
+              <button
+                type="button"
+                onClick={onResume}
+                className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-700 transition hover:border-amber-400 hover:text-amber-800"
+                title="该回复因连接中断未完成,点击从断点继续(已完成内容不重复生成)"
+              >
+                ⚡ 从断点续跑
+              </button>
+            )}
             {/* 打磨②:最后一条助手回复可重新生成 */}
             {!isStreaming && isLast && message.role === "assistant" && hasText && onRegenerate && (
               <button

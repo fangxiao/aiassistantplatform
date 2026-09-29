@@ -68,6 +68,14 @@ export function continueChat(
   return streamSse(`/chat/sessions/${sid}/continue`, {}, signal);
 }
 
+// 断点续跑(设计 016 §2 / ADR 0009):从中断草稿处继续,产物原地并入该条消息
+export function resumeChat(
+  sid: string,
+  signal?: AbortSignal,
+): AsyncGenerator<SseEvent> {
+  return streamSse(`/chat/sessions/${sid}/resume`, {}, signal);
+}
+
 // 交互回传
 export async function interactBlock(
   sid: string,

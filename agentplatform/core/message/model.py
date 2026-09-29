@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Text, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Text, Uuid
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Integer
@@ -51,6 +51,11 @@ class Message(Base):
         JSON().with_variant(JSONB, "postgresql"), nullable=True
     )
     tool_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 草稿消息(ADR 0009):流式进行中渐进落库的助手消息,断线时留存作检查点,
+    # resume 续跑后原地 finalize;正常结束与历史消息均为 false
+    is_draft: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

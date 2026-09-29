@@ -21,6 +21,7 @@ export interface ChatMessage {
   blocks?: ContentBlock[];
   toolCalls?: ToolCallInfo[];
   reasoning?: string;   // 模型深度思考内容（流式，展示为思考进度指示器）
+  resumable?: string | null; // 断点续跑(ADR 0009):值为服务端草稿 message_id,可续跑
   created_at?: string;
 }
 
