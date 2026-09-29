@@ -21,7 +21,10 @@ const ROLE_LABEL: Record<UserAdminInfo["role"], string> = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const me = getUser();
+  // useState 惰性初始化:getUser() 每次 JSON.parse 返回新对象,若直接赋值并
+  // 进入下方 useEffect 依赖,会导致"渲染→effect→setState→渲染"死循环
+  // (20260929 事故:admin 页 3 分钟打出 2 万次 /admin/users 请求)
+  const [me] = useState(() => getUser());
   const [tab, setTab] = useState<"review" | "users">("review");
 
   // 助手审批
