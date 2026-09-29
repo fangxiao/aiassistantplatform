@@ -135,6 +135,49 @@ async def test_resume_appends_to_draft_and_finalizes(session: AsyncSession) -> N
 
 
 @pytest.mark.asyncio
+async def test_generator_exit_spawns_tail_persist(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """客户端断开(GeneratorExit):尾部经独立任务落盘,partial 转正式。"""
+    import asyncio as _asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from agentplatform.core.db import session as db_session_mod
+
+    # 独立任务用 SessionLocal 开新会话——重定向到测试引擎
+    monkeypatch.setattr(
+        db_session_mod,
+        "SessionLocal",
+        async_sessionmaker(session.bind, class_=AsyncSession, expire_on_commit=False),
+    )
+
+    s = await create_session(session, plugin_id=None, title="ckpt-gexit")
+    await session.commit()
+
+    async def gen() -> AsyncIterator[AgentEvent]:
+        yield AgentEvent(type="delta", text="断开前的尾部内容")
+        yield AgentEvent(type="done", usage={"total_tokens": 3})
+
+    agen = _checkpointed_agent_sse(session, s.id, gen())
+    async for chunk in agen:
+        if chunk.startswith("event: delta"):
+            break
+    await agen.aclose()  # 模拟客户端断开触发的生成器关闭
+
+    # 等待派生的独立落盘任务完成
+    pending = [t for t in _asyncio.all_tasks() if t is not _asyncio.current_task()]
+    await _asyncio.gather(*pending, return_exceptions=True)
+
+    draft = await latest_draft_message(session, s.id)
+    assert draft is None  # partial 已转正式,不再是草稿
+    msgs = await list_messages(session, s.id)
+    assistant = [m for m in msgs if m.role == MessageRole.assistant]
+    assert len(assistant) == 1
+    assert "断开前的尾部内容" in json.dumps(assistant[0].blocks, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
 async def test_tool_call_boundary_flush_survives_disconnect(session: AsyncSession) -> None:
     s = await create_session(session, plugin_id=None, title="ckpt-tool")
     await session.commit()

@@ -206,6 +206,40 @@ async def history_messages(
 _DRAFT_FLUSH_CHARS = 4000  # 检查点 flush 的正文增量阈值(工具边界为主,此为纯长文本兜底)
 
 
+async def _persist_interrupted_tail(
+    sid: uuid.UUID,
+    draft_id: uuid.UUID | None,
+    blocks: list[dict],
+    is_final: bool,
+) -> None:
+    """断开路径的尾部落盘:必须用独立 DB 会话与独立任务。
+
+    断开发生在 starlette/anyio 的取消作用域内——请求作用域的 session 上任何
+    await(含 except 块里的 flush/commit)都会被立即再取消,原地落库必被静默
+    回滚(20260929 P1 冒烟实测)。派生脱离该作用域的任务 + 全新会话才可靠。
+    """
+    from datetime import timedelta as _td
+
+    from agentplatform.core.db.session import SessionLocal
+
+    async with SessionLocal() as s:
+        d = await s.get(Message, draft_id) if draft_id is not None else None
+        if d is None:
+            d = Message(
+                session_id=sid,
+                role=MessageRole.assistant,
+                blocks=[{"type": "markdown", "data": {"text": ""}}],
+                is_draft=True,
+            )
+            s.add(d)
+            await s.flush()
+            d.created_at = d.created_at + _td(microseconds=2000)
+        d.blocks = blocks or [{"type": "markdown", "data": {"text": ""}}]
+        if is_final:
+            d.is_draft = False
+        await s.commit()
+
+
 async def _checkpointed_agent_sse(
     session: AsyncSession,
     sid: uuid.UUID,
@@ -230,6 +264,24 @@ async def _checkpointed_agent_sse(
     base_blocks: list[dict] = list(draft.blocks or []) if draft is not None else []
     usage_total: int | None = None
     flushed_len = 0
+    draft_id: uuid.UUID | None = draft.id if draft is not None else None
+
+    def _spawn_tail(is_final: bool) -> None:
+        """把未 flush 的尾部派生独立任务落盘(见 _persist_interrupted_tail)。"""
+        text = "".join(text_parts)
+        if is_final:
+            from agentplatform.core.agent.img_proxy import sanitize_model_images
+
+            text = sanitize_model_images(text)
+        composed = [*base_blocks]
+        if text.strip():
+            composed.append({"type": "markdown", "data": {"text": text}})
+        composed.extend(blocks)
+        if draft_id is None and not text.strip() and not blocks:
+            return  # 无草稿且无内容,无需落盘
+        asyncio.get_running_loop().create_task(
+            _persist_interrupted_tail(sid, draft_id, composed, is_final)
+        )
 
     def _composed(is_final: bool) -> list[dict]:
         final_text = "".join(text_parts)
@@ -248,12 +300,13 @@ async def _checkpointed_agent_sse(
         生成器,用户消息在首次迭代时才保存;草稿必须晚于它创建,否则
         list_messages 按 created_at 排序会把 assistant 排到 user 之前。
         首 token 前断开本就无可检查点内容,惰性创建无损失。"""
-        nonlocal draft
+        nonlocal draft, draft_id
         if draft is not None:
             return
         draft = await save_assistant_message(
             session, sid, [{"type": "markdown", "data": {"text": ""}}], is_draft=True
         )
+        draft_id = draft.id
         # 与用户消息可能同微秒落库,后移 2ms 保证 user → assistant 严格顺序
         from datetime import timedelta as _td
 
@@ -320,13 +373,16 @@ async def _checkpointed_agent_sse(
             done_payload["resume_of"] = str(draft.id)
         yield sse("done", done_payload)
 
+    except GeneratorExit:
+        # 客户端断开:starlette 经 aclose 关闭流生成器,以 GeneratorExit 在
+        # yield 点穿透。anyio 取消作用域内不可原地 await 落库(会被再取消),
+        # 派生独立任务 + 独立会话落盘尾部;partial 转正式(与用户停止行为一致)
+        _spawn_tail(is_final=True)
+        raise
+
     except asyncio.CancelledError:
-        # 用户"停止生成"/客户端断开:已产出部分转正式(与既有行为一致),草稿关闭
-        try:
-            await _flush(is_final=True)
-            await session.commit()
-        except Exception:  # noqa: BLE001
-            await session.rollback()
+        # 任务取消:同上,派生独立任务落盘,partial 转正式
+        _spawn_tail(is_final=True)
         raise
 
     except ChatError as exc:
