@@ -665,7 +665,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         print(f"部署失败(网络): {exc}")
         return 1
     if resp.status_code == 401:
-        print("部署失败: 未认证。请先 export AGENTPLATFORM_TOKEN=\"<平台 JWT>\"(Web 登录后 /auth/me 可见)。")
+        print("部署失败: 未认证。请先配置平台令牌——POST /api/auth/login 换取 JWT(30 天有效),")
+        print('  然后 export AGENTPLATFORM_TOKEN="<JWT>",或写入 ~/.agentplatform/config.json: {"token": "<JWT>"}')
         return 1
     if resp.status_code == 403:
         print("部署失败: 当前账号无开发者权限,请联系平台管理员分配 developer 角色。")
