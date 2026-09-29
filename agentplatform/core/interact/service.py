@@ -78,7 +78,14 @@ async def handle_interaction(
             "type": "markdown",
             "data": {"text": f"✅ **{status_text}**(已告知助手,可继续对话)**"},
         })
-    elif action.endswith("form_submit") or action == "input.form":
+    elif (
+        action.endswith("form_submit")
+        or action == "input.form"
+        # 表单提交以 value 结构为准(fields 数组),自定义 action 名(如
+        # "study_intake_submit")同样走表单分支——此前仅按命名约定匹配,
+        # 不命中时落 fallback:表单值被静默丢弃且前端不触发续跑,表现为"提交后无响应"
+        or (isinstance(value, dict) and isinstance(value.get("fields"), list))
+    ):
         # 打磨(控件发挥):表单提交值渲染为表格回执 + 落用户消息,agent 基于值续跑
         fields = value.get("fields") if isinstance(value, dict) else None
         if isinstance(fields, list) and fields:

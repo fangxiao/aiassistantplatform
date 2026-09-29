@@ -358,7 +358,12 @@ function ChatHome() {
       }
       // 交互回填后自动续跑(表单提交/确认类动作):agent 以回填消息为当前轮直接继续,
       // 用户无需再手动输入"继续"
-      const isFormSubmit = action === "input.form" || action.endsWith("form_submit");
+      // 表单判定与后端同构:除约定命名外,value 含 fields 数组即视为表单提交
+      // (input.form 允许自定义 action 名,不能只靠命名匹配,否则表现为"提交后无响应")
+      const isFormSubmit =
+        action === "input.form" ||
+        action.endsWith("form_submit") ||
+        Boolean(value && typeof value === "object" && Array.isArray((value as { fields?: unknown }).fields));
       const isConfirm = action === "input.confirm" || action.endsWith("confirm");
       if (isFormSubmit || isConfirm) {
         setStreaming(true);
