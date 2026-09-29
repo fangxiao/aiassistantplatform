@@ -204,6 +204,10 @@ async def stream_agent(
     for rid in resource_ids:
         row = await resolve(session, rid)
         if row is not None:
+            # 部署态自愈:陈旧资源行的 impl 文件缺失时从 manifest 重建(20260929 事故)
+            from agentplatform.core.plugin.loader import ensure_resource_impl
+
+            await ensure_resource_impl(session, row)
             # 注册全部名称与别名形式，确保任意调用形式(如 tool:xxx, tool__xxx, xxx)均能精准命中
             resources[row.id] = row
             resources[row.id.replace(":", "__")] = row

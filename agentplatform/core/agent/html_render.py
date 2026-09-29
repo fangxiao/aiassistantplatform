@@ -84,6 +84,13 @@ async def run(args: dict) -> str:
 
     files = data.get("files") or {}
     out: dict = {"ok": True, "pages": data.get("pages", 0)}
+    # 契约提示(20260929 sharestudy 反馈):输入缺少 .slide/@page 分页标记时,
+    # 渲染服务按单页处理——此处显式告知模型,防止把"只渲染出 1 页"当成符合多页契约
+    if out["pages"] <= 1 and ".slide" not in html and "@page" not in html:
+        out["warning"] = (
+            "输入 HTML 未包含 .slide 或 @page 分页标记,本次按单页渲染;"
+            "若任务要求多页 deck,请按契约补齐分页标记后重新渲染"
+        )
     up = _uploads_dir()
     if files.get("pdf"):
         p = up / f"{_uuid.uuid4().hex}.pdf"

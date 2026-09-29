@@ -218,6 +218,61 @@ def remove_plugin_storage(plugin_name: str) -> None:
         shutil.rmtree(plugin_storage, ignore_errors=True)
 
 
+async def ensure_resource_impl(session: AsyncSession, resource: SkillTool) -> None:
+    """部署态自愈:私有资源 impl 文件缺失时,从插件 manifest 内联代码落盘重建。
+
+    背景(20260929 sharestudy 事故):历史部署残留的旧版本资源行 impl_path 指向
+    开发者宿主机路径,服务端容器内不存在;execute_skill 曾静默降级为按 description
+    拼提示词,LLM 拿到"说明书本身",表现为"skill 未执行、模型裸手发挥"。
+    在会话资源装载点检测并自愈,使陈旧资源行自动修复;无法自愈时记日志留痕。
+    """
+    import logging as _logging
+
+    if resource.source != SkillToolSource.private or not resource.impl_path:
+        return
+    if Path(resource.impl_path).exists():
+        return
+
+    plugin_name = resource.owner_id or resource.id.split(":", 1)[-1].rsplit("_", 1)[0]
+    plugin = await session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+    code, file_name = None, Path(resource.impl_path).name
+    if plugin is not None:
+        for entry in (plugin.manifest.get("skills") or []) + (
+            plugin.manifest.get("tools") or []
+        ):
+            if isinstance(entry, dict) and entry.get("id") == resource.id and entry.get("code"):
+                code = entry["code"]
+                file_name = Path(entry.get("file") or file_name).name or file_name
+                break
+    if code is None:
+        _logging.getLogger(__name__).warning(
+            "资源 %s@%s impl 文件缺失且无法从 manifest 自愈: %s",
+            resource.id,
+            resource.version,
+            resource.impl_path,
+        )
+        return
+
+    target = (
+        Path.home()
+        / ".agentplatform"
+        / "installed_plugins"
+        / plugin_name
+        / ("skills" if resource.kind == SkillToolKind.skill else "tools")
+        / file_name
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(code, encoding="utf-8")
+    resource.impl_path = str(target.resolve())
+    await session.flush()
+    _logging.getLogger(__name__).warning(
+        "资源 %s@%s impl 文件缺失,已从 manifest 自愈落盘: %s",
+        resource.id,
+        resource.version,
+        resource.impl_path,
+    )
+
+
 async def uninstall_plugin(session: AsyncSession, plugin: Plugin) -> None:
     """删除插件及其私有 skill/tool(注册表 source=private)。"""
     await purge_private_resources(session, plugin.name)

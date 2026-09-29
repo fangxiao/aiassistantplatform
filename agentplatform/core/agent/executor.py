@@ -8,12 +8,15 @@ skill:简单 skill,填充 prompt 模板后由注入的 llm_call 完成一次 LLM
 
 import importlib
 import importlib.util
+import logging
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from agentplatform.core.agent.errors import AgentExecError
 from agentplatform.core.registry.model import SkillTool
+
+logger = logging.getLogger(__name__)
 
 # skill 的 LLM 调用器:prompt -> 文本(测试可 mock,生产由循环注入)
 SkillLlmCall = Callable[[str], Awaitable[str]]
@@ -140,6 +143,14 @@ async def execute_skill(resource: SkillTool, args: dict, llm_call: SkillLlmCall)
         module = resolve_impl(resource)
     except AgentExecError:
         # 优雅降级：如果无本地实现文件（如纯 Prompt 声明或跨机器部署），通过资源描述与参数动态构建提示词
+        # 留痕(20260929 sharestudy 事故):静默降级会把部署态断线伪装成"模型裸手发挥",
+        # 必须有日志可查;装载点自愈(ensure_resource_impl)已覆盖可修复场景,落到这里即真缺失
+        logger.warning(
+            "skill %s@%s impl 缺失,降级为 description 拼提示执行(impl_path=%s)",
+            resource.id,
+            resource.version,
+            resource.impl_path,
+        )
         import json
 
         args_str = json.dumps(args, ensure_ascii=False, indent=2)

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentplatform.core.plugin.errors import DependencyError, PluginValidationError
 from agentplatform.core.plugin.loader import (
     deploy_plugin,
+    ensure_resource_impl,
     get_plugin,
     uninstall_plugin,
     validate_manifest,
@@ -175,3 +176,59 @@ class TestDeployPlugin:
             select(SkillTool).where(SkillTool.owner_id == plugin.name)
         )
         assert list(rows) == []
+
+
+class TestEnsureResourceImpl:
+    async def test_heals_missing_impl_from_manifest_code(
+        self, session: AsyncSession, tmp_path, monkeypatch
+    ) -> None:
+        """20260929 sharestudy 事故回归:资源行 impl_path 指向不存在的宿主机路径时,
+        从插件 manifest 内联代码自愈落盘并改写 impl_path。"""
+        from pathlib import Path as _Path
+
+        from agentplatform.core.plugin.loader import ensure_resource_impl
+
+        await seed_builtin(session)
+        plugin = await deploy_plugin(
+            session,
+            _manifest(
+                skills=[
+                    ResourceDef(
+                        id="skill:prd_review",
+                        file="./skills/prd_review.py",
+                        code="SKILL_REGISTRY = []\n",
+                        schema={"parameters": {"type": "object"}},
+                    )
+                ]
+            ),
+        )
+        await session.commit()
+
+        row = await resolve(session, "skill:prd_review")
+        assert row is not None
+        # 模拟部署态断线:impl 文件被删 + impl_path 指向不存在路径
+        _Path(row.impl_path).unlink(missing_ok=True)
+        dead_path = str(tmp_path / "somewhere" / "prd_review.py")
+        row.impl_path = dead_path
+        await session.commit()
+
+        # Path.home() 重定向到 tmp,保证测试不污染真实 ~/.agentplatform
+        monkeypatch.setenv("HOME", str(tmp_path))
+        import agentplatform.core.plugin.loader as loader_mod
+
+        monkeypatch.setattr(loader_mod.Path, "home", staticmethod(lambda: tmp_path))
+
+        await ensure_resource_impl(session, row)
+        assert row.impl_path != dead_path
+        assert _Path(row.impl_path).exists()
+        assert _Path(row.impl_path).read_text(encoding="utf-8") == "SKILL_REGISTRY = []\n"
+
+    async def test_noop_when_impl_exists(self, session: AsyncSession) -> None:
+        await seed_builtin(session)
+        await deploy_plugin(session, _manifest())
+        await session.commit()
+        row = await resolve(session, "skill:prd_review")
+        assert row is not None
+        original = row.impl_path
+        await ensure_resource_impl(session, row)
+        assert row.impl_path == original
