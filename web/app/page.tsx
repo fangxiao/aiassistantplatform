@@ -196,6 +196,7 @@ function ChatHome() {
         setMessages((ms) => ms.map((m) => (m.id === asstId ? fn(m) : m)));
       const controller = new AbortController();
       abortRef.current = controller;
+      let terminated = false;
       try {
         for await (const ev of regenerateLast(current.id, controller.signal)) {
           if (ev.event === "delta") {
@@ -207,7 +208,15 @@ function ChatHome() {
           } else if (ev.event === "tool_call") {
             const d = ev.data as ToolCallInfo;
             patch((m) => ({ ...m, toolCalls: [...(m.toolCalls ?? []), d] }));
+          } else if (ev.event === "done") {
+            terminated = true;
           }
+        }
+        if (!terminated) {
+          patch((m) => ({
+            ...m,
+            text: m.text + "\n\n[连接中断] 流式响应意外结束(未收到完成事件),请重试;反复出现请反馈平台。",
+          }));
         }
       } catch {
         patch((m) => ({ ...m, text: m.text || "[已中断]" }));

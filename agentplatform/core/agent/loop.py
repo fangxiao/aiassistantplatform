@@ -229,18 +229,30 @@ async def stream_agent(
     skill_delta_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def skill_call(prompt: str) -> str:
-        """简单 skill 的一次 LLM 调用(002 §5.3)。实时将 delta 注入队列以流式渲染给用户。"""
+        """简单 skill 的一次 LLM 调用(002 §5.3)。实时将 delta 注入队列以流式渲染给用户。
+
+        嵌套流失败不再静默(20260928 断流事故):client 以 error 事件上报的失败
+        回填为可见错误文本进结果与队列,外层模型据此自纠,而不是拿到空串无声停摆。
+        """
         chunks: list[str] = []
         async for e in _stream(llm_client, [{"role": "user", "content": prompt}]):
             if e.type == "delta" and e.text:
                 chunks.append(e.text)
                 await skill_delta_queue.put(e.text)
+            elif e.type == "error" and getattr(e, "error", None):
+                err_text = f"\n\n【skill 子调用失败】{e.error}"
+                chunks.append(err_text)
+                await skill_delta_queue.put(err_text)
         return "".join(chunks)
 
     async def execute(resource: SkillTool | None, arguments: str) -> str:
         """执行入口:包装 _execute_inner,采集产物 URL 与入参消费(freshness 校验用)。"""
         import re as _re
 
+        # 属性快照:执行期间请求级 session 可能已 rollback/关闭(expire/detach),
+        # 执行完成后再摸 ORM 属性会触发刷新抛 DetachedInstanceError(20260928 断流事故)
+        rid = resource.id if resource is not None else None
+        rkind = resource.kind if resource is not None else None
         # 入参引用了平台文件 URL(签名/编码形态)→ 记为已消费(交付链:
         # 如 image_gen 的图被嵌进 preview 的 html_content)
         arg_urls = set(
@@ -249,12 +261,12 @@ async def stream_agent(
         if arg_urls:
             _run_state.consumed_urls.update(u for u in arg_urls if "%" in u or "sig=" in u)
         result = await _execute_inner(resource, arguments)
-        if resource is not None and resource.id and resource.kind == SkillToolKind.tool:
+        if rid and rkind == SkillToolKind.tool:
             urls = set(
                 _re.findall(r'https?://[^\s\"<>]+|/api/files/raw\?[^\s\"<>]+', result or "")
             )
             if urls:
-                _run_state.produced_urls.setdefault(resource.id, set()).update(urls)
+                _run_state.produced_urls.setdefault(rid, set()).update(urls)
         return result
 
     # M17 P1:写操作确认框积攒区(执行后由 block_meta 通道下发)
@@ -588,19 +600,26 @@ async def stream_agent(
 
                     # 2. 实际执行工具逻辑（若为 skill 撰写，则将内部生成内容实时流式传输给用户）
                     exec_task = asyncio.create_task(execute(resource, tc.arguments))
-                    while not exec_task.done():
-                        try:
-                            chunk = await asyncio.wait_for(skill_delta_queue.get(), timeout=0.05)
+                    try:
+                        while not exec_task.done():
+                            try:
+                                chunk = await asyncio.wait_for(skill_delta_queue.get(), timeout=0.05)
+                                if chunk:
+                                    yield AgentEvent(type="skill_delta", text=chunk)
+                            except TimeoutError:
+                                continue
+                        while not skill_delta_queue.empty():
+                            chunk = skill_delta_queue.get_nowait()
                             if chunk:
                                 yield AgentEvent(type="skill_delta", text=chunk)
-                        except TimeoutError:
-                            continue
-                    while not skill_delta_queue.empty():
-                        chunk = skill_delta_queue.get_nowait()
-                        if chunk:
-                            yield AgentEvent(type="skill_delta", text=chunk)
 
-                    result = await exec_task
+                        result = await exec_task
+                    finally:
+                        # 客户端断开/生成器被取消时终止孤儿执行任务:否则任务继续持有
+                        # 已关闭的请求级 session,产生 DetachedInstanceError 与连接泄漏
+                        # (20260928 断流事故日志证据:Task exception was never retrieved)
+                        if not exec_task.done():
+                            exec_task.cancel()
                     trace = ToolTrace(
                         id=norm_name, args=tool_args, result=result
                     )
