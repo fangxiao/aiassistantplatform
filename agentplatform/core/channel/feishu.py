@@ -573,9 +573,14 @@ def start() -> bool:
             elif a.value and a.value.get("plugin"):
                 option = a.value["plugin"]
             chat_id = ev.context.open_chat_id if ev.context else None
+            open_message_id = (ev.context.open_message_id or "") if ev.context else ""
             if option and chat_id:
+                # 队列项结构 (message_id, chat_id, text):切换标记必须放 text 槽位
+                # ——曾误放 message_id 槽,worker 判 text 前缀永不命中,
+                # 还把标记当 message_id 回复报 400(20260930 选助手无反应根因)
                 loop.call_soon_threadsafe(
-                    queue.put_nowait, (f"__CARD__:{option}", chat_id, "")
+                    queue.put_nowait,
+                    (open_message_id, chat_id, f"__CARD__:{option}"),
                 )
             try:
                 return P2CardActionTriggerResponse.build(
