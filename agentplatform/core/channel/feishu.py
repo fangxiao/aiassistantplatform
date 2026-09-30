@@ -31,6 +31,75 @@ _ws_thread: object | None = None
 _CARD_SENDER = None
 
 
+def _text_card(content_md: str) -> dict:
+    """简单文本卡片(占位/更新两用;lark_md 渲染)。"""
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": content_md}}
+        ],
+    }
+
+
+async def _create_card_with(client, chat_id: str, card: dict) -> str | None:
+    """创建卡片消息,返回 message_id(占位卡用;失败返回 None 走文本降级)。"""
+    from lark_oapi.api.im.v1 import (
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+    )
+
+    def _do() -> str | None:
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("interactive")
+                .content(json.dumps(card, ensure_ascii=False))
+                .build()
+            )
+            .build()
+        )
+        resp = client.im.v1.message.create(req)
+        if resp.success() and resp.data is not None:
+            return resp.data.message_id
+        logger.warning("feishu 占位卡片创建失败 code=%s msg=%s", resp.code, resp.msg)
+        return None
+
+    return await asyncio.get_running_loop().run_in_executor(None, _do)
+
+
+async def _patch_card_with(client, message_id: str, card: dict) -> bool:
+    """更新卡片内容(占位卡 → 最终回答);失败返回 False 走文本降级。"""
+    from lark_oapi.api.im.v1 import (
+        PatchMessageRequest,
+        PatchMessageRequestBody,
+    )
+
+    def _do() -> bool:
+        req = (
+            PatchMessageRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                PatchMessageRequestBody.builder()
+                .content(json.dumps(card, ensure_ascii=False))
+                .build()
+            )
+            .build()
+        )
+        resp = client.im.v1.message.patch(req)
+        if resp.success():
+            return True
+        logger.warning("feishu 卡片更新失败 code=%s msg=%s", resp.code, resp.msg)
+        return False
+
+    return await asyncio.get_running_loop().run_in_executor(None, _do)
+
+
+_PLACEHOLDER_CARD_NOTE = "⏳ 正在思考…\n\n长回答可能需要 10–30 秒,完成后此处直接显示答案。"
+
+
 async def _send_text_with(client, chat_id: str, text: str) -> None:
     """向会话主动发送文本消息(卡片确认等场景,无 reply 目标时用)。"""
     from lark_oapi.api.im.v1 import (
@@ -276,7 +345,7 @@ def _assistant_card_json(rows: list) -> dict:
     }
 
 
-async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
+async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=None) -> None:
     """单条消息处理:命令分发 → 会话映射 → agent 运行 → 回复。"""
     from agentplatform.core.chat.service import agent_stream_for_session
     from agentplatform.core.db.session import SessionLocal
@@ -321,6 +390,26 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
 
     lock = _INFLIGHT.setdefault(chat_id, asyncio.Lock())
     async with lock:  # A4:同一飞书会话串行处理
+        # 等待反馈(20260930 用户反馈"没有等待提示像没 work"):先发占位卡,
+        # 生成完成后原地更新为答案;卡片不可用时静默降级为完成时一次性回复
+        placeholder_mid: str | None = None
+        if client is not None:
+            try:
+                placeholder_mid = await _create_card_with(
+                    client, chat_id, _text_card(_PLACEHOLDER_CARD_NOTE)
+                )
+            except Exception:  # noqa: BLE001  占位失败不影响主流程
+                logger.warning("feishu 占位卡片异常,降级为完成时回复")
+
+        async def _deliver(final_text: str) -> None:
+            if placeholder_mid is not None:
+                try:
+                    if await _patch_card_with(client, placeholder_mid, _text_card(final_text)):
+                        return
+                except Exception:  # noqa: BLE001  更新失败回落新消息
+                    logger.warning("feishu 答案卡片更新异常,回落新消息")
+            await reply_fn(message_id, final_text)
+
         try:
             async with SessionLocal() as s:
                 sid = await _ensure_session_id(s, chat_id)
@@ -341,11 +430,11 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
                     elif frame.startswith("event: error"):
                         payload = frame.split("data: ", 1)[1].strip()
                         parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
-            await reply_fn(message_id, _reply_text("".join(parts), n_blocks))
+            await _deliver(_reply_text("".join(parts), n_blocks))
         except Exception as exc:  # noqa: BLE001 通道侧兜底,错误必须回给用户
             logger.exception("feishu 通道处理失败 chat=%s", chat_id)
             try:
-                await reply_fn(message_id, f"[处理失败] {type(exc).__name__}: {exc}")
+                await _deliver(f"[处理失败] {type(exc).__name__}: {exc}")
             except Exception:  # noqa: BLE001
                 pass
 
@@ -466,7 +555,7 @@ def start() -> bool:
                         msg = await _switch_plugin(s, chat_id, plugin_name)
                     await _send_text_with(client, chat_id, msg)
                 else:
-                    await _process(message_id, chat_id, text, _build_reply_fn(client))
+                    await _process(message_id, chat_id, text, _build_reply_fn(client), client)
             finally:
                 queue.task_done()
 
