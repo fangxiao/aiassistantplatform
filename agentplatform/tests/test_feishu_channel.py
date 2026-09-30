@@ -121,14 +121,14 @@ def test_extract_text_only_text_type() -> None:
         event=SimpleNamespace(
             message=SimpleNamespace(
                 message_type="text",
-                message_content='{"text":"你好"}',
+                content='{"text":"你好"}',
             )
         )
     )
     assert feishu._extract_text(msg) == "你好"
     img = SimpleNamespace(
         event=SimpleNamespace(
-            message=SimpleNamespace(message_type="image", message_content="{}")
+            message=SimpleNamespace(message_type="image", content="{}")
         )
     )
     assert feishu._extract_text(img) is None

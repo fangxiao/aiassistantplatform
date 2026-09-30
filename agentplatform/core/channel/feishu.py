@@ -101,11 +101,13 @@ async def _ensure_session_id(session: AsyncSession, chat_id: str) -> uuid.UUID:
 def _extract_text(msg) -> str | None:
     """从事件消息体提取文本;仅处理文本类型,其余类型提示暂不支持。"""
     m = msg.event.message
-    if m.message_type != "text":
+    if getattr(m, "message_type", "") != "text":
         return None
     try:
-        return json.loads(m.message_content).get("text", "")
-    except (ValueError, AttributeError):
+        # SDK 模型字段为 content(payload 同名);首版误写 message_content,
+        # AttributeError 被吞导致所有文本都落"暂只支持文本消息"(20260930)
+        return json.loads(m.content).get("text", "")
+    except (ValueError, AttributeError, TypeError):
         return None
 
 
@@ -142,14 +144,21 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
                 sid = await _ensure_session_id(s, chat_id)
             parts: list[str] = []
             n_blocks = 0
+            # 复用 Web 端的检查点 SSE 管道:助手消息随草稿检查点落库(需求 A5,
+            # Web 端可见),断线路径行为一致;从 SSE 帧中提取增量文本
+            from agentplatform.api.chat import _checkpointed_agent_sse
+
             async with SessionLocal() as s:
-                async for ev in agent_stream_for_session(s, sid, text):
-                    if ev.type == "delta" and ev.text:
-                        parts.append(ev.text)
-                    elif ev.type in ("block_meta", "await_external") and ev.block:
+                agen = agent_stream_for_session(s, sid, text)
+                async for frame in _checkpointed_agent_sse(s, sid, agen):
+                    if frame.startswith("event: delta"):
+                        payload = frame.split("data: ", 1)[1].strip()
+                        parts.append(json.loads(payload).get("text", ""))
+                    elif frame.startswith(("event: block_meta", "event: await_external")):
                         n_blocks += 1
-                    elif ev.type == "error":
-                        parts.append(f"\n[生成中断:{getattr(ev, 'text', '') or ''}]")
+                    elif frame.startswith("event: error"):
+                        payload = frame.split("data: ", 1)[1].strip()
+                        parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
             await reply_fn(message_id, _reply_text("".join(parts), n_blocks))
         except Exception as exc:  # noqa: BLE001 通道侧兜底,错误必须回给用户
             logger.exception("feishu 通道处理失败 chat=%s", chat_id)
