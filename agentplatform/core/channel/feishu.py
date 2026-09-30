@@ -155,21 +155,21 @@ async def _send_card_with(client, chat_id: str, card: dict) -> None:
     await asyncio.get_running_loop().run_in_executor(None, _do)
 
 
-async def _service_user_id(session: AsyncSession) -> str:
-    """通道共享服务账号(get-or-create,role=user;需求 012 §5:独立账号 P2+)。"""
+async def _service_user_id(session: AsyncSession, open_id: str | None = None) -> str:
+    """通道账号(P2-5):按飞书 open_id 自动开通独立平台账号(role=user,
+    随机密码不可登录,仅作会话/资源归属);open_id 缺省回落共享服务账号。"""
     from agentplatform.core.auth.model import UserRole
     from agentplatform.core.auth.service import create_user, get_user_by_email
 
-    u = await get_user_by_email(session, FEISHU_SERVICE_EMAIL)
+    email = (
+        f"feishu-{open_id}@channel.agentplatform.local"
+        if open_id
+        else FEISHU_SERVICE_EMAIL
+    )
+    u = await get_user_by_email(session, email)
     if u is not None:
         return str(u.id)
-    # 随机密码:通道账号不走密码登录,仅作会话归属
-    u = await create_user(
-        session,
-        FEISHU_SERVICE_EMAIL,
-        secrets.token_urlsafe(24),
-        role=UserRole.user,
-    )
+    u = await create_user(session, email, secrets.token_urlsafe(24), role=UserRole.user)
     await session.commit()
     return str(u.id)
 
@@ -196,8 +196,10 @@ async def _reset_binding(session: AsyncSession, chat_id: str) -> None:
     await session.commit()
 
 
-async def _ensure_session_id(session: AsyncSession, chat_id: str) -> uuid.UUID:
-    """get-or-create:绑定存在即复用;否则以默认助手新建并落绑定。"""
+async def _ensure_session_id(
+    session: AsyncSession, chat_id: str, open_id: str | None = None, allowed: list | None = None
+) -> uuid.UUID:
+    """get-or-create:绑定存在即复用;否则以默认助手新建并落绑定(记录 open_id)。"""
     from agentplatform.core.channel.model import ChannelSession
     from agentplatform.core.plugin.model import Plugin
     from agentplatform.core.session.service import create_session
@@ -217,9 +219,16 @@ async def _ensure_session_id(session: AsyncSession, chat_id: str) -> uuid.UUID:
                 "feishu_default_plugin=%s 不存在,回落默认助手",
                 settings.feishu_default_plugin,
             )
-    user_id = await _service_user_id(session)
+    # allowlist(P2-4):机器人限定的助手范围内取默认插件
+    if allowed and settings.feishu_default_plugin not in allowed:
+        plugin_id = None
+    user_id = await _service_user_id(session, open_id)
     sess = await create_session(session, plugin_id=plugin_id, title="飞书会话", user_id=user_id)
-    session.add(ChannelSession(channel="feishu", chat_id=chat_id, session_id=sess.id))
+    session.add(
+        ChannelSession(
+            channel="feishu", chat_id=chat_id, session_id=sess.id, feishu_open_id=open_id
+        )
+    )
     await session.commit()
     return sess.id
 
@@ -441,7 +450,7 @@ def _plugin_intro(plugin) -> str:
     return "\n".join(lines)
 
 
-async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str):
+async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str, allowed: list | None = None, open_id: str | None = None):
     """切换助手:清旧绑定,以指定插件新建会话并绑定。返回 Plugin 或 None(未找到)。"""
     from sqlalchemy import select as _select
 
@@ -456,10 +465,10 @@ async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str):
             Plugin.review_status == PluginReviewStatus.approved,
         )
     )
-    if plugin is None:
+    if plugin is None or (allowed and plugin_name not in allowed):
         return None
     await _reset_binding(session, chat_id)
-    user_id = await _service_user_id(session)
+    user_id = await _service_user_id(session, open_id)
     sess = await create_session(
         session, plugin_id=plugin.id, title=f"飞书·{plugin.name}", user_id=user_id
     )
@@ -468,7 +477,7 @@ async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str):
     return plugin
 
 
-async def _available_plugins() -> list:
+async def _available_plugins(allowed: list | None = None) -> list:
     from agentplatform.core.db.session import SessionLocal
     from agentplatform.core.plugin.model import Plugin, PluginReviewStatus, PluginStatus
     from sqlalchemy import select as _select
@@ -482,6 +491,8 @@ async def _available_plugins() -> list:
                 ).order_by(Plugin.name)
             )
         ).all()
+    if allowed:
+        rows = [r for r in rows if r.name in allowed]
     return list(rows)
 
 
@@ -541,7 +552,7 @@ def _assistant_card_json(rows: list) -> dict:
     }
 
 
-async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=None) -> None:
+async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=None, open_id: str | None = None, allowed: list | None = None) -> None:
     """单条消息处理:命令分发 → 会话映射 → agent 运行 → 回复。"""
     from agentplatform.core.chat.service import agent_stream_for_session
     from agentplatform.core.db.session import SessionLocal
@@ -557,12 +568,10 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
         await reply_fn(message_id, "已开启新会话,上下文已清空。")
         return
     if cmd in ("/助手列表", "/助手", "/plugins"):
-        # 优先发交互卡片(下拉选择即切换);失败回落文本列表
-        card_sender = globals().get("_CARD_SENDER")
-        rows = await _available_plugins()
-        if card_sender is not None and rows:
+        rows = await _available_plugins(allowed)
+        if client is not None and rows:
             try:
-                await card_sender(chat_id, _assistant_card_json(rows))
+                await _send_card_with(client, chat_id, _assistant_card_json(rows))
                 return
             except Exception:  # noqa: BLE001  卡片失败回落文本
                 logger.exception("飞书卡片发送失败,回落文本列表")
@@ -587,6 +596,15 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
                 logger.warning("feishu 介绍卡片发送失败,回落文本")
         await reply_fn(message_id, intro)
         return
+    if cmd.startswith("/定时"):
+        await _handle_schedule_cmd(message_id, chat_id, cmd, reply_fn, open_id)
+        return
+    if cmd in ("/定时列表",):
+        await _handle_schedule_cmd(message_id, chat_id, "/定时列表", reply_fn, open_id)
+        return
+    if cmd.startswith("/取消定时"):
+        await _handle_schedule_cmd(message_id, chat_id, cmd, reply_fn, open_id)
+        return
     if cmd in ("/帮助", "/help", "帮助"):
         await reply_fn(
             message_id,
@@ -594,6 +612,8 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
             "/助手列表 - 弹出助手选择卡片,下拉即切换\n"
             "/切换 <名字> - 切换助手(如 /切换 sharestudy)\n"
             "/重置 - 当前助手开新会话\n"
+            "/定时 HH:MM <内容> - 每天定点生成并推送到本会话\n"
+            "/定时列表 / 取消定时 <名称> - 管理定时任务\n"
             "/帮助 - 显示本帮助",
         )
         return
@@ -603,7 +623,7 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
         from agentplatform.core.db.session import SessionLocal as _SL
 
         async with _SL() as s:
-            sid = await _ensure_session_id(s, chat_id)
+            sid = await _ensure_session_id(s, chat_id, open_id, allowed)
         await _run_agent_round(client, chat_id, sid, text, message_id, reply_fn)
 
 
@@ -699,6 +719,110 @@ async def _run_agent_round(
             pass
 
 
+
+
+async def _handle_schedule_cmd(
+    message_id: str, chat_id: str, cmd: str, reply_fn, open_id: str | None
+) -> None:
+    """定时任务命令(P2-3):以当前助手+通道账号创建,产出推回本会话。"""
+    from agentplatform.core.db.session import SessionLocal as _SL
+    from agentplatform.core.scheduler import service as sched
+    from agentplatform.core.scheduler.model import ScheduledTask
+    from sqlalchemy import select as _sel
+
+    async def _current_plugin_and_user(s):
+        row = await _bound_session_id(s, chat_id)
+        plugin_id = None
+        if row is not None:
+            from agentplatform.core.session.service import get_session as _gs
+
+            cs = await _gs(s, row)
+            plugin_id = cs.plugin_id if cs else None
+        user_id = await _service_user_id(s, open_id)
+        return plugin_id, user_id
+
+    if cmd == "/定时列表":
+        async with _SL() as s:
+            _, user_id = await _current_plugin_and_user(s)
+            rows = (await s.scalars(_sel(ScheduledTask).where(ScheduledTask.user_id == user_id))).all()
+        if not rows:
+            await reply_fn(message_id, "暂无定时任务。/定时 HH:MM <内容> 创建")
+            return
+        lines = ["定时任务:"]
+        for r in rows:
+            when = r.daily_at or (f"每 {r.interval_minutes} 分钟" if r.interval_minutes else "?")
+            lines.append(f"· {r.name}({when}) 下次 {r.next_run_at}")
+        await reply_fn(message_id, "\n".join(lines)[:4000])
+        return
+
+    if cmd.startswith("/取消定时"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2:
+            await reply_fn(message_id, "用法:/取消定时 <名称>")
+            return
+        async with _SL() as s:
+            _, user_id = await _current_plugin_and_user(s)
+            row = await s.scalar(
+                _sel(ScheduledTask).where(
+                    ScheduledTask.user_id == user_id, ScheduledTask.name == parts[1].strip()
+                )
+            )
+            if row is None:
+                await reply_fn(message_id, f"未找到定时任务:{parts[1].strip()}")
+                return
+            await sched.delete_task(s, user_id, row.id)
+            await s.commit()
+        await reply_fn(message_id, f"已取消定时任务:{parts[1].strip()}")
+        return
+
+    # /定时 HH:MM <内容>
+    parts = cmd.split(maxsplit=2)
+    if len(parts) < 3 or ":" not in parts[1]:
+        await reply_fn(message_id, "用法:/定时 HH:MM <内容>(如 /定时 08:30 每日英语学习简报)")
+        return
+    hh_mm = parts[1].strip()
+    content = parts[2].strip()
+    try:
+        hh, mm = (int(x) for x in hh_mm.split(":", 1))
+        assert 0 <= hh < 24 and 0 <= mm < 60
+    except (ValueError, AssertionError):
+        await reply_fn(message_id, "时间格式应为 HH:MM(如 08:30)")
+        return
+    async with _SL() as s:
+        plugin_id, user_id = await _current_plugin_and_user(s)
+        name = f"飞书定时-{hh_mm}"
+        row = await sched.create_task(
+            s,
+            user_id=user_id,
+            name=name,
+            kind="custom",
+            prompt=content,
+            schedule_type="daily",
+            daily_at=hh_mm,
+            plugin_id=plugin_id,
+        )
+        row.feishu_chat_id = chat_id
+        await s.commit()
+    await reply_fn(
+        message_id,
+        f"已创建定时任务「{name}」:每天 {hh_mm} 以当前助手生成并推送到本会话。/定时列表 查看",
+    )
+
+async def push_to_chat(chat_id: str, title: str, text: str) -> bool:
+    """向飞书会话推送卡片(定时任务产出等)。遍历已启动机器人,命中即返回。"""
+    card = _text_card(f"**{title}**\n\n{text[:20000]}")
+    for g in list(_GATEWAYS.values()):
+        client = g.get("client")
+        if client is None:
+            continue
+        try:
+            await _send_card_with(client, chat_id, card)
+            return True
+        except Exception:  # noqa: BLE001  发错机器人(chat 不存在)静默跳过
+            continue
+    return False
+
+
 async def _handle_confirm_submit(client, chat_id: str, payload: dict) -> None:
     """input.confirm 飞书按钮回执:确认/取消经 handle_interaction 落库后自动续跑。"""
     from agentplatform.core.db.session import SessionLocal
@@ -763,115 +887,98 @@ async def _handle_form_submit(client, chat_id: str, payload: dict) -> None:
         await _run_agent_round(client, chat_id, sid, content, "", _fallback_reply)
 
 
-def start() -> bool:
-    """启动飞书网关:凭证齐全才连(返回是否启动)。lifespan 调用。"""
-    global _worker, _queue, _ws_thread
+def _start_bot(app_id: str, app_secret: str, allowed: list | None, name: str = "") -> dict:
+    """启动单个飞书机器人网关(WS 线程 + 队列 + worker)。返回句柄。
 
-    if not (settings.feishu_app_id and settings.feishu_app_secret):
-        logger.info("飞书通道未配置凭证,跳过启动")
-        return False
+    P2-4:多机器人并存;allowed 为该机器人可用的助手插件名列表(None=不限)。
+    队列项 (message_id, chat_id, text, open_id):open_id 用于按飞书用户
+    自动开通通道账号(P2-5)。
+    """
+    import threading
 
     import lark_oapi as lark
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     client = (
-        lark.Client.builder()
-        .app_id(settings.feishu_app_id)
-        .app_secret(settings.feishu_app_secret)
-        .build()
+        lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
     )
+
+    def _put(item: tuple) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, item)
 
     def _on_message(data) -> None:
         try:
             msg = data.event.message
+            sender = getattr(getattr(data.event, "sender", None), "sender_id", None)
+            open_id = getattr(sender, "open_id", "") or ""
             text = _extract_text(data)
             if msg.chat_type != "p2p":
-                # 群聊(P2-6):仅 @机器人 的文本触发;@提及在 content 中为
-                # <at user_id="..."></at> 占位,提取后剥净即可
+                # 群聊(P2-6):仅 @机器人 的文本触发
                 if text is None:
                     return
                 import re as _re
 
                 stripped = _re.sub(r"<at[^>]*>\s*</at>", "", text).strip()
-                mentions = getattr(data.event.message, "mentions", None)
+                mentions = getattr(msg, "mentions", None)
                 at_bot = bool(mentions) or "@_user" in text or stripped != text
                 if not at_bot or not stripped:
                     return
-                loop.call_soon_threadsafe(
-                    queue.put_nowait, (msg.message_id, msg.chat_id, stripped)
-                )
+                _put((msg.message_id, msg.chat_id, stripped, open_id))
                 return
             if text is None:
-                loop.call_soon_threadsafe(
-                    queue.put_nowait,
-                    (msg.message_id, msg.chat_id, "__UNSUPPORTED__"),
-                )
+                _put((msg.message_id, msg.chat_id, "__UNSUPPORTED__", open_id))
                 return
-            # 文本中可能带 @机器人 前缀(单聊通常没有),去掉再投递
-            loop.call_soon_threadsafe(queue.put_nowait, (msg.message_id, msg.chat_id, text))
-        except Exception:  # noqa: BLE001 事件回调不允许抛
+            _put((msg.message_id, msg.chat_id, text, open_id))
+        except Exception:  # noqa: BLE001  事件回调不允许抛
             logger.exception("feishu 事件解析失败")
 
-    def _on_card_action(data):
-        """卡片动作回调(长连接):下拉选择助手 → 投递 __CARD__ 项处理。"""
+    def _toast(text: str):
         try:
             from lark_oapi.event.callback.model.p2_card_action_trigger import (
                 P2CardActionTriggerResponse,
             )
 
+            return P2CardActionTriggerResponse.build(
+                {"toast": {"type": "success", "content": text}}
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _on_card_action(data):
+        """卡片动作回调:确认按钮 / 表单提交 / 助手下拉,统一投递队列。"""
+        try:
             ev = data.event
             a = ev.action
-            # 确认按钮(input.confirm 映射):按钮 value 直接携带 confirmed,
-            # chat 上下文定位会话——交互经 handle_interaction 后自动续跑
+            chat_id0 = ev.context.open_chat_id if ev.context else None
+            open_mid = (ev.context.open_message_id or "") if ev.context else ""
             if not a.form_value and isinstance(a.value, dict) and a.value.get("__confirm_submit"):
-                chat_id0 = ev.context.open_chat_id if ev.context else None
                 if chat_id0:
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
+                    _put(
                         (
-                            "",
+                            open_mid,
                             chat_id0,
                             "__CONFIRM__:"
                             + json.dumps({"confirmed": bool(a.value.get("confirmed"))}, ensure_ascii=False),
-                        ),
-                    )
-                try:
-                    from lark_oapi.event.callback.model.p2_card_action_trigger import (
-                        P2CardActionTriggerResponse,
-                    )
-
-                    return P2CardActionTriggerResponse.build(
-                        {"toast": {"type": "success", "content": "已记录,继续处理…"}}
-                    )
-                except Exception:  # noqa: BLE001
-                    return None
-            # 表单提交(M23 input.form 映射):form_value + 按钮 value 携带 sid/action
-            if a.form_value and isinstance(a.value, dict) and a.value.get("__form_submit"):
-                chat_id0 = ev.context.open_chat_id if ev.context else None
-                if chat_id0:
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
-                        (
                             "",
+                        )
+                    )
+                return _toast("已记录,继续处理…")
+            if a.form_value and isinstance(a.value, dict) and a.value.get("__form_submit"):
+                if chat_id0:
+                    _put(
+                        (
+                            open_mid,
                             chat_id0,
                             "__FORM__:"
                             + json.dumps(
                                 {"sid": a.value.get("sid"), "action": a.value.get("action"), "form_value": a.form_value},
                                 ensure_ascii=False,
                             ),
-                        ),
+                            "",
+                        )
                     )
-                try:
-                    from lark_oapi.event.callback.model.p2_card_action_trigger import (
-                        P2CardActionTriggerResponse,
-                    )
-
-                    return P2CardActionTriggerResponse.build(
-                        {"toast": {"type": "success", "content": "已提交,正在生成…"}}
-                    )
-                except Exception:  # noqa: BLE001
-                    return None
+                return _toast("已提交,正在生成…")
             option = None
             if a.form_value and a.form_value.get("plugin"):
                 option = a.form_value["plugin"]
@@ -879,35 +986,22 @@ def start() -> bool:
                 option = a.option
             elif a.value and a.value.get("plugin"):
                 option = a.value["plugin"]
-            chat_id = ev.context.open_chat_id if ev.context else None
-            open_message_id = (ev.context.open_message_id or "") if ev.context else ""
-            if option and chat_id:
-                # 队列项结构 (message_id, chat_id, text):切换标记必须放 text 槽位
-                # ——曾误放 message_id 槽,worker 判 text 前缀永不命中,
-                # 还把标记当 message_id 回复报 400(20260930 选助手无反应根因)
-                loop.call_soon_threadsafe(
-                    queue.put_nowait,
-                    (open_message_id, chat_id, f"__CARD__:{option}"),
-                )
-            try:
-                return P2CardActionTriggerResponse.build(
-                    {"toast": {"type": "success", "content": "正在切换助手…"}}
-                )
-            except Exception:  # noqa: BLE001
-                return None
-        except Exception:  # noqa: BLE001 事件回调不允许抛
+            if option and chat_id0:
+                _put((open_mid, chat_id0, f"__CARD__:{option}", ""))
+            return _toast("正在切换助手…")
+        except Exception:  # noqa: BLE001  事件回调不允许抛
             logger.exception("feishu 卡片回调解析失败")
             return None
 
-    async def _handle_unsupported() -> None:
+    async def _worker_loop() -> None:
         from agentplatform.core.db.session import SessionLocal as _SL
 
         while True:
             item = await queue.get()
             try:
-                message_id, chat_id, text = item
+                message_id, chat_id, text, open_id = item
                 if text == "__UNSUPPORTED__":
-                    await _build_reply_fn(client)(message_id, "暂只支持文本消息,文件/图片等请在 Web 工作台发送。")
+                    await _build_reply_fn(client)(message_id, _unsupported_reply())
                 elif isinstance(text, str) and text.startswith("__CONFIRM__:"):
                     try:
                         payload = json.loads(text.split(":", 1)[1])
@@ -923,23 +1017,19 @@ def start() -> bool:
                 elif isinstance(text, str) and text.startswith("__CARD__:"):
                     plugin_name = text.split(":", 1)[1]
                     async with _SL() as s:
-                        plugin = await _switch_plugin(s, chat_id, plugin_name)
+                        plugin = await _switch_plugin(s, chat_id, plugin_name, allowed, open_id)
                     if plugin is None:
-                        await _send_text_with(
-                            client, chat_id, f"未找到可用助手:{plugin_name}"
-                        )
+                        await _send_text_with(client, chat_id, f"未找到可用助手:{plugin_name}")
                     else:
-                        # 切换成功即推助手介绍卡(20260930 用户建议:能做什么一目了然)
                         try:
-                            await _send_card_with(
-                                client, chat_id, _text_card(_plugin_intro(plugin))
-                            )
+                            await _send_card_with(client, chat_id, _text_card(_plugin_intro(plugin)))
                         except Exception:  # noqa: BLE001
                             await _send_text_with(client, chat_id, _plugin_intro(plugin))
                 else:
-                    await _process(message_id, chat_id, text, _build_reply_fn(client), client)
+                    await _process(
+                        message_id, chat_id, text, _build_reply_fn(client), client, open_id, allowed
+                    )
             except Exception:  # noqa: BLE001  单条消息失败绝不杀死 worker 循环
-                # 20260930 事故:worker 无兜底,一轮异常即整通道静默(后续消息全部排队无响应)
                 logger.exception("feishu worker 处理异常(已跳过该条)")
             finally:
                 queue.task_done()
@@ -950,44 +1040,120 @@ def start() -> bool:
         .register_p2_card_action_trigger(_on_card_action)
         .build()
     )
-    global _CARD_SENDER
-    _CARD_SENDER = lambda chat_id, card: _send_card_with(client, chat_id, card)  # noqa: E731
 
-    _worker = asyncio.create_task(_handle_unsupported())
-    _queue = queue
+    worker = asyncio.create_task(_worker_loop())
 
     def _run_ws() -> None:
-        # SDK 的 ws client 在构造时会抓当前事件循环——必须在子线程内
-        # 先设独立循环再构造,否则拿到主线程 uvicorn 正在跑的 uvloop,
-        # start() 的 run_until_complete 直接 RuntimeError(20260930 首连即断根因)
+        # SDK ws client 抓循环问题:子线程独立循环 + 重指模块级全局(20260930)
         try:
             asyncio.set_event_loop(asyncio.new_event_loop())
-            # SDK 在 import 时抓了模块级全局 loop(主线程 uvicorn 运行中的循环),
-            # start() 的 run_until_complete 会撞"already running"——线程内重指
             import lark_oapi.ws.client as _ws_mod
 
             _ws_mod.loop = asyncio.get_event_loop()
             ws_client = lark.ws.Client(
-                settings.feishu_app_id,
-                settings.feishu_app_secret,
+                app_id,
+                app_secret,
                 event_handler=dispatcher,
-                log_level=lark.LogLevel.DEBUG,
+                log_level=lark.LogLevel.INFO,
             )
-            ws_client.start()  # 阻塞运行;容器重启即停(trial 无优雅退出需求)
+            ws_client.start()
         except Exception:  # noqa: BLE001
-            logger.exception("feishu 长连接退出")
+            logger.exception("feishu 长连接退出 bot=%s", name or app_id)
 
-    import threading
+    thread = threading.Thread(target=_run_ws, name=f"feishu-ws-{name or app_id}", daemon=True)
+    thread.start()
+    logger.info("飞书机器人已启动:%s(%s)", name or app_id, app_id)
+    handle = {"app_id": app_id, "queue": queue, "worker": worker, "thread": thread, "client": client}
+    return handle
 
-    _ws_thread = threading.Thread(target=_run_ws, name="feishu-ws", daemon=True)
-    _ws_thread.start()
-    logger.info("飞书通道已启动(WebSocket 长连接)")
+
+def _unsupported_reply() -> str:
+    return "该消息类型暂不支持,请发送文本(文件/语音支持建设中)。"
+
+
+_GATEWAYS: dict[str, dict] = {}
+
+
+async def _load_bots() -> list[dict]:
+    """启用的机器人列表:DB 配置优先;无 DB 配置时回落 settings 全局凭证。"""
+    try:
+        from agentplatform.core.channel.model import FeishuBot
+        from agentplatform.core.db.session import SessionLocal as _SL
+        from agentplatform.core.llm.crypto import decrypt
+        from sqlalchemy import select as _select
+
+        async with _SL() as s:
+            rows = (
+                await s.scalars(_select(FeishuBot).where(FeishuBot.enabled.is_(True)))
+            ).all()
+        out = []
+        for r in rows:
+            try:
+                secret = decrypt(r.app_secret_enc)
+            except Exception:  # noqa: BLE001  解密失败跳过该机器人
+                logger.warning("feishu bot %s secret 解密失败,跳过", r.name)
+                continue
+            out.append(
+                {"app_id": r.app_id, "app_secret": secret, "allowed": r.allowed_plugins, "name": r.name}
+            )
+        return out
+    except Exception:  # noqa: BLE001  DB 未就绪不阻塞启动
+        logger.warning("feishu bots 加载失败(表未迁移?)")
+        return []
+
+
+def start() -> bool:
+    """启动飞书网关(lifespan):DB 机器人 + settings 全局凭证(回退兼容)。"""
+    async def _boot() -> list[str]:
+        bots = []
+        if settings.feishu_app_id and settings.feishu_app_secret:
+            bots.append(
+                {
+                    "app_id": settings.feishu_app_id,
+                    "app_secret": settings.feishu_app_secret,
+                    "allowed": None,
+                    "name": "default(settings)",
+                }
+            )
+        bots.extend(await _load_bots())
+        ids = []
+        for b in bots:
+            if b["app_id"] in _GATEWAYS:
+                continue
+            try:
+                _GATEWAYS[b["app_id"]] = _start_bot(
+                    b["app_id"], b["app_secret"], b["allowed"], b.get("name", "")
+                )
+                ids.append(b["app_id"])
+            except Exception:  # noqa: BLE001  单机器人失败不影响其他
+                logger.exception("feishu 机器人启动失败 %s", b.get("name"))
+        return ids
+
+    # start() 在 lifespan(异步上下文)中调用:同步派发启动任务
+    asyncio.get_running_loop().create_task(_boot())
+    if not (settings.feishu_app_id or settings.feishu_app_secret):
+        logger.info("飞书通道未配置凭证;等待 DB 机器人配置或跳过")
     return True
 
 
+def start_bot_now(bot: dict) -> None:
+    """管理接口:立即启动/重启一个机器人(增改后调用)。"""
+    gid = bot["app_id"]
+    old = _GATEWAYS.pop(gid, None)
+    if old is not None:
+        old["worker"].cancel()
+    _GATEWAYS[gid] = _start_bot(gid, bot["app_secret"], bot.get("allowed"), bot.get("name", ""))
+
+
+def stop_bot_now(app_id: str) -> None:
+    """管理接口:停用一个机器人(删除/禁用后调用;WS 线程 daemon 随进程退出)。"""
+    old = _GATEWAYS.pop(app_id, None)
+    if old is not None:
+        old["worker"].cancel()
+
+
 async def stop() -> None:
-    """停止 worker(ws 线程为 daemon,随进程退出)。"""
-    global _worker
-    if _worker is not None:
-        _worker.cancel()
-        _worker = None
+    """停止全部 worker(ws 线程为 daemon,随进程退出)。"""
+    for g in list(_GATEWAYS.values()):
+        g["worker"].cancel()
+    _GATEWAYS.clear()

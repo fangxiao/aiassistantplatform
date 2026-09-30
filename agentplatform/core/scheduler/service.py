@@ -228,6 +228,20 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run.status = "success"
             # 成熟度④:通知出口推送(失败不影响任务)
             await _notify(db, task, output)
+            # M22 P2-3:飞书推送(失败不影响任务)
+            if getattr(task, "feishu_chat_id", None):
+                try:
+                    from agentplatform.core.channel.feishu import push_to_chat
+
+                    await push_to_chat(
+                        task.feishu_chat_id, f"⏰ {task.name}", output
+                    )
+                except Exception:  # noqa: BLE001
+                    import logging as _lg
+
+                    _lg.getLogger(__name__).warning(
+                        "定时任务飞书推送失败 task=%s", task.id
+                    )
             # P1 通知分级:产出首行 [ALERT] 标记 → alert=True 进通知;正常静默落卡
             run.alert = output.splitlines()[0].strip().startswith("[ALERT]") if output else False
             task.last_status = "success"

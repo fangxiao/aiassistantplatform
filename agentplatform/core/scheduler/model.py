@@ -32,6 +32,8 @@ class ScheduledTask(Base):
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # 空=平台通用助手
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # 空=运行时取可见库
     auto_save_kb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # M22 P2-3:产出推送目标飞书会话(空=不推送)
+    feishu_chat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 通知出口(成熟度④): {webhook?: url, webhook_payload?: "feishu"|"raw", email?: addr}
     notify: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=sa_text("'{}'::jsonb")
