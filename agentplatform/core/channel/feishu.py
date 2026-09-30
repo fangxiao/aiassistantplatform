@@ -341,10 +341,11 @@ def _assistant_card_json(rows: list) -> dict:
     options = []
     for r in rows:
         m = r.manifest or {}
+        # 下拉只显示中文名(20260930 用户偏好);value 仍用插件名精确切换
         label = m.get("display_name") or r.name
         options.append(
             {
-                "text": {"tag": "plain_text", "content": f"{label}（{r.name}）"},
+                "text": {"tag": "plain_text", "content": str(label)},
                 "value": r.name,
             }
         )
@@ -383,6 +384,10 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
     from agentplatform.core.db.session import SessionLocal
 
     cmd = text.strip()
+    if not cmd:
+        # 空文本(空消息/@残留等)不触发生成——曾引发 300s 空转超时(20260930)
+        await reply_fn(message_id, "请输入内容后再发送。")
+        return
     if cmd in ("/重置", "/reset"):
         async with SessionLocal() as s:
             await _reset_binding(s, chat_id)
@@ -609,6 +614,9 @@ def start() -> bool:
                             await _send_text_with(client, chat_id, _plugin_intro(plugin))
                 else:
                     await _process(message_id, chat_id, text, _build_reply_fn(client), client)
+            except Exception:  # noqa: BLE001  单条消息失败绝不杀死 worker 循环
+                # 20260930 事故:worker 无兜底,一轮异常即整通道静默(后续消息全部排队无响应)
+                logger.exception("feishu worker 处理异常(已跳过该条)")
             finally:
                 queue.task_done()
 
