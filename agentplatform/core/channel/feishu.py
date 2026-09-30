@@ -237,12 +237,68 @@ def _extract_text(msg) -> str | None:
         return None
 
 
-def _reply_text(final_text: str, n_blocks: int) -> str:
+def _reply_text(final_text: str, n_blocks: int, unmapped_blocks: int = 0) -> str:
     text = final_text.strip() or "（助手未返回文本内容）"
-    if n_blocks:
-        text += f"\n\n（本次回复含 {n_blocks} 个富交互组件,请在 Web 工作台查看与操作）"
+    if unmapped_blocks:
+        text += f"\n\n（另有 {unmapped_blocks} 个组件暂不支持飞书渲染,可在 Web 工作台查看）"
     # 飞书单条文本上限 150KB,防御性截断
     return text[:60000]
+
+
+def _form_card(block: dict, sid: str) -> dict | None:
+    """input.form → 飞书卡片表单(M23 P1 映射):提交回调 → 平台 interact → 续跑。
+
+    支持 input.text/textarea/number→输入框、select/radio→下拉、date→日期;
+    其余类型转普通输入框。无法映射返回 None(降级提示)。
+    """
+    data = block.get("data") or {}
+    fields = data.get("fields") or []
+    if not fields:
+        return None
+    elements: list[dict] = []
+    for f in fields:
+        fd = f.get("data") or {}
+        key = str(fd.get("id") or f.get("id") or "")
+        label = str(fd.get("label") or key)
+        if not key:
+            continue
+        ftype = f.get("type") or "input.text"
+        placeholder = {"tag": "plain_text", "content": label}
+        if ftype in ("input.select", "input.radio"):
+            options = [
+                {"text": {"tag": "plain_text", "content": str(o)}, "value": str(o)}
+                for o in (fd.get("options") or [])
+            ]
+            if options:
+                elements.append(
+                    {"tag": "select_static", "name": key, "placeholder": placeholder, "options": options}
+                )
+            else:
+                elements.append({"tag": "input", "name": key, "placeholder": placeholder})
+        elif ftype == "input.date":
+            elements.append({"tag": "date_picker", "name": key, "placeholder": placeholder})
+        else:
+            elements.append({"tag": "input", "name": key, "placeholder": placeholder})
+    if not elements:
+        return None
+    elements.append(
+        {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": str(data.get("submit_text") or data.get("submit_label") or "提交")},
+            "type": "primary",
+            "action_type": "form_submit",
+            "name": "submit",
+            "value": {"__form_submit": 1, "sid": sid, "action": str(data.get("action") or "input.form")},
+        }
+    )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": str(data.get("title") or "请填写以下信息")},
+            "template": "blue",
+        },
+        "elements": [{"tag": "form", "name": "form", "elements": elements}],
+    }
 
 
 def _plugin_intro(plugin) -> str:
@@ -437,87 +493,115 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
 
     lock = _INFLIGHT.setdefault(chat_id, asyncio.Lock())
     async with lock:  # A4:同一飞书会话串行处理
-        # 等待反馈(20260930 用户反馈"没有等待提示像没 work"):先发占位卡,
-        # 生成完成后原地更新为答案;卡片不可用时静默降级为完成时一次性回复
-        placeholder_mid: str | None = None
-        if client is not None:
-            try:
-                placeholder_mid = await _create_card_with(
-                    client, chat_id, _text_card(_PLACEHOLDER_CARD_NOTE)
-                )
-            except Exception:  # noqa: BLE001  占位失败不影响主流程
-                logger.warning("feishu 占位卡片异常,降级为完成时回复")
+        from agentplatform.core.db.session import SessionLocal as _SL
 
-        async def _deliver(final_text: str) -> None:
-            if placeholder_mid is not None:
-                try:
-                    if await _patch_card_with(client, placeholder_mid, _text_card(final_text)):
-                        return
-                except Exception:  # noqa: BLE001  更新失败回落新消息
-                    logger.warning("feishu 答案卡片更新异常,回落新消息")
-            await reply_fn(message_id, final_text)
+        async with _SL() as s:
+            sid = await _ensure_session_id(s, chat_id)
+        await _run_agent_round(client, chat_id, sid, text, message_id, reply_fn)
 
+
+async def _run_agent_round(
+    client, chat_id: str, sid: uuid.UUID, user_text: str, message_id: str, reply_fn
+) -> None:
+    """一轮 agent 运行与交付:占位卡 → 检查点管道流式 → 答案原地更新;
+    input.form 渲染为飞书表单卡(M23 P1),其余组件计数降级提示。
+    消息处理与表单提交续跑共用此路径。"""
+    from agentplatform.core.chat.service import agent_stream_for_session
+    from agentplatform.core.db.session import SessionLocal
+
+    placeholder_mid: str | None = None
+    if client is not None:
         try:
-            async with SessionLocal() as s:
-                sid = await _ensure_session_id(s, chat_id)
-            parts: list[str] = []
-            n_blocks = 0
-            # 复用 Web 端的检查点 SSE 管道:助手消息随草稿检查点落库(需求 A5,
-            # Web 端可见),断线路径行为一致;从 SSE 帧中提取增量文本
-            from agentplatform.api.chat import _checkpointed_agent_sse
-
-            async with SessionLocal() as s:
-                agen = agent_stream_for_session(s, sid, text)
-                async for frame in _checkpointed_agent_sse(s, sid, agen):
-                    if frame.startswith("event: delta"):
-                        payload = frame.split("data: ", 1)[1].strip()
-                        parts.append(json.loads(payload).get("text", ""))
-                    elif frame.startswith(("event: block_meta", "event: await_external")):
-                        n_blocks += 1
-                    elif frame.startswith("event: error"):
-                        payload = frame.split("data: ", 1)[1].strip()
-                        parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
-            await _deliver(_reply_text("".join(parts), n_blocks))
-        except Exception as exc:  # noqa: BLE001 通道侧兜底,错误必须回给用户
-            logger.exception("feishu 通道处理失败 chat=%s", chat_id)
-            try:
-                await _deliver(f"[处理失败] {type(exc).__name__}: {exc}")
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _build_reply_fn(client) -> object:
-    """构造回复函数:reply API 封装为 async(sync SDK 调用丢线程池)。"""
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1 import (
-        ReplyMessageRequest,
-        ReplyMessageRequestBody,
-    )
-
-    async def reply(message_id: str, text: str) -> None:
-        def _do() -> None:
-            req = (
-                ReplyMessageRequest.builder()
-                .message_id(message_id)
-                .request_body(
-                    ReplyMessageRequestBody.builder()
-                    .content(json.dumps({"text": text}, ensure_ascii=False))
-                    .msg_type("text")
-                    .build()
-                )
-                .build()
+            placeholder_mid = await _create_card_with(
+                client, chat_id, _text_card(_PLACEHOLDER_CARD_NOTE)
             )
-            resp = client.im.v1.message.reply(req)
-            if not resp.success():
-                logger.warning(
-                    "feishu 回复失败 code=%s msg=%s",
-                    resp.code,
-                    resp.msg,
-                )
+        except Exception:  # noqa: BLE001  占位失败不影响主流程
+            logger.warning("feishu 占位卡片异常,降级为完成时回复")
 
-        await asyncio.get_running_loop().run_in_executor(None, _do)
+    async def _deliver(final_text: str) -> None:
+        if placeholder_mid is not None:
+            try:
+                if await _patch_card_with(client, placeholder_mid, _text_card(final_text)):
+                    return
+            except Exception:  # noqa: BLE001  更新失败回落新消息
+                logger.warning("feishu 答案卡片更新异常,回落新消息")
+        await reply_fn(message_id, final_text)
 
-    return reply
+    parts: list[str] = []
+    blocks: list[dict] = []
+    try:
+        from agentplatform.api.chat import _checkpointed_agent_sse
+
+        async with SessionLocal() as s:
+            agen = agent_stream_for_session(s, sid, user_text)
+            async for frame in _checkpointed_agent_sse(s, sid, agen):
+                if frame.startswith("event: delta"):
+                    payload = frame.split("data: ", 1)[1].strip()
+                    parts.append(json.loads(payload).get("text", ""))
+                elif frame.startswith(("event: block_meta", "event: await_external")):
+                    payload = frame.split("data: ", 1)[1].strip()
+                    blocks.append(json.loads(payload))
+                elif frame.startswith("event: error"):
+                    payload = frame.split("data: ", 1)[1].strip()
+                    parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
+        form_blocks = [b for b in blocks if isinstance(b, dict) and b.get("type") == "input.form"]
+        unmapped = len(blocks) - len(form_blocks)
+        await _deliver(_reply_text("".join(parts), len(blocks), unmapped))
+        for fb in form_blocks:
+            card = _form_card(fb, str(sid))
+            if card is None:
+                continue
+            try:
+                if client is not None:
+                    await _send_card_with(client, chat_id, card)
+            except Exception:  # noqa: BLE001
+                logger.warning("feishu 表单卡片发送失败")
+    except Exception as exc:  # noqa: BLE001 通道侧兜底,错误必须回给用户
+        logger.exception("feishu 通道处理失败 chat=%s", chat_id)
+        try:
+            await _deliver(f"[处理失败] {type(exc).__name__}: {exc}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _handle_form_submit(client, chat_id: str, payload: dict) -> None:
+    """飞书表单提交回执:fields 经 handle_interaction 落库(表格回执+【表单提交】
+    用户消息),随后按 continue 语义自动续跑并交付答案。"""
+    from agentplatform.core.db.session import SessionLocal
+    from agentplatform.core.interact.service import handle_interaction
+    from agentplatform.core.message.model import MessageRole
+    from agentplatform.core.message.service import list_messages
+
+    sid_str = str(payload.get("sid") or "")
+    action = str(payload.get("action") or "input.form")
+    form_value = payload.get("form_value") or {}
+    if not sid_str:
+        await _send_text_with(client, chat_id, "[表单提交异常] 缺少会话信息")
+        return
+    sid = uuid.UUID(sid_str)
+    fields = [
+        {"id": k, "label": k, "value": v} for k, v in form_value.items() if k != "submit"
+    ]
+    async with SessionLocal() as s:
+        await handle_interaction(
+            s, session_id=sid, block_id="feishu_form", action=action, value={"fields": fields}
+        )
+        await s.commit()
+    content = ""
+    async with SessionLocal() as s:
+        msgs = await list_messages(s, sid)
+        last_user = next((m for m in reversed(msgs) if m.role == MessageRole.user), None)
+        if last_user is not None:
+            for b in last_user.blocks or []:
+                if isinstance(b, dict) and b.get("type") == "markdown":
+                    content = (b.get("data") or {}).get("text", "")
+
+    async def _fallback_reply(message_id: str, text: str) -> None:
+        await _send_text_with(client, chat_id, text)
+
+    lock = _INFLIGHT.setdefault(chat_id, asyncio.Lock())
+    async with lock:
+        await _run_agent_round(client, chat_id, sid, content, "", _fallback_reply)
 
 
 def start() -> bool:
@@ -565,6 +649,32 @@ def start() -> bool:
 
             ev = data.event
             a = ev.action
+            # 表单提交(M23 input.form 映射):form_value + 按钮 value 携带 sid/action
+            if a.form_value and isinstance(a.value, dict) and a.value.get("__form_submit"):
+                chat_id0 = ev.context.open_chat_id if ev.context else None
+                if chat_id0:
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        (
+                            "",
+                            chat_id0,
+                            "__FORM__:"
+                            + json.dumps(
+                                {"sid": a.value.get("sid"), "action": a.value.get("action"), "form_value": a.form_value},
+                                ensure_ascii=False,
+                            ),
+                        ),
+                    )
+                try:
+                    from lark_oapi.event.callback.model.p2_card_action_trigger import (
+                        P2CardActionTriggerResponse,
+                    )
+
+                    return P2CardActionTriggerResponse.build(
+                        {"toast": {"type": "success", "content": "已提交,正在生成…"}}
+                    )
+                except Exception:  # noqa: BLE001
+                    return None
             option = None
             if a.form_value and a.form_value.get("plugin"):
                 option = a.form_value["plugin"]
@@ -601,6 +711,12 @@ def start() -> bool:
                 message_id, chat_id, text = item
                 if text == "__UNSUPPORTED__":
                     await _build_reply_fn(client)(message_id, "暂只支持文本消息,文件/图片等请在 Web 工作台发送。")
+                elif isinstance(text, str) and text.startswith("__FORM__:"):
+                    try:
+                        payload = json.loads(text.split(":", 1)[1])
+                    except ValueError:
+                        payload = {}
+                    await _handle_form_submit(client, chat_id, payload)
                 elif isinstance(text, str) and text.startswith("__CARD__:"):
                     plugin_name = text.split(":", 1)[1]
                     async with _SL() as s:

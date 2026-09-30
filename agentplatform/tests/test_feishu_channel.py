@@ -80,7 +80,7 @@ async def test_process_text_runs_agent_and_replies(session: AsyncSession, monkey
 
     assert len(replies) == 1
     assert "回复正文" in replies[0]
-    assert "1 个富交互组件" in replies[0]
+    assert "另有 1 个组件" in replies[0]
     # 用户消息落库由真实 agent_stream_for_session 负责(fake 流替换,此处不验)
 
 
@@ -135,10 +135,39 @@ def test_extract_text_only_text_type() -> None:
 
 
 def test_reply_text_truncates_and_notes_blocks() -> None:
-    out = feishu._reply_text("", 2)
-    assert "未返回文本内容" in out and "2 个富交互组件" in out
+    out = feishu._reply_text("", 2, unmapped_blocks=2)
+    assert "未返回文本内容" in out and "2 个组件" in out
     long = feishu._reply_text("x" * 70000, 0)
     assert len(long) <= 60000
+
+
+def test_form_card_mapping() -> None:
+    """input.form → 飞书表单卡:字段控件映射 + 提交按钮携带 sid/action。"""
+    import json as _json
+
+    block = {
+        "type": "input.form",
+        "data": {
+            "title": "文章需求",
+            "action": "study_intake_submit",
+            "submit_text": "开始",
+            "fields": [
+                {"type": "input.text", "data": {"id": "topic", "label": "主题"}},
+                {"type": "input.select", "data": {"id": "tone", "label": "语气", "options": ["专业", "轻松"]}},
+                {"type": "input.date", "data": {"id": "when", "label": "日期"}},
+            ],
+        },
+    }
+    card = feishu._form_card(block, "11111111-1111-1111-1111-111111111111")
+    assert card is not None
+    els = card["elements"][0]["elements"]
+    tags = [e["tag"] for e in els]
+    assert "input" in tags and "select_static" in tags and "date_picker" in tags
+    btn = els[-1]
+    assert btn["action_type"] == "form_submit"
+    assert btn["value"]["sid"] == "11111111-1111-1111-1111-111111111111"
+    assert btn["value"]["action"] == "study_intake_submit"
+    assert _json.dumps(card, ensure_ascii=False)  # 可序列化
 
 
 @pytest.mark.asyncio
