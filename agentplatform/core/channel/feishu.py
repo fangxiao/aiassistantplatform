@@ -1214,13 +1214,23 @@ def _start_bot(app_id: str, app_secret: str, allowed: list | None, name: str = "
     worker = asyncio.create_task(_worker_loop())
 
     def _run_ws() -> None:
-        # SDK ws client 抓循环问题:子线程独立循环 + 重指模块级全局(20260930)
+        # SDK ws client 的 loop 是模块级全局——多机器人共用会互相覆盖
+        # (B 机器人 set 后 A 的重连会在 B 的运行中循环上 run_until_complete)。
+        # 每机器人加载一份独立的 ws.client 模块副本,全局各自隔离(20261001)
         try:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            import lark_oapi.ws.client as _ws_mod
+            import importlib
+            import importlib.util as _ilu
 
-            _ws_mod.loop = asyncio.get_event_loop()
-            ws_client = lark.ws.Client(
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            src_mod = importlib.import_module("lark_oapi.ws.client")
+            spec = _ilu.spec_from_file_location(
+                f"lark_ws_client_{app_id}", src_mod.__file__
+            )
+            assert spec is not None and spec.loader is not None
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.loop = asyncio.get_event_loop()
+            ws_client = mod.Client(
                 app_id,
                 app_secret,
                 event_handler=dispatcher,
@@ -1316,10 +1326,18 @@ def start_bot_now(bot: dict) -> None:
 
 
 def stop_bot_now(app_id: str) -> None:
-    """管理接口:停用一个机器人(删除/禁用后调用;WS 线程 daemon 随进程退出)。"""
+    """管理接口:停用一个机器人(删除/禁用后调用;WS 线程 daemon 随进程退出)。
+
+    与 settings 默认凭证同 app_id 的机器人被移除时,默认网关自动恢复
+    (20261001 事故:用户在面板绑了同一应用又删除,清掉了唯一网关,通道静默)。
+    """
     old = _GATEWAYS.pop(app_id, None)
     if old is not None:
         old["worker"].cancel()
+    if app_id == settings.feishu_app_id and settings.feishu_app_secret:
+        _GATEWAYS[app_id] = _start_bot(
+            settings.feishu_app_id, settings.feishu_app_secret, None, "default(settings)"
+        )
 
 
 async def stop() -> None:
