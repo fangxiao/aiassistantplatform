@@ -48,6 +48,9 @@ packages = ["agentplatform"]
 
 [tool.uv]
 package = true
+# 20260930:国内镜像(阿里/清华)未同步 charset-normalizer 3.5.2 纯 Python 轮,
+# 离线构建装不上;降到 3.5.1(补丁位差异,行为等价)
+override-dependencies = ["charset-normalizer==3.5.1"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -46,3 +46,7 @@ out/
 .deploy.env
 backups/
 *.zip
+
+# 本地构建提速的预下载轮子(不入库;Dockerfile 检测存在则离线装配)
+wheels/*.whl
+wheels/*.txt

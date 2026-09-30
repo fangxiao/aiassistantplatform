@@ -246,18 +246,27 @@ def start() -> bool:
         .register_p2_im_message_receive_v1(_on_message)
         .build()
     )
-    ws_client = lark.ws.Client(
-        settings.feishu_app_id,
-        settings.feishu_app_secret,
-        event_handler=dispatcher,
-        log_level=lark.LogLevel.INFO,
-    )
 
     _worker = asyncio.create_task(_handle_unsupported())
     _queue = queue
 
     def _run_ws() -> None:
+        # SDK 的 ws client 在构造时会抓当前事件循环——必须在子线程内
+        # 先设独立循环再构造,否则拿到主线程 uvicorn 正在跑的 uvloop,
+        # start() 的 run_until_complete 直接 RuntimeError(20260930 首连即断根因)
         try:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            # SDK 在 import 时抓了模块级全局 loop(主线程 uvicorn 运行中的循环),
+            # start() 的 run_until_complete 会撞"already running"——线程内重指
+            import lark_oapi.ws.client as _ws_mod
+
+            _ws_mod.loop = asyncio.get_event_loop()
+            ws_client = lark.ws.Client(
+                settings.feishu_app_id,
+                settings.feishu_app_secret,
+                event_handler=dispatcher,
+                log_level=lark.LogLevel.DEBUG,
+            )
             ws_client.start()  # 阻塞运行;容器重启即停(trial 无优雅退出需求)
         except Exception:  # noqa: BLE001
             logger.exception("feishu 长连接退出")
