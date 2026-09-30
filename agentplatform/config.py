@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     sandbox_high_risk_only: bool = True
     sandbox_timeout_seconds: int = 30
 
+    # 插件发布审批(ADR 0008)。试用阶段默认免审:部署即 approved,跳过 pending_review;
+    # 对外开放前置 True 恢复审批制(部署回退待审,防"过审后偷换内容")
+    plugin_review_required: bool = False
+
     # 知识库(M12,设计 008)
     kb_embedding_dim: int = 1024  # 与迁移中 vector 维度一致,变更需全量重算
     kb_embedding_model: str = ""  # 兜底 embedding 模型名;空则仅用端点表中 embedding 类型端点

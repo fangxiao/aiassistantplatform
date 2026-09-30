@@ -40,6 +40,15 @@ async def deploy_plugin(
     if missing:
         raise DependencyError(missing)
 
+    # 试用期免审(20260930 用户决策):部署即 approved;对外开放前
+    # settings.plugin_review_required=True 恢复 ADR 0008 审批制
+    from agentplatform.config import settings as _settings
+
+    trial_status = (
+        PluginReviewStatus.pending_review
+        if _settings.plugin_review_required
+        else PluginReviewStatus.approved
+    )
     existing = await session.scalar(
         select(Plugin).where(Plugin.name == manifest.name)
     )
@@ -51,11 +60,12 @@ async def deploy_plugin(
         existing.manifest = manifest.model_dump()
         existing.status = PluginStatus.active
         existing.deployed_at = datetime.now(UTC)
-        # ADR 0008 保守策略:重新部署一律退回待审,防"过审后偷换内容"
-        existing.review_status = PluginReviewStatus.pending_review
+        # ADR 0008 保守策略:重新部署一律退回待审,防"过审后偷换内容"(审批制下)
+        existing.review_status = trial_status
         existing.last_review_reason = None
-        existing.reviewed_by = None
-        existing.reviewed_at = None
+        if _settings.plugin_review_required:
+            existing.reviewed_by = None
+            existing.reviewed_at = None
         plugin = existing
         await session.flush()
     else:
@@ -65,7 +75,7 @@ async def deploy_plugin(
             manifest=manifest.model_dump(),
             status=PluginStatus.active,
             owner_id=owner_id,
-            review_status=PluginReviewStatus.pending_review,
+            review_status=trial_status,
         )
         session.add(plugin)
         await session.flush()
