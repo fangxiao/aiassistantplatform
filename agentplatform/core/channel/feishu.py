@@ -27,6 +27,63 @@ _INFLIGHT: dict[str, asyncio.Lock] = {}
 _worker: asyncio.Task | None = None
 _queue: asyncio.Queue | None = None
 _ws_thread: object | None = None
+# 卡片发送器(start() 注入;命令处理里经 globals() 取用,便于测试替换)
+_CARD_SENDER = None
+
+
+async def _send_text_with(client, chat_id: str, text: str) -> None:
+    """向会话主动发送文本消息(卡片确认等场景,无 reply 目标时用)。"""
+    from lark_oapi.api.im.v1 import (
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+    )
+
+    def _do() -> None:
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("text")
+                .content(json.dumps({"text": text}, ensure_ascii=False))
+                .build()
+            )
+            .build()
+        )
+        resp = client.im.v1.message.create(req)
+        if not resp.success():
+            logger.warning("feishu 主动文本发送失败 code=%s msg=%s", resp.code, resp.msg)
+
+    await asyncio.get_running_loop().run_in_executor(None, _do)
+
+
+async def _send_card_with(client, chat_id: str, card: dict) -> None:
+    """向会话发送交互卡片(msg_type=interactive)。"""
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import (
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+    )
+
+    def _do() -> None:
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("interactive")
+                .content(json.dumps(card, ensure_ascii=False))
+                .build()
+            )
+            .build()
+        )
+        resp = client.im.v1.message.create(req)
+        if not resp.success():
+            raise RuntimeError(f"卡片发送失败: {resp.code} {resp.msg}")
+
+    await asyncio.get_running_loop().run_in_executor(None, _do)
 
 
 async def _service_user_id(session: AsyncSession) -> str:
@@ -147,7 +204,7 @@ async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str) 
     return f"已切换到「{label}」,直接发消息开始(上下文重新开始)。"
 
 
-async def _list_plugins() -> str:
+async def _available_plugins() -> list:
     from agentplatform.core.db.session import SessionLocal
     from agentplatform.core.plugin.model import Plugin, PluginReviewStatus, PluginStatus
     from sqlalchemy import select as _select
@@ -161,6 +218,11 @@ async def _list_plugins() -> str:
                 ).order_by(Plugin.name)
             )
         ).all()
+    return list(rows)
+
+
+async def _list_plugins() -> str:
+    rows = await _available_plugins()
     if not rows:
         return "当前没有可用的助手。"
     lines = ["可用助手:"]
@@ -171,6 +233,47 @@ async def _list_plugins() -> str:
         lines.append(f"· {r.name}({label}){extra}")
     lines.append("\n/切换 <名字> 使用该助手(如 /切换 sharestudy)")
     return "\n".join(lines)
+
+
+def _assistant_card_json(rows: list) -> dict:
+    """助手选择卡片(经典 v1 卡片):select_static 选择即触发切换回调。"""
+    options = []
+    for r in rows:
+        m = r.manifest or {}
+        label = m.get("display_name") or r.name
+        options.append(
+            {
+                "text": {"tag": "plain_text", "content": f"{label}（{r.name}）"},
+                "value": r.name,
+            }
+        )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "选择平台助手"},
+            "template": "indigo",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "下拉选择即切换，对话上下文重新开始。",
+                },
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "select_static",
+                        "name": "plugin",
+                        "placeholder": {"tag": "plain_text", "content": "点击选择助手"},
+                        "options": options,
+                    }
+                ],
+            },
+        ],
+    }
 
 
 async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
@@ -185,6 +288,15 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
         await reply_fn(message_id, "已开启新会话,上下文已清空。")
         return
     if cmd in ("/助手列表", "/助手", "/plugins"):
+        # 优先发交互卡片(下拉选择即切换);失败回落文本列表
+        card_sender = globals().get("_CARD_SENDER")
+        rows = await _available_plugins()
+        if card_sender is not None and rows:
+            try:
+                await card_sender(chat_id, _assistant_card_json(rows))
+                return
+            except Exception:  # noqa: BLE001  卡片失败回落文本
+                logger.exception("飞书卡片发送失败,回落文本列表")
         await reply_fn(message_id, await _list_plugins())
         return
     if cmd.startswith("/切换"):
@@ -200,7 +312,7 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
         await reply_fn(
             message_id,
             "直接发消息即可与当前助手对话(上下文连续)。\n"
-            "/助手列表 - 查看平台全部可用助手\n"
+            "/助手列表 - 弹出助手选择卡片,下拉即切换\n"
             "/切换 <名字> - 切换助手(如 /切换 sharestudy)\n"
             "/重置 - 当前助手开新会话\n"
             "/帮助 - 显示本帮助",
@@ -308,13 +420,51 @@ def start() -> bool:
         except Exception:  # noqa: BLE001 事件回调不允许抛
             logger.exception("feishu 事件解析失败")
 
+    def _on_card_action(data):
+        """卡片动作回调(长连接):下拉选择助手 → 投递 __CARD__ 项处理。"""
+        try:
+            from lark_oapi.event.callback.model.p2_card_action_trigger import (
+                P2CardActionTriggerResponse,
+            )
+
+            ev = data.event
+            a = ev.action
+            option = None
+            if a.form_value and a.form_value.get("plugin"):
+                option = a.form_value["plugin"]
+            elif a.option:
+                option = a.option
+            elif a.value and a.value.get("plugin"):
+                option = a.value["plugin"]
+            chat_id = ev.context.open_chat_id if ev.context else None
+            if option and chat_id:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait, (f"__CARD__:{option}", chat_id, "")
+                )
+            try:
+                return P2CardActionTriggerResponse.build(
+                    {"toast": {"type": "success", "content": "正在切换助手…"}}
+                )
+            except Exception:  # noqa: BLE001
+                return None
+        except Exception:  # noqa: BLE001 事件回调不允许抛
+            logger.exception("feishu 卡片回调解析失败")
+            return None
+
     async def _handle_unsupported() -> None:
+        from agentplatform.core.db.session import SessionLocal as _SL
+
         while True:
             item = await queue.get()
             try:
                 message_id, chat_id, text = item
                 if text == "__UNSUPPORTED__":
                     await _build_reply_fn(client)(message_id, "暂只支持文本消息,文件/图片等请在 Web 工作台发送。")
+                elif isinstance(text, str) and text.startswith("__CARD__:"):
+                    plugin_name = text.split(":", 1)[1]
+                    async with _SL() as s:
+                        msg = await _switch_plugin(s, chat_id, plugin_name)
+                    await _send_text_with(client, chat_id, msg)
                 else:
                     await _process(message_id, chat_id, text, _build_reply_fn(client))
             finally:
@@ -323,8 +473,11 @@ def start() -> bool:
     dispatcher = (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(_on_message)
+        .register_p2_card_action_trigger(_on_card_action)
         .build()
     )
+    global _CARD_SENDER
+    _CARD_SENDER = lambda chat_id, card: _send_card_with(client, chat_id, card)  # noqa: E731
 
     _worker = asyncio.create_task(_handle_unsupported())
     _queue = queue

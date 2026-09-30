@@ -14,6 +14,9 @@ interface SessionDrawerProps {
   onShare?: (id: string) => Promise<void>;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  showChannelView?: boolean;
+  onToggleChannelView?: () => void;
+  canViewChannel?: boolean;
 }
 
 export function SessionDrawer({
@@ -27,6 +30,9 @@ export function SessionDrawer({
   onShare,
   collapsed,
   onToggleCollapse,
+  showChannelView = false,
+  onToggleChannelView,
+  canViewChannel = false,
 }: SessionDrawerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -158,6 +164,22 @@ export function SessionDrawer({
             ▼
           </span>
         </button>
+
+        {/* 飞书通道会话视图切换(admin;需求 012 A5:通道会话 Web 端可见) */}
+        {canViewChannel && onToggleChannelView && (
+          <button
+            type="button"
+            onClick={onToggleChannelView}
+            className={`mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] transition ${
+              showChannelView
+                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+            }`}
+            title="查看通过飞书机器人进行的会话"
+          >
+            💬 飞书会话{showChannelView ? " · 查看中" : ""}
+          </button>
+        )}
 
         {/* 助手选择浮层菜单 */}
         {menuOpen && (

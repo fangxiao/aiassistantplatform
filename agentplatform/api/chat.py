@@ -59,7 +59,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def _ensure_session_owned(
     session: AsyncSession, sid: uuid.UUID, user_id: uuid.UUID
 ) -> Session:
-    """校验会话存在且属于当前用户;否则 404/403。"""
+    """校验会话存在且属于当前用户(admin 豁免——通道会话归服务账号,
+    admin 需在 Web 端查看/打开,需求 012 A5);否则 404/403。"""
     row = await get_session(session, sid)
     if row is None:
         raise HTTPException(
@@ -67,10 +68,16 @@ async def _ensure_session_owned(
             detail={"code": "not_found", "message": f"会话不存在: {sid}"},
         )
     if row.user_id and str(row.user_id) != str(user_id):
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "forbidden", "message": "无权访问该会话"},
-        )
+        # admin 豁免:通道会话归服务账号,admin 需在 Web 端查看/打开(需求 012 A5)
+        from agentplatform.core.auth.dependencies import is_admin
+        from agentplatform.core.auth.model import User as _User
+
+        current = await session.get(_User, user_id)
+        if current is None or not is_admin(current):
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "forbidden", "message": "无权访问该会话"},
+            )
     return row
 
 
@@ -135,10 +142,27 @@ async def create_chat_session(
 
 @router.get("/sessions", response_model=list[SessionOut])
 async def chat_sessions(
+    scope: str = "mine",
     session: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_user),
 ) -> list[SessionOut]:
-    """我的会话列表。"""
+    """我的会话列表;scope=channel(admin)返回飞书通道会话(需求 012 A5)。"""
+    if scope == "channel":
+        from agentplatform.core.auth.dependencies import is_admin
+
+        if not is_admin(user):
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "forbidden", "message": "仅管理员可查看通道会话"},
+            )
+        from agentplatform.core.auth.service import get_user_by_email
+        from agentplatform.core.channel.feishu import FEISHU_SERVICE_EMAIL
+
+        svc = await get_user_by_email(session, FEISHU_SERVICE_EMAIL)
+        if svc is None:
+            return []
+        rows = await list_sessions(session, user_id=str(svc.id))
+        return [SessionOut.model_validate(r, from_attributes=True) for r in rows]
     rows = await list_sessions(session, user_id=str(user.id))
     return [SessionOut.model_validate(r, from_attributes=True) for r in rows]
 

@@ -28,7 +28,7 @@ import {
   setSessionModel,
 } from "../lib/api/chat";
 import { apiGet } from "../lib/api/client";
-import { isAuthed } from "../lib/api/auth";
+import { getUser, isAuthed } from "../lib/api/auth";
 import type {
   AssistantInfo,
   ChatMessage,
@@ -77,6 +77,12 @@ function ChatHome() {
     }
   }, [router]);
 
+  // 角色检测(admin 才显示飞书通道会话入口)
+  useEffect(() => {
+    const u = getUser();
+    setIsAdmin(u?.role === "admin");
+  }, []);
+
   const selectSession = useCallback(async (s: SessionInfo) => {
     setCurrent(s);
     try {
@@ -87,14 +93,27 @@ function ChatHome() {
     }
   }, []);
 
+  // 飞书通道会话视图(admin;需求 012 A5)
+  const [showChannelView, setShowChannelView] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
   const refreshSessions = useCallback(async () => {
     try {
-      const list = await listSessions();
+      const list = await listSessions(showChannelView ? "channel" : undefined);
       setSessions(list);
       return list;
     } catch {
       return [];
     }
+  }, [showChannelView]);
+
+  const toggleChannelView = useCallback(() => {
+    setShowChannelView((v) => {
+      const next = !v;
+      // 切回我的会话时清掉当前选中,避免停留在打不开的通道会话上下文
+      if (!next) setCurrent(null);
+      return next;
+    });
   }, []);
 
   // 初始加载
@@ -580,6 +599,9 @@ function ChatHome() {
           sessions={sessions}
           assistants={assistants}
           currentId={current?.id ?? null}
+          showChannelView={showChannelView}
+          onToggleChannelView={toggleChannelView}
+          canViewChannel={isAdmin}
           onSelect={(id) => {
             const s = sessions.find((x) => x.id === id);
             if (s) selectSession(s);

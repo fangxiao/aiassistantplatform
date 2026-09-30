@@ -3,8 +3,8 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, streamSse, type SseEvent } from "./client";
 import type { ChatMessage, ContentBlock, SessionInfo } from "../types";
 
-export async function listSessions(): Promise<SessionInfo[]> {
-  return apiGet<SessionInfo[]>("/chat/sessions");
+export async function listSessions(scope?: "channel"): Promise<SessionInfo[]> {
+  return apiGet<SessionInfo[]>(`/chat/sessions${scope ? `?scope=${scope}` : ""}`);
 }
 
 export async function createSession(
