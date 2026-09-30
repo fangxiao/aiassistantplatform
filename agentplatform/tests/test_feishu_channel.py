@@ -139,3 +139,45 @@ def test_reply_text_truncates_and_notes_blocks() -> None:
     assert "未返回文本内容" in out and "2 个富交互组件" in out
     long = feishu._reply_text("x" * 70000, 0)
     assert len(long) <= 60000
+
+
+@pytest.mark.asyncio
+async def test_switch_and_list_commands(session: AsyncSession, monkeypatch) -> None:
+    """/助手列表 与 /切换:列出可用助手;切换即换绑新插件会话。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from agentplatform.core.db import session as db_session_mod
+    from agentplatform.core.plugin.model import (
+        Plugin,
+        PluginReviewStatus,
+        PluginStatus,
+    )
+
+    monkeypatch.setattr(
+        db_session_mod,
+        "SessionLocal",
+        async_sessionmaker(session.bind, class_=AsyncSession, expire_on_commit=False),
+    )
+    p = Plugin(
+        name="feishu_test_plugin",
+        version="0.1.0",
+        manifest={"name": "feishu_test_plugin", "description": "测试助手"},
+        status=PluginStatus.active,
+        review_status=PluginReviewStatus.approved,
+    )
+    session.add(p)
+    await session.commit()
+
+    # /助手列表
+    listing = await feishu._list_plugins()
+    assert "feishu_test_plugin" in listing
+
+    # /切换
+    chat_id = "oc_test_switch"
+    msg = await feishu._switch_plugin(session, chat_id, "feishu_test_plugin")
+    assert "已切换" in msg
+    sid = await feishu._bound_session_id(session, chat_id)
+    assert sid is not None
+    # 未知助手
+    msg2 = await feishu._switch_plugin(session, chat_id, "no_such")
+    assert "未找到" in msg2

@@ -119,6 +119,60 @@ def _reply_text(final_text: str, n_blocks: int) -> str:
     return text[:60000]
 
 
+async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str) -> str:
+    """切换助手:清旧绑定,以指定插件新建会话并绑定(返回给用户的提示文本)。"""
+    from sqlalchemy import select as _select
+
+    from agentplatform.core.channel.model import ChannelSession
+    from agentplatform.core.plugin.model import Plugin, PluginReviewStatus, PluginStatus
+    from agentplatform.core.session.service import create_session
+
+    plugin = await session.scalar(
+        _select(Plugin).where(
+            Plugin.name == plugin_name,
+            Plugin.status == PluginStatus.active,
+            Plugin.review_status == PluginReviewStatus.approved,
+        )
+    )
+    if plugin is None:
+        return f"未找到可用助手:{plugin_name}(发送 /助手列表 查看)"
+    await _reset_binding(session, chat_id)
+    user_id = await _service_user_id(session)
+    sess = await create_session(
+        session, plugin_id=plugin.id, title=f"飞书·{plugin.name}", user_id=user_id
+    )
+    session.add(ChannelSession(channel="feishu", chat_id=chat_id, session_id=sess.id))
+    await session.commit()
+    label = (plugin.manifest or {}).get("display_name") or plugin.name
+    return f"已切换到「{label}」,直接发消息开始(上下文重新开始)。"
+
+
+async def _list_plugins() -> str:
+    from agentplatform.core.db.session import SessionLocal
+    from agentplatform.core.plugin.model import Plugin, PluginReviewStatus, PluginStatus
+    from sqlalchemy import select as _select
+
+    async with SessionLocal() as s:
+        rows = (
+            await s.scalars(
+                _select(Plugin).where(
+                    Plugin.status == PluginStatus.active,
+                    Plugin.review_status == PluginReviewStatus.approved,
+                ).order_by(Plugin.name)
+            )
+        ).all()
+    if not rows:
+        return "当前没有可用的助手。"
+    lines = ["可用助手:"]
+    for r in rows:
+        m = r.manifest or {}
+        label = m.get("display_name") or r.name
+        extra = f" — {m.get('description', '')[:24]}" if m.get("description") else ""
+        lines.append(f"· {r.name}({label}){extra}")
+    lines.append("\n/切换 <名字> 使用该助手(如 /切换 sharestudy)")
+    return "\n".join(lines)
+
+
 async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
     """单条消息处理:命令分发 → 会话映射 → agent 运行 → 回复。"""
     from agentplatform.core.chat.service import agent_stream_for_session
@@ -130,10 +184,26 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn) -> None:
             await _reset_binding(s, chat_id)
         await reply_fn(message_id, "已开启新会话,上下文已清空。")
         return
+    if cmd in ("/助手列表", "/助手", "/plugins"):
+        await reply_fn(message_id, await _list_plugins())
+        return
+    if cmd.startswith("/切换"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            await reply_fn(message_id, "用法:/切换 <助手名>(发送 /助手列表 查看)")
+            return
+        async with SessionLocal() as s:
+            msg = await _switch_plugin(s, chat_id, parts[1].strip())
+        await reply_fn(message_id, msg)
+        return
     if cmd in ("/帮助", "/help", "帮助"):
         await reply_fn(
             message_id,
-            "直接发消息即可与平台助手对话(上下文连续)。\n/重置 - 开启新会话\n/帮助 - 显示本帮助",
+            "直接发消息即可与当前助手对话(上下文连续)。\n"
+            "/助手列表 - 查看平台全部可用助手\n"
+            "/切换 <名字> - 切换助手(如 /切换 sharestudy)\n"
+            "/重置 - 当前助手开新会话\n"
+            "/帮助 - 显示本帮助",
         )
         return
 
