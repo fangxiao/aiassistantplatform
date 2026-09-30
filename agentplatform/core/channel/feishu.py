@@ -245,8 +245,41 @@ def _reply_text(final_text: str, n_blocks: int) -> str:
     return text[:60000]
 
 
-async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str) -> str:
-    """切换助手:清旧绑定,以指定插件新建会话并绑定(返回给用户的提示文本)。"""
+def _plugin_intro(plugin) -> str:
+    """助手介绍(lark_md 文本):简介 + 技能/工具清单,切换成功即推送。"""
+    m = plugin.manifest or {}
+    label = m.get("display_name") or plugin.name
+    lines = [f"✅ 已切换到 **{label}**（{plugin.name} v{plugin.version}）", ""]
+    if m.get("description"):
+        lines += [m["description"], ""]
+    skills = m.get("skills") or []
+    tools = m.get("tools") or []
+    if skills:
+        lines.append("**技能**")
+        for x in skills:
+            if not isinstance(x, dict):
+                continue
+            name = str(x.get("id", "")).split(":", 1)[-1]
+            desc = (x.get("description") or "").strip()
+            lines.append(f"· {name}{' — ' + desc[:48] if desc else ''}")
+        lines.append("")
+    if tools:
+        lines.append("**工具**")
+        for x in tools:
+            if not isinstance(x, dict):
+                continue
+            name = str(x.get("id", "")).split(":", 1)[-1]
+            desc = (x.get("description") or "").strip()
+            lines.append(f"· {name}{' — ' + desc[:48] if desc else ''}")
+        lines.append("")
+    if not skills and not tools:
+        lines.append("（该助手未声明独立技能/工具，直接描述你的需求即可）")
+    lines.append("_直接发消息开始对话，上下文已重新开始_")
+    return "\n".join(lines)
+
+
+async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str):
+    """切换助手:清旧绑定,以指定插件新建会话并绑定。返回 Plugin 或 None(未找到)。"""
     from sqlalchemy import select as _select
 
     from agentplatform.core.channel.model import ChannelSession
@@ -261,7 +294,7 @@ async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str) 
         )
     )
     if plugin is None:
-        return f"未找到可用助手:{plugin_name}(发送 /助手列表 查看)"
+        return None
     await _reset_binding(session, chat_id)
     user_id = await _service_user_id(session)
     sess = await create_session(
@@ -269,8 +302,7 @@ async def _switch_plugin(session: AsyncSession, chat_id: str, plugin_name: str) 
     )
     session.add(ChannelSession(channel="feishu", chat_id=chat_id, session_id=sess.id))
     await session.commit()
-    label = (plugin.manifest or {}).get("display_name") or plugin.name
-    return f"已切换到「{label}」,直接发消息开始(上下文重新开始)。"
+    return plugin
 
 
 async def _available_plugins() -> list:
@@ -374,8 +406,18 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
             await reply_fn(message_id, "用法:/切换 <助手名>(发送 /助手列表 查看)")
             return
         async with SessionLocal() as s:
-            msg = await _switch_plugin(s, chat_id, parts[1].strip())
-        await reply_fn(message_id, msg)
+            plugin = await _switch_plugin(s, chat_id, parts[1].strip())
+        if plugin is None:
+            await reply_fn(message_id, f"未找到可用助手:{parts[1].strip()}(发送 /助手列表 查看)")
+            return
+        intro = _plugin_intro(plugin)
+        if client is not None:
+            try:
+                await _send_card_with(client, chat_id, _text_card(intro))
+                return
+            except Exception:  # noqa: BLE001  卡片失败回落文本
+                logger.warning("feishu 介绍卡片发送失败,回落文本")
+        await reply_fn(message_id, intro)
         return
     if cmd in ("/帮助", "/help", "帮助"):
         await reply_fn(
@@ -552,8 +594,19 @@ def start() -> bool:
                 elif isinstance(text, str) and text.startswith("__CARD__:"):
                     plugin_name = text.split(":", 1)[1]
                     async with _SL() as s:
-                        msg = await _switch_plugin(s, chat_id, plugin_name)
-                    await _send_text_with(client, chat_id, msg)
+                        plugin = await _switch_plugin(s, chat_id, plugin_name)
+                    if plugin is None:
+                        await _send_text_with(
+                            client, chat_id, f"未找到可用助手:{plugin_name}"
+                        )
+                    else:
+                        # 切换成功即推助手介绍卡(20260930 用户建议:能做什么一目了然)
+                        try:
+                            await _send_card_with(
+                                client, chat_id, _text_card(_plugin_intro(plugin))
+                            )
+                        except Exception:  # noqa: BLE001
+                            await _send_text_with(client, chat_id, _plugin_intro(plugin))
                 else:
                     await _process(message_id, chat_id, text, _build_reply_fn(client), client)
             finally:

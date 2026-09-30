@@ -172,12 +172,13 @@ async def test_switch_and_list_commands(session: AsyncSession, monkeypatch) -> N
     listing = await feishu._list_plugins()
     assert "feishu_test_plugin" in listing
 
-    # /切换
+    # /切换:成功返回 Plugin,介绍文本含技能信息
     chat_id = "oc_test_switch"
-    msg = await feishu._switch_plugin(session, chat_id, "feishu_test_plugin")
-    assert "已切换" in msg
+    plugin = await feishu._switch_plugin(session, chat_id, "feishu_test_plugin")
+    assert plugin is not None
+    intro = feishu._plugin_intro(plugin)
+    assert "已切换" in intro and "feishu_test_plugin" in intro
     sid = await feishu._bound_session_id(session, chat_id)
     assert sid is not None
-    # 未知助手
-    msg2 = await feishu._switch_plugin(session, chat_id, "no_such")
-    assert "未找到" in msg2
+    # 未知助手返回 None
+    assert await feishu._switch_plugin(session, chat_id, "no_such") is None
