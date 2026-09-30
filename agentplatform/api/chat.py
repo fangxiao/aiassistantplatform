@@ -238,6 +238,11 @@ async def _persist_interrupted_tail(
         if is_final:
             d.is_draft = False
         await s.commit()
+        import logging as _log
+
+        _log.getLogger(__name__).info(
+            "断开尾部落盘完成: session=%s message=%s is_final=%s", sid, d.id, is_final
+        )
 
 
 async def _checkpointed_agent_sse(

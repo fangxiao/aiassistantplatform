@@ -12,6 +12,7 @@
 | 004 | [004-remote-dev.md](./004-remote-dev.md) | 远程开发与调试(增量) | v0.1 已实现 | [007-remote-dev.md](../design/007-remote-dev.md) |
 | 005 | [005-knowledge-base.md](./005-knowledge-base.md) | 知识库(个人库 + 公共库,增量) | v0.1 草稿待评审 | 008(待产出) |
 | 011 | [011-harness-robustness.md](./011-harness-robustness.md) | Agent Harness 加固(断线恢复/并发重构/上下文管理/错误体系) | v0.1 已确认 | [016-harness-robustness.md](../design/016-harness-robustness.md) |
+| 012 | [012-feishu-channel.md](./012-feishu-channel.md) | 飞书通道(单聊文本桥接) | v0.1 已实现 | [017-feishu-channel.md](../design/017-feishu-channel.md) |
 
 ## 阅读路径
 

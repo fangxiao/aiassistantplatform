@@ -66,7 +66,12 @@ async def lifespan(app: FastAPI):
     from agentplatform.core.scheduler import scheduler as task_scheduler
 
     task_scheduler.start()
+    # M22:飞书通道(配置凭证才启动,WebSocket 长连接)
+    from agentplatform.core.channel import feishu as feishu_channel
+
+    feishu_channel.start()
     yield
+    await feishu_channel.stop()
     await task_scheduler.stop()
     await connector_scheduler.stop()
     await kb_pipeline.stop_worker()

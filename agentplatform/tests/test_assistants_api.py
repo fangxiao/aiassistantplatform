@@ -8,6 +8,14 @@ from agentplatform.core.plugin.loader import deploy_plugin
 from agentplatform.core.plugin.manifest import PluginManifest
 
 
+@pytest.fixture(autouse=True)
+def _review_required(monkeypatch):
+    """本文件测试审批制(ADR 0008)行为:恢复 plugin_review_required=True
+    (20260930 起试用默认免审,生产语义仍需守护)。"""
+    monkeypatch.setattr("agentplatform.config.settings.plugin_review_required", True)
+
+
+
 @pytest.mark.asyncio
 async def test_assistants_list_empty(client: AsyncClient) -> None:
     res = await client.get("/api/assistants")
