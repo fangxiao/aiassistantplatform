@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     feishu_app_secret: str = ""
     # 通道会话默认绑定的助手插件名(空=平台默认助手)
     feishu_default_plugin: str = ""
+    # 语音转写(P3-10,可选):OpenAI 兼容 /audio/transcriptions 端点;空=语音不转写
+    feishu_asr_url: str = ""
+    feishu_asr_key: str = ""
+    feishu_asr_model: str = "whisper-1"
 
     # 知识库(M12,设计 008)
     kb_embedding_dim: int = 1024  # 与迁移中 vector 维度一致,变更需全量重算

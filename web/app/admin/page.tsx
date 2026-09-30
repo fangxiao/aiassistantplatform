@@ -13,6 +13,14 @@ const REVIEW_BADGE: Record<ReviewStatus, { label: string; cls: string }> = {
   rejected: { label: "已驳回", cls: "bg-rose-100 text-rose-700 border-rose-200" },
 };
 
+interface BotInfo {
+  id: string;
+  name: string;
+  app_id: string;
+  allowed_plugins: string[] | null;
+  enabled: boolean;
+}
+
 const ROLE_LABEL: Record<UserAdminInfo["role"], string> = {
   admin: "平台管理员",
   developer: "开发者",
@@ -25,7 +33,18 @@ export default function AdminPage() {
   // 进入下方 useEffect 依赖,会导致"渲染→effect→setState→渲染"死循环
   // (20260929 事故:admin 页 3 分钟打出 2 万次 /admin/users 请求)
   const [me] = useState(() => getUser());
-  const [tab, setTab] = useState<"review" | "users">("review");
+  const [tab, setTab] = useState<"review" | "users" | "bots">("review");
+  // 飞书机器人(P2-4):凭证绑定 + 助手授权
+  const [bots, setBots] = useState<BotInfo[]>([]);
+  const [botForm, setBotForm] = useState({ name: "", app_id: "", app_secret: "", allowed_plugins: "" });
+
+  const loadBots = useCallback(async () => {
+    try {
+      setBots(await apiGet<BotInfo[]>("/channel/feishu/bots"));
+    } catch (err) {
+      alert(`加载机器人失败: ${err instanceof Error ? err.message : err}`);
+    }
+  }, []);
 
   // 助手审批
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -64,7 +83,8 @@ export default function AdminPage() {
     }
     void loadPlugins();
     void loadUsers("");
-  }, [router, me, loadPlugins, loadUsers]);
+    if (tab === "bots") void loadBots();
+  }, [router, me, loadPlugins, loadUsers, loadBots, tab]);
 
   const review = async (plugin: PluginInfo, action: "approve" | "reject", reason?: string) => {
     try {
@@ -181,6 +201,7 @@ export default function AdminPage() {
           {([
             ["review", `📋 助手审批${pending.length ? ` (${pending.length})` : ""}`],
             ["users", "👥 用户管理"],
+            ["bots", `🤖 飞书机器人${bots.length ? ` (${bots.length})` : ""}`],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -211,6 +232,77 @@ export default function AdminPage() {
               <h2 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">历史({others.length})</h2>
               <div className="space-y-3">{others.map(pluginRow)}</div>
             </section>
+          </div>
+        )}
+
+        {tab === "bots" && (
+          <div className="mt-6">
+            <p className="mb-4 text-xs text-slate-500">
+              绑定已有飞书自建应用:开放平台创建应用 → 开机器人能力 → 事件订阅选「长连接」订阅 im.message.receive_v1
+              → 权限开通 im:message → 发布版本后填入凭证。<b>助手授权</b>留空 = 该机器人可用全部助手,填插件名(逗号分隔)即白名单。
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input type="text" value={botForm.name} onChange={(e) => setBotForm({ ...botForm, name: e.target.value })} placeholder="机器人名称(如:团队入口)" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
+              <input type="text" value={botForm.app_id} onChange={(e) => setBotForm({ ...botForm, app_id: e.target.value })} placeholder="App ID(cli_...)" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
+              <input type="password" value={botForm.app_secret} onChange={(e) => setBotForm({ ...botForm, app_secret: e.target.value })} placeholder="App Secret" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
+              <input type="text" value={botForm.allowed_plugins} onChange={(e) => setBotForm({ ...botForm, allowed_plugins: e.target.value })} placeholder="助手白名单(可选,逗号分隔插件名)" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await apiFetch("/channel/feishu/bots", {
+                    method: "POST",
+                    body: {
+                      name: botForm.name,
+                      app_id: botForm.app_id,
+                      app_secret: botForm.app_secret,
+                      allowed_plugins: botForm.allowed_plugins.trim()
+                        ? botForm.allowed_plugins.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
+                        : null,
+                      enabled: true,
+                    },
+                  });
+                  setBotForm({ name: "", app_id: "", app_secret: "", allowed_plugins: "" });
+                  await loadBots();
+                } catch (err) {
+                  alert(`创建失败: ${err instanceof Error ? err.message : err}`);
+                }
+              }}
+              className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800"
+            >
+              ＋ 绑定机器人(立即生效)
+            </button>
+            <div className="mt-5 space-y-2">
+              {bots.map((b) => (
+                <div key={b.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xs">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-800">{b.name} <span className="ml-2 font-mono text-[10px] text-slate-400">{b.app_id}</span></p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">助手白名单:{b.allowed_plugins?.join("、") ?? "不限(全部助手)"}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] ${b.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      {b.enabled ? "已启用" : "已停用"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/channel/feishu/bots/${b.id}`, { method: "DELETE" });
+                          await loadBots();
+                        } catch (err) {
+                          alert(`删除失败: ${err instanceof Error ? err.message : err}`);
+                        }
+                      }}
+                      className="rounded-md border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50"
+                    >
+                      解绑
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {bots.length === 0 && <p className="text-center text-xs text-slate-400">暂无 DB 绑定的机器人(settings 全局凭证的默认机器人仍可用)</p>}
+            </div>
           </div>
         )}
 
