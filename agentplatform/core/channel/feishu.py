@@ -628,7 +628,7 @@ async def _process(message_id: str, chat_id: str, text: str, reply_fn, client=No
 
 
 async def _run_agent_round(
-    client, chat_id: str, sid: uuid.UUID, user_text: str, message_id: str, reply_fn
+    client, chat_id: str, sid: uuid.UUID, user_text: str, message_id: str, reply_fn, docs: list[str] | None = None
 ) -> None:
     """一轮 agent 运行与交付:占位卡 → 检查点管道流式 → 答案原地更新;
     input.form 渲染为飞书表单卡(M23 P1),其余组件计数降级提示。
@@ -662,7 +662,7 @@ async def _run_agent_round(
         from agentplatform.api.chat import _checkpointed_agent_sse
 
         async with SessionLocal() as s:
-            agen = agent_stream_for_session(s, sid, user_text)
+            agen = agent_stream_for_session(s, sid, user_text, docs=docs)
             async for frame in _checkpointed_agent_sse(s, sid, agen):
                 if frame.startswith("event: delta"):
                     payload = frame.split("data: ", 1)[1].strip()
@@ -691,7 +691,7 @@ async def _run_agent_round(
                 elif frame.startswith("event: error"):
                     payload = frame.split("data: ", 1)[1].strip()
                     parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
-        mappable = ("input.form", "input.confirm", "table", "image", "code", "file")
+        mappable = ("input.form", "input.confirm", "table", "image", "code", "file", "mermaid")
         handled = [b for b in blocks if isinstance(b, dict) and b.get("type") in mappable]
         unmapped = len(blocks) - len(handled)
         await _deliver(_reply_text("".join(parts), len(blocks), unmapped))
@@ -703,6 +703,12 @@ async def _run_agent_round(
             if b.get("type") == "input.form":
                 c = _form_card(b, str(sid))
                 cards = [c] if c else []
+            elif b.get("type") == "mermaid":
+                c = await _mermaid_card(b)
+                cards = [c] if c else _block_cards(
+                    {"type": "code", "data": {"code": (b.get("data") or {}).get("text") or "", "language": "mermaid"}},
+                    base,
+                )
             else:
                 cards = _block_cards(b, base)
             for card in cards:
@@ -808,6 +814,146 @@ async def _handle_schedule_cmd(
         f"已创建定时任务「{name}」:每天 {hh_mm} 以当前助手生成并推送到本会话。/定时列表 查看",
     )
 
+
+
+def _download_feishu_file(client, message_id: str, file_key: str, kind: str):
+    """下载飞书消息附件(im message_resource),返回字节流;失败抛异常。"""
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
+    req = (
+        GetMessageResourceRequest.builder()
+        .message_id(message_id)
+        .file_key(file_key)
+        .type("file" if kind == "file" else "image")
+        .build()
+    )
+    resp = client.im.v1.message_resource.get(req)
+    if not resp.success() or resp.file is None:
+        raise RuntimeError(f"附件下载失败: {resp.code} {resp.msg}")
+    return resp.file
+
+
+def _save_channel_upload(data: bytes, name: str) -> str:
+    """落平台 uploads 并返回签名 URL(html_render 同款目录)。"""
+    import re as _re
+    from agentplatform.api.files import sign_file_path
+
+    from agentplatform.core.agent.html_render import _uploads_dir
+
+    safe = _re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", name)[:80] or "file"
+    suffix = safe.rsplit(".", 1)[1] if "." in safe else "bin"
+    p = _uploads_dir() / f"{uuid.uuid4().hex}.{suffix}"
+    p.write_bytes(data)
+    base = (settings.public_api_base or "").rstrip("/")
+    url = sign_file_path(str(p))
+    return base + url if base else url
+
+
+async def _transcribe_audio(data: bytes, name: str) -> str | None:
+    """语音转写(P3-10):可选 OpenAI 兼容 /audio/transcriptions 端点。
+
+    未配置 settings.feishu_asr_url 时返回 None(上层提示不支持)。
+    """
+    asr_url = getattr(settings, "feishu_asr_url", "") or ""
+    if not asr_url:
+        return None
+    import httpx
+
+    async with httpx.AsyncClient(timeout=120) as hc:
+        resp = await hc.post(
+            asr_url,
+            files={"file": (name, data, "audio/ogg")},
+            data={"model": getattr(settings, "feishu_asr_model", "") or "whisper-1"},
+            headers={
+                "Authorization": f"Bearer {getattr(settings, 'feishu_asr_key', '') or ''}"
+            },
+        )
+        resp.raise_for_status()
+        return (resp.json().get("text") or "").strip() or None
+
+
+async def _handle_resource(client, chat_id, payload, reply_fn, open_id, allowed) -> None:
+    """附件处理:语音→转写入对话;文件/图片→存平台→作为文档即问上下文。"""
+    from agentplatform.core.db.session import SessionLocal as _SL
+
+    kind = payload.get("kind") or "file"
+    name = payload.get("file_name") or "file"
+    try:
+        data = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: _download_feishu_file(
+                client, payload.get("message_id", ""), payload.get("file_key", ""), kind
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        await reply_fn(payload.get("message_id", ""), f"[附件下载失败] {exc}")
+        return
+
+    if kind == "audio":
+        text = await _transcribe_audio(data, name)
+        if text is None:
+            await _send_text_with(
+                client, chat_id, "收到语音。平台尚未配置语音识别(FEISHU_ASR_URL),暂无法转写。"
+            )
+            return
+        await _send_text_with(client, chat_id, f"🎙️ {text}")
+        await _process(payload.get("message_id", ""), chat_id, text, reply_fn, client, open_id, allowed)
+        return
+
+    url = _save_channel_upload(data, name)
+    await _send_text_with(client, chat_id, f"📎 已接收《{name}》,作为参考资料提问。")
+    async with _SL() as s:
+        sid = await _ensure_session_id(s, chat_id, open_id, allowed)
+    from agentplatform.core.chat.service import agent_stream_for_session
+    from agentplatform.core.db.session import SessionLocal
+
+    note = f"(用户发送了文件《{name}》,服务端已解析为参考资料;请基于它回答用户后续问题)"
+    await _run_agent_round(client, chat_id, sid, note, payload.get("message_id", ""), reply_fn, docs=[url])
+
+
+
+async def _mermaid_card(block: dict) -> dict | None:
+    """mermaid → 渲染服务出 PNG → 图片链接卡(P3-7;失败返回 None 回落代码块)。"""
+    data = block.get("data") or {}
+    code = str(data.get("text") or data.get("code") or "").strip()
+    if not code:
+        return None
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<script src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js'></script>"
+        "<style>body{margin:0;display:flex;justify-content:center;padding:16px;}</style>"
+        "</head><body><pre class='mermaid'>"
+        + code.replace("<", "&lt;").replace(">", "&gt;")
+        + "</pre><script>mermaid.initialize({startOnLoad:true});</script></body></html>"
+    )
+    try:
+        import base64 as _b64
+
+        import httpx
+
+        from agentplatform.config import settings as _st
+
+        base = (_st.render_service_url or "http://render:8001").rstrip("/")
+        async with httpx.AsyncClient(timeout=90) as hc:
+            resp = await hc.post(
+                f"{base}/render", json={"html": html, "formats": ["png"], "scale": 2}
+            )
+            resp.raise_for_status()
+            png_b64 = (resp.json().get("files") or {}).get("png")
+        if not png_b64:
+            return None
+        url = _save_channel_upload(_b64.b64decode(png_b64), "mermaid.png")
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {"title": {"tag": "plain_text", "content": str(data.get("title") or "图表")}, "template": "violet"},
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": f"[查看图表]({url})"}}
+            ],
+        }
+    except Exception:  # noqa: BLE001  渲染失败回落代码块
+        return None
+
 async def push_to_chat(chat_id: str, title: str, text: str) -> bool:
     """向飞书会话推送卡片(定时任务产出等)。遍历已启动机器人,命中即返回。"""
     card = _text_card(f"**{title}**\n\n{text[:20000]}")
@@ -912,6 +1058,24 @@ def _start_bot(app_id: str, app_secret: str, allowed: list | None, name: str = "
             msg = data.event.message
             sender = getattr(getattr(data.event, "sender", None), "sender_id", None)
             open_id = getattr(sender, "open_id", "") or ""
+            # P3-9/10:文件与语音消息走资源下载管线
+            if getattr(msg, "message_type", "text") in ("file", "media", "audio", "image"):
+                try:
+                    content = json.loads(msg.content or "{}")
+                except ValueError:
+                    content = {}
+                kind = "audio" if msg.message_type in ("audio",) else "file"
+                payload = {
+                    "kind": kind,
+                    "file_key": content.get("file_key") or content.get("image_key") or "",
+                    "file_name": content.get("file_name") or msg.message_type,
+                    "message_id": msg.message_id,
+                }
+                if payload["file_key"]:
+                    _put((msg.message_id, msg.chat_id, "__RESOURCE__:" + json.dumps(payload), open_id))
+                else:
+                    _put((msg.message_id, msg.chat_id, "__UNSUPPORTED__", open_id))
+                return
             text = _extract_text(data)
             if msg.chat_type != "p2p":
                 # 群聊(P2-6):仅 @机器人 的文本触发
@@ -1002,6 +1166,12 @@ def _start_bot(app_id: str, app_secret: str, allowed: list | None, name: str = "
                 message_id, chat_id, text, open_id = item
                 if text == "__UNSUPPORTED__":
                     await _build_reply_fn(client)(message_id, _unsupported_reply())
+                elif isinstance(text, str) and text.startswith("__RESOURCE__:"):
+                    try:
+                        payload = json.loads(text.split(":", 1)[1])
+                    except ValueError:
+                        payload = {}
+                    await _handle_resource(client, chat_id, payload, _build_reply_fn(client), open_id, allowed)
                 elif isinstance(text, str) and text.startswith("__CONFIRM__:"):
                     try:
                         payload = json.loads(text.split(":", 1)[1])
