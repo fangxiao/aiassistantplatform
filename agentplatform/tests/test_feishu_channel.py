@@ -57,7 +57,7 @@ async def test_process_text_runs_agent_and_replies(session: AsyncSession, monkey
         assert session_id == sid
         assert user_message == "你好"
         yield AgentEvent(type="delta", text="回复正文")
-        yield AgentEvent(type="block_meta", block={"type": "table", "data": {}})
+        yield AgentEvent(type="block_meta", block={"type": "card", "data": {}})
 
     monkeypatch.setattr("agentplatform.core.chat.service.agent_stream_for_session", fake_stream)
     # _process 内部经 SessionLocal 开新会话——重定向到测试引擎

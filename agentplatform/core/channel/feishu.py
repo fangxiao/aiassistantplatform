@@ -245,6 +245,113 @@ def _reply_text(final_text: str, n_blocks: int, unmapped_blocks: int = 0) -> str
     return text[:60000]
 
 
+def _block_cards(block: dict, base_url: str = "") -> list[dict]:
+    """展示类 ContentBlock → 飞书卡片(M23 P2):confirm/table/image/code/file。
+
+    返回 0..N 张卡片;无法映射返回空列表(由调用方计数降级)。
+    """
+    btype = block.get("type") or ""
+    data = block.get("data") or {}
+
+    def _md_card(title: str | None, md: str, template: str = "turquoise") -> dict:
+        els: list[dict] = []
+        card: dict = {"config": {"wide_screen_mode": True}}
+        if title:
+            card["header"] = {
+                "title": {"tag": "plain_text", "content": str(title)},
+                "template": template,
+            }
+        els.append({"tag": "div", "text": {"tag": "lark_md", "content": md}})
+        card["elements"] = els
+        return card
+
+    if btype == "input.confirm":
+        message = str(data.get("message") or data.get("text") or "请确认")
+        return [
+            {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": "需要你确认"},
+                    "template": "orange",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": message}},
+                    {
+                        "tag": "action",
+                        "actions": [
+                            {
+                                "tag": "button",
+                                "text": {"tag": "plain_text", "content": str(data.get("confirm_text") or "确认")},
+                                "type": "primary",
+                                "value": {"__confirm_submit": 1, "confirmed": 1},
+                            },
+                            {
+                                "tag": "button",
+                                "text": {"tag": "plain_text", "content": str(data.get("cancel_text") or "取消")},
+                                "type": "danger",
+                                "value": {"__confirm_submit": 1, "confirmed": 0},
+                            },
+                        ],
+                    },
+                ],
+            }
+        ]
+
+    if btype == "table":
+        cols = [str(c) for c in (data.get("columns") or [])]
+        rows = [
+            ["" if c is None else str(c) for c in (r if isinstance(r, list) else [])]
+            for r in (data.get("rows") or [])
+            if isinstance(r, list)
+        ]
+        if not cols:
+            return []
+        header_md = "|" + "|".join(cols) + "|\n|" + "|".join(["---"] * len(cols)) + "|"
+        body_md = "\n".join("|" + "|".join(r) + "|" for r in rows)
+        return [_md_card(data.get("title"), (header_md + "\n" + body_md).strip())]
+
+    if btype == "image":
+        url = str(data.get("url") or "")
+        if not url:
+            return []
+        return [
+            {
+                "config": {"wide_screen_mode": True},
+                "elements": [{"tag": "img", "img_key": "", "alt": {"tag": "plain_text", "content": "图片"}}],
+                # lark_md 中可直接嵌图片链接,退而求其次以链接展示
+                "header": None,
+            }
+            if False
+            else _md_card(data.get("title") or "图片", f"[查看图片]({url})")
+        ]
+
+    if btype == "code":
+        code = str(data.get("code") or data.get("text") or "")
+        lang = str(data.get("language") or "")
+        return [
+            {
+                "config": {"wide_screen_mode": True},
+                "elements": [
+                    {
+                        "tag": "code_block",
+                        "language": lang or "plain_text",
+                        "content": code[:20000],
+                    }
+                ],
+            }
+        ]
+
+    if btype == "file":
+        name = str(data.get("name") or "文件")
+        url = str(data.get("url") or "")
+        if not url:
+            return []
+        link = f"[{name}]({url})" if url.startswith("http") else name
+        return [_md_card(None, f"📎 {link}")]
+
+    return []
+
+
 def _form_card(block: dict, sid: str) -> dict | None:
     """input.form → 飞书卡片表单(M23 P1 映射):提交回调 → 平台 interact → 续跑。
 
@@ -529,6 +636,8 @@ async def _run_agent_round(
 
     parts: list[str] = []
     blocks: list[dict] = []
+    last_refresh = asyncio.get_running_loop().time()
+    last_len = 0
     try:
         from agentplatform.api.chat import _checkpointed_agent_sse
 
@@ -538,30 +647,80 @@ async def _run_agent_round(
                 if frame.startswith("event: delta"):
                     payload = frame.split("data: ", 1)[1].strip()
                     parts.append(json.loads(payload).get("text", ""))
+                    # 流式刷新(P2-1):节流 5s 增量 patch 占位卡,长回答渐进可见
+                    now = asyncio.get_running_loop().time()
+                    cur_len = sum(map(len, parts))
+                    if (
+                        placeholder_mid is not None
+                        and now - last_refresh >= 5.0
+                        and cur_len - last_len >= 20
+                    ):
+                        last_refresh = now
+                        last_len = cur_len
+                        try:
+                            await _patch_card_with(
+                                client,
+                                placeholder_mid,
+                                _text_card("".join(parts) + "\n\n_…(生成中)_"),
+                            )
+                        except Exception:  # noqa: BLE001  刷新失败不影响主流程
+                            pass
                 elif frame.startswith(("event: block_meta", "event: await_external")):
                     payload = frame.split("data: ", 1)[1].strip()
                     blocks.append(json.loads(payload))
                 elif frame.startswith("event: error"):
                     payload = frame.split("data: ", 1)[1].strip()
                     parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
-        form_blocks = [b for b in blocks if isinstance(b, dict) and b.get("type") == "input.form"]
-        unmapped = len(blocks) - len(form_blocks)
+        mappable = ("input.form", "input.confirm", "table", "image", "code", "file")
+        handled = [b for b in blocks if isinstance(b, dict) and b.get("type") in mappable]
+        unmapped = len(blocks) - len(handled)
         await _deliver(_reply_text("".join(parts), len(blocks), unmapped))
-        for fb in form_blocks:
-            card = _form_card(fb, str(sid))
-            if card is None:
-                continue
-            try:
-                if client is not None:
-                    await _send_card_with(client, chat_id, card)
-            except Exception:  # noqa: BLE001
-                logger.warning("feishu 表单卡片发送失败")
+        from agentplatform.config import settings as _st
+
+        base = getattr(_st, "public_api_base", "") or ""
+        for b in handled:
+            cards: list[dict] = []
+            if b.get("type") == "input.form":
+                c = _form_card(b, str(sid))
+                cards = [c] if c else []
+            else:
+                cards = _block_cards(b, base)
+            for card in cards:
+                try:
+                    if client is not None:
+                        await _send_card_with(client, chat_id, card)
+                except Exception:  # noqa: BLE001
+                    logger.warning("feishu 组件卡片发送失败 type=%s", b.get("type"))
     except Exception as exc:  # noqa: BLE001 通道侧兜底,错误必须回给用户
         logger.exception("feishu 通道处理失败 chat=%s", chat_id)
         try:
             await _deliver(f"[处理失败] {type(exc).__name__}: {exc}")
         except Exception:  # noqa: BLE001
             pass
+
+
+async def _handle_confirm_submit(client, chat_id: str, payload: dict) -> None:
+    """input.confirm 飞书按钮回执:确认/取消经 handle_interaction 落库后自动续跑。"""
+    from agentplatform.core.db.session import SessionLocal
+    from agentplatform.core.interact.service import handle_interaction
+
+    async with SessionLocal() as s:
+        sid = await _bound_session_id(s, chat_id)
+    if sid is None:
+        await _send_text_with(client, chat_id, "[确认异常] 当前会话无绑定")
+        return
+    confirmed = bool(payload.get("confirmed"))
+    async with SessionLocal() as s:
+        await handle_interaction(
+            s,
+            session_id=sid,
+            block_id="feishu_confirm",
+            action="input.confirm",
+            value={"confirmed": confirmed},
+        )
+        await s.commit()
+    note = "已确认,继续处理。" if confirmed else "已取消。"
+    await _send_text_with(client, chat_id, note)
 
 
 async def _handle_form_submit(client, chat_id: str, payload: dict) -> None:
@@ -626,9 +785,23 @@ def start() -> bool:
     def _on_message(data) -> None:
         try:
             msg = data.event.message
-            if msg.chat_type != "p2p":
-                return  # P2:群聊 @机器人
             text = _extract_text(data)
+            if msg.chat_type != "p2p":
+                # 群聊(P2-6):仅 @机器人 的文本触发;@提及在 content 中为
+                # <at user_id="..."></at> 占位,提取后剥净即可
+                if text is None:
+                    return
+                import re as _re
+
+                stripped = _re.sub(r"<at[^>]*>\s*</at>", "", text).strip()
+                mentions = getattr(data.event.message, "mentions", None)
+                at_bot = bool(mentions) or "@_user" in text or stripped != text
+                if not at_bot or not stripped:
+                    return
+                loop.call_soon_threadsafe(
+                    queue.put_nowait, (msg.message_id, msg.chat_id, stripped)
+                )
+                return
             if text is None:
                 loop.call_soon_threadsafe(
                     queue.put_nowait,
@@ -649,6 +822,30 @@ def start() -> bool:
 
             ev = data.event
             a = ev.action
+            # 确认按钮(input.confirm 映射):按钮 value 直接携带 confirmed,
+            # chat 上下文定位会话——交互经 handle_interaction 后自动续跑
+            if not a.form_value and isinstance(a.value, dict) and a.value.get("__confirm_submit"):
+                chat_id0 = ev.context.open_chat_id if ev.context else None
+                if chat_id0:
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        (
+                            "",
+                            chat_id0,
+                            "__CONFIRM__:"
+                            + json.dumps({"confirmed": bool(a.value.get("confirmed"))}, ensure_ascii=False),
+                        ),
+                    )
+                try:
+                    from lark_oapi.event.callback.model.p2_card_action_trigger import (
+                        P2CardActionTriggerResponse,
+                    )
+
+                    return P2CardActionTriggerResponse.build(
+                        {"toast": {"type": "success", "content": "已记录,继续处理…"}}
+                    )
+                except Exception:  # noqa: BLE001
+                    return None
             # 表单提交(M23 input.form 映射):form_value + 按钮 value 携带 sid/action
             if a.form_value and isinstance(a.value, dict) and a.value.get("__form_submit"):
                 chat_id0 = ev.context.open_chat_id if ev.context else None
@@ -711,6 +908,12 @@ def start() -> bool:
                 message_id, chat_id, text = item
                 if text == "__UNSUPPORTED__":
                     await _build_reply_fn(client)(message_id, "暂只支持文本消息,文件/图片等请在 Web 工作台发送。")
+                elif isinstance(text, str) and text.startswith("__CONFIRM__:"):
+                    try:
+                        payload = json.loads(text.split(":", 1)[1])
+                    except ValueError:
+                        payload = {"confirmed": False}
+                    await _handle_confirm_submit(client, chat_id, payload)
                 elif isinstance(text, str) and text.startswith("__FORM__:"):
                     try:
                         payload = json.loads(text.split(":", 1)[1])
