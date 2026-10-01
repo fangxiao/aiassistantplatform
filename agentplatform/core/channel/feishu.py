@@ -1295,6 +1295,8 @@ def _start_bot(app_id: str, app_secret: str, allowed: list | None, name: str = "
             # 网络中间层(代理/NAT)约 12 分钟静默掐断 WS(no close frame):
             # 心跳从 120s 缩到 30s 保活;断开后 SDK 自动重连
             ws_client._ping_interval = 30
+            # 断线快重连(默认 120s 死窗太长;WS 模式断线期间事件不补投)
+            ws_client._reconnect_interval = 5
             ws_client.start()
         except Exception:  # noqa: BLE001
             logger.exception("feishu 长连接退出 bot=%s", name or app_id)
