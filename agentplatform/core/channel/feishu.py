@@ -31,6 +31,40 @@ _ws_thread: object | None = None
 _CARD_SENDER = None
 
 
+def _build_reply_fn(client):
+    """构造回复函数:reply API 封装为 async(sync SDK 调用丢线程池)。"""
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import (
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
+    )
+
+    async def reply(message_id: str, text: str) -> None:
+        def _do() -> None:
+            req = (
+                ReplyMessageRequest.builder()
+                .message_id(message_id)
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .content(json.dumps({"text": text}, ensure_ascii=False))
+                    .msg_type("text")
+                    .build()
+                )
+                .build()
+            )
+            resp = client.im.v1.message.reply(req)
+            if not resp.success():
+                logger.warning(
+                    "feishu 回复失败 code=%s msg=%s",
+                    resp.code,
+                    resp.msg,
+                )
+
+        await asyncio.get_running_loop().run_in_executor(None, _do)
+
+    return reply
+
+
 def _text_card(content_md: str) -> dict:
     """简单文本卡片(占位/更新两用;lark_md 渲染)。"""
     return {
@@ -1236,6 +1270,9 @@ def _start_bot(app_id: str, app_secret: str, allowed: list | None, name: str = "
                 event_handler=dispatcher,
                 log_level=lark.LogLevel.INFO,
             )
+            # 网络中间层(代理/NAT)约 12 分钟静默掐断 WS(no close frame):
+            # 心跳从 120s 缩到 30s 保活;断开后 SDK 自动重连
+            ws_client._ping_interval = 30
             ws_client.start()
         except Exception:  # noqa: BLE001
             logger.exception("feishu 长连接退出 bot=%s", name or app_id)
