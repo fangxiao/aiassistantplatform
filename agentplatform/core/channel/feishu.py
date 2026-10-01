@@ -1023,8 +1023,30 @@ async def _handle_confirm_submit(client, chat_id: str, payload: dict) -> None:
             value={"confirmed": confirmed},
         )
         await s.commit()
-    note = "已确认,继续处理。" if confirmed else "已取消。"
+    note = "已确认,正在继续处理…" if confirmed else "已取消。"
     await _send_text_with(client, chat_id, note)
+    # 与 Web 端 continue 语义一致:交互回填后自动续跑(20261001 缺失即用户
+    # 点确认后助手停摆的根因);取消则不续跑
+    if not confirmed:
+        return
+    from agentplatform.core.message.model import MessageRole
+    from agentplatform.core.message.service import list_messages
+
+    content = ""
+    async with SessionLocal() as s:
+        msgs = await list_messages(s, sid)
+        last_user = next((m for m in reversed(msgs) if m.role == MessageRole.user), None)
+        if last_user is not None:
+            for b in last_user.blocks or []:
+                if isinstance(b, dict) and b.get("type") == "markdown":
+                    content = (b.get("data") or {}).get("text", "")
+
+    async def _fallback_reply(message_id: str, text: str) -> None:
+        await _send_text_with(client, chat_id, text)
+
+    lock = _INFLIGHT.setdefault(chat_id, asyncio.Lock())
+    async with lock:
+        await _run_agent_round(client, chat_id, sid, content, "", _fallback_reply)
 
 
 async def _handle_form_submit(client, chat_id: str, payload: dict) -> None:
