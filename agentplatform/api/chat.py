@@ -21,6 +21,7 @@ from agentplatform.core.chat.schemas import (
     SessionOut,
     UpdateSession,
 )
+from agentplatform.core.agent.errors import classify_exception
 from agentplatform.core.chat.service import ChatError, agent_stream_for_session
 from agentplatform.core.chat.sse import sse
 from agentplatform.core.db.session import get_session as get_db_session
@@ -269,6 +270,40 @@ async def _persist_interrupted_tail(
         )
 
 
+
+
+async def _record_round_trace(
+    session: AsyncSession,
+    sid: uuid.UUID,
+    message_id: uuid.UUID | None,
+    tokens: int | None,
+    error_kind,
+    error_detail: str | None,
+) -> None:
+    """轮次轨迹落库(需求 011 H4):主会话可能已 rollback,用独立会话写。"""
+    from agentplatform.core.agent.errors import ErrorKind
+    from agentplatform.core.agent.trace_model import AgentRoundTrace
+    from agentplatform.core.db.session import SessionLocal
+
+    try:
+        async with SessionLocal() as s2:
+            s2.add(
+                AgentRoundTrace(
+                    session_id=sid,
+                    message_id=message_id,
+                    kind="chat",
+                    tokens=tokens,
+                    error_kind=error_kind.value if isinstance(error_kind, ErrorKind) else error_kind,
+                    error_detail=error_detail,
+                )
+            )
+            await s2.commit()
+    except Exception:  # noqa: BLE001  trace 失败不影响主流程
+        import logging as _log
+
+        _log.getLogger(__name__).warning("agent_round_trace 写入失败 session=%s", sid)
+
+
 async def _checkpointed_agent_sse(
     session: AsyncSession,
     sid: uuid.UUID,
@@ -391,6 +426,9 @@ async def _checkpointed_agent_sse(
                 usage_total = ev.usage.get("total_tokens") or usage_total
         await _flush(is_final=True)
         await session.commit()
+        await _record_round_trace(
+            session, sid, draft.id if draft is not None else None, usage_total, None, None
+        )
         if title_source is not None:
             import asyncio as _asyncio
 
@@ -415,32 +453,40 @@ async def _checkpointed_agent_sse(
         raise
 
     except ChatError as exc:
+        kind, _resumable = classify_exception(exc)
         try:
             await _flush()
             await session.commit()
         except Exception:  # noqa: BLE001
             await session.rollback()
+        await _record_round_trace(
+            session, sid, draft.id if draft is not None else None, usage_total, kind, str(exc)[:500]
+        )
         yield sse(
             "error",
             {
                 "code": "chat_error",
-                "kind": "internal",
+                "kind": kind.value,
                 "message": str(exc),
                 "resumable": draft is not None,
                 "message_id": str(draft.id) if draft is not None else None,
             },
         )
     except Exception as exc:  # noqa: BLE001  SSE 内兜底,避免连接悬挂
+        kind, _resumable = classify_exception(exc)
         try:
             await _flush()
             await session.commit()
         except Exception:  # noqa: BLE001
             await session.rollback()
+        await _record_round_trace(
+            session, sid, draft.id if draft is not None else None, usage_total, kind, str(exc)[:500]
+        )
         yield sse(
             "error",
             {
                 "code": "agent_error",
-                "kind": "internal",
+                "kind": kind.value,
                 "message": str(exc),
                 "resumable": draft is not None,
                 "message_id": str(draft.id) if draft is not None else None,

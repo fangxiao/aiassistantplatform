@@ -19,6 +19,7 @@ from agentplatform.core.db.base import Base
 from agentplatform.core.db.session import get_session
 from agentplatform.core.interact.model import InteractEvent  # noqa: F401
 from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401
+from agentplatform.core.agent.trace_model import AgentRoundTrace  # noqa: F401  表注册进 metadata
 from agentplatform.core.message.model import Message  # noqa: F401
 from agentplatform.core.plugin.model import Plugin  # noqa: F401
 from agentplatform.core.registry.model import SkillTool  # noqa: F401

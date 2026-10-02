@@ -25,6 +25,20 @@ from agentplatform.core.message.service import (
 from agentplatform.core.session.service import create_session
 
 
+@pytest.fixture(autouse=True)
+def _trace_stub(monkeypatch):
+    """捕获 trace 写入(避免测试写库),并暴露调用记录供断言。"""
+    calls: list[tuple] = []
+
+    async def fake(session, sid, message_id, tokens, error_kind, error_detail):
+        calls.append((sid, message_id, tokens, error_kind, error_detail))
+
+    import agentplatform.api.chat as chat_mod
+
+    monkeypatch.setattr(chat_mod, "_record_round_trace", fake)
+    return calls
+
+
 def _parse(frames: list[str]) -> list[tuple[str, dict]]:
     out = []
     for f in frames:
@@ -74,7 +88,7 @@ async def test_normal_stream_finalizes_draft(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_error_keeps_draft_and_reports_resumable(session: AsyncSession) -> None:
+async def test_stream_error_keeps_draft_and_reports_resumable(session: AsyncSession, _trace_stub) -> None:
     s = await create_session(session, plugin_id=None, title="ckpt-err")
     await session.commit()
 
@@ -95,6 +109,8 @@ async def test_stream_error_keeps_draft_and_reports_resumable(session: AsyncSess
     assert draft.id == uuid.UUID(errors[0]["message_id"])
     assert "部分产出" in draft.blocks[0]["data"]["text"]
     assert draft.is_draft is True
+    # 错误已按六分类落 trace(H4)
+    assert _trace_stub and _trace_stub[-1][4] is not None  # error_detail 非空
 
 
 @pytest.mark.asyncio
