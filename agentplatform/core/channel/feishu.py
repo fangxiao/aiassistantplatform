@@ -1315,6 +1315,40 @@ def _unsupported_reply() -> str:
 _GATEWAYS: dict[str, dict] = {}
 
 
+async def _ensure_default_bot_row() -> None:
+    """收编 settings 凭证为 DB 机器人行(20261002 用户要求:面板统一管理)。
+
+    幂等:app_id 已存在不重复建。收编后 DB 行状态(enabled/allowlist)优先生效,
+    settings 凭证仅作首次导入来源。
+    """
+    if not (settings.feishu_app_id and settings.feishu_app_secret):
+        return
+    try:
+        from agentplatform.core.channel.model import FeishuBot
+        from agentplatform.core.db.session import SessionLocal as _SL
+        from agentplatform.core.llm.crypto import encrypt
+        from sqlalchemy import select as _select
+
+        async with _SL() as s:
+            exists = await s.scalar(
+                _select(FeishuBot).where(FeishuBot.app_id == settings.feishu_app_id)
+            )
+            if exists is None:
+                s.add(
+                    FeishuBot(
+                        name="默认机器人(settings 导入)",
+                        app_id=settings.feishu_app_id,
+                        app_secret_enc=encrypt(settings.feishu_app_secret),
+                        allowed_plugins=None,
+                        enabled=True,
+                    )
+                )
+                await s.commit()
+                logger.info("settings 飞书机器人已收编为 DB 行: %s", settings.feishu_app_id)
+    except Exception:  # noqa: BLE001  表未迁移等不阻塞启动
+        logger.warning("默认机器人收编跳过(表未就绪?)")
+
+
 async def _load_bots() -> list[dict]:
     """启用的机器人列表:DB 配置优先;无 DB 配置时回落 settings 全局凭证。"""
     try:
@@ -1323,6 +1357,7 @@ async def _load_bots() -> list[dict]:
         from agentplatform.core.llm.crypto import decrypt
         from sqlalchemy import select as _select
 
+        await _ensure_default_bot_row()
         async with _SL() as s:
             rows = (
                 await s.scalars(_select(FeishuBot).where(FeishuBot.enabled.is_(True)))
@@ -1386,16 +1421,20 @@ def start_bot_now(bot: dict) -> None:
     _GATEWAYS[gid] = _start_bot(gid, bot["app_secret"], bot.get("allowed"), bot.get("name", ""))
 
 
-def stop_bot_now(app_id: str) -> None:
+def stop_bot_now(app_id: str, db_row_exists: bool = False) -> None:
     """管理接口:停用一个机器人(删除/禁用后调用;WS 线程 daemon 随进程退出)。
 
-    与 settings 默认凭证同 app_id 的机器人被移除时,默认网关自动恢复
-    (20261001 事故:用户在面板绑了同一应用又删除,清掉了唯一网关,通道静默)。
+    与 settings 同 app_id 且 DB 无对应行(settings 时代误清)时自动恢复默认
+    网关;DB 行存在时以 DB 状态为准(禁用不被自愈顶翻,20261002)。
     """
     old = _GATEWAYS.pop(app_id, None)
     if old is not None:
         old["worker"].cancel()
-    if app_id == settings.feishu_app_id and settings.feishu_app_secret:
+    if (
+        not db_row_exists
+        and app_id == settings.feishu_app_id
+        and settings.feishu_app_secret
+    ):
         _GATEWAYS[app_id] = _start_bot(
             settings.feishu_app_id, settings.feishu_app_secret, None, "default(settings)"
         )

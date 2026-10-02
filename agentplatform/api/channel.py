@@ -113,7 +113,8 @@ async def update_bot(
             }
         )
     else:
-        feishu_channel.stop_bot_now(row.app_id)
+        # DB 行仍在(enabled=False):以 DB 状态为准,不触发自愈恢复
+        feishu_channel.stop_bot_now(row.app_id, db_row_exists=True)
     return _out(row)
 
 
@@ -126,7 +127,9 @@ async def delete_bot(
     row = await session.get(FeishuBot, bot_id)
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "机器人不存在"})
-    feishu_channel.stop_bot_now(row.app_id)
+    app_id = row.app_id
     await session.delete(row)
     await session.commit()
+    # DB 行已删:若与 settings 同 app_id 则允许自愈恢复默认网关
+    feishu_channel.stop_bot_now(app_id, db_row_exists=False)
     return {"ok": True}

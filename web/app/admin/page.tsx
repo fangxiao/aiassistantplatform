@@ -36,11 +36,19 @@ export default function AdminPage() {
   const [tab, setTab] = useState<"review" | "users" | "bots">("review");
   // 飞书机器人(P2-4):凭证绑定 + 助手授权
   const [bots, setBots] = useState<BotInfo[]>([]);
-  const [botForm, setBotForm] = useState({ name: "", app_id: "", app_secret: "", allowed_plugins: "" });
+  const [botForm, setBotForm] = useState({ name: "", app_id: "", app_secret: "", allowed_plugins: [] as string[] });
+  // 可选助手(复选框数据源):审批通过的 active 插件
+  const [selectablePlugins, setSelectablePlugins] = useState<{ name: string; label: string }[]>([]);
 
   const loadBots = useCallback(async () => {
     try {
       setBots(await apiGet<BotInfo[]>("/channel/feishu/bots"));
+      const ps = await apiGet<{ name: string; review_status: string; manifest?: { display_name?: string } }[]>("/plugins");
+      setSelectablePlugins(
+        ps
+          .filter((x) => x.review_status === "approved")
+          .map((x) => ({ name: x.name, label: x.manifest?.display_name || x.name })),
+      );
     } catch (err) {
       alert(`加载机器人失败: ${err instanceof Error ? err.message : err}`);
     }
@@ -245,7 +253,30 @@ export default function AdminPage() {
               <input type="text" value={botForm.name} onChange={(e) => setBotForm({ ...botForm, name: e.target.value })} placeholder="机器人名称(如:团队入口)" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
               <input type="text" value={botForm.app_id} onChange={(e) => setBotForm({ ...botForm, app_id: e.target.value })} placeholder="App ID(cli_...)" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
               <input type="password" value={botForm.app_secret} onChange={(e) => setBotForm({ ...botForm, app_secret: e.target.value })} placeholder="App Secret" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
-              <input type="text" value={botForm.allowed_plugins} onChange={(e) => setBotForm({ ...botForm, allowed_plugins: e.target.value })} placeholder="助手白名单(可选,逗号分隔插件名)" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs shadow-xs" />
+            
+            </div>
+            <div className="mt-2">
+              <p className="mb-1 text-[11px] font-semibold text-slate-600">助手白名单(不勾 = 全部可用)</p>
+              <div className="flex flex-wrap gap-2">
+                {selectablePlugins.map((pl) => (
+                  <label key={pl.name} className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-700 shadow-xs has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50">
+                    <input
+                      type="checkbox"
+                      checked={botForm.allowed_plugins.includes(pl.name)}
+                      onChange={(e) =>
+                        setBotForm((f) => ({
+                          ...f,
+                          allowed_plugins: e.target.checked
+                            ? [...f.allowed_plugins, pl.name]
+                            : f.allowed_plugins.filter((x) => x !== pl.name),
+                        }))
+                      }
+                    />
+                    {pl.label}
+                  </label>
+                ))}
+                {selectablePlugins.length === 0 && <span className="text-[11px] text-slate-400">暂无已过审助手</span>}
+              </div>
             </div>
             <button
               type="button"
@@ -257,13 +288,11 @@ export default function AdminPage() {
                       name: botForm.name,
                       app_id: botForm.app_id,
                       app_secret: botForm.app_secret,
-                      allowed_plugins: botForm.allowed_plugins.trim()
-                        ? botForm.allowed_plugins.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
-                        : null,
+                      allowed_plugins: botForm.allowed_plugins.length ? botForm.allowed_plugins : null,
                       enabled: true,
                     },
                   });
-                  setBotForm({ name: "", app_id: "", app_secret: "", allowed_plugins: "" });
+                  setBotForm({ name: "", app_id: "", app_secret: "", allowed_plugins: [] });
                   await loadBots();
                 } catch (err) {
                   alert(`创建失败: ${err instanceof Error ? err.message : err}`);
