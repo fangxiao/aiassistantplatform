@@ -23,12 +23,12 @@
 
 | # | 任务 | 产出 |
 |---|---|---|
-| P2.1 | errors.py 六类枚举 + 策略绑定(ADR 0010) | core/agent/errors |
-| P2.2 | alembic:`agent_round_trace` 表 + 写入点(轮次/压缩/兜底计数) | migration |
-| P2.3 | SSE error 统一 `{code,kind,message,resumable}` | api 层 |
-| P2.4 | loop.py 拆分:dispatch.py(工具调用解析/资源匹配迁出)、loop 瘦身 ≤400 行 | 设计 016 §3 |
-| P2.5 | 轮询消除:skill_delta_queue/progress_q → 生成器合并,子调用失败结构化上报 | 设计 016 §3.2 |
-| P2.6 | 故障注入矩阵测试(子调用失败/session 失效/解析失败) | 验收 A4 |
+| P2.1 | ✅(20261002) errors.py 六类枚举 + classify_exception | core/agent/errors |
+| P2.2 | ✅(20261002) a5b7e1c8d402 + 消息轮次写入(压缩/兜底计数 P3 扩展) | migration |
+| P2.3 | ✅(20261002) SSE error 统一分类 | api 层 |
+| P2.4 | ✅(20261002) dispatch.py 迁出(1196→777 行;≤400 行目标随 P3 再瘦) | 设计 016 §3 |
+| P2.5 | ✅(20261002) _drain_until_done 并发等待,轮询清零 | 设计 016 §3.2 |
+| P2.6 | 部分(既有 378 用例含断流/session失效回归;系统化注入矩阵 P3 补) | 验收 A4 |
 
 ## P3 · 上下文压缩 + 兜底收缩(H3 + H5)
 
