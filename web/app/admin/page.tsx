@@ -43,10 +43,10 @@ export default function AdminPage() {
   const loadBots = useCallback(async () => {
     try {
       setBots(await apiGet<BotInfo[]>("/channel/feishu/bots"));
-      const ps = await apiGet<{ name: string; display_name?: string | null; review_status: string }[]>("/plugins");
+      const ps = await apiGet<{ name: string; display_name?: string | null; review_status: string; status: string }[]>("/plugins");
       setSelectablePlugins(
         ps
-          .filter((x) => x.review_status === "approved")
+          .filter((x) => x.review_status === "approved" && x.status === "active")
           .map((x) => ({ name: x.name, label: x.display_name || x.name })),
       );
     } catch (err) {
