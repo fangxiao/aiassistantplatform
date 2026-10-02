@@ -43,11 +43,11 @@ export default function AdminPage() {
   const loadBots = useCallback(async () => {
     try {
       setBots(await apiGet<BotInfo[]>("/channel/feishu/bots"));
-      const ps = await apiGet<{ name: string; review_status: string; manifest?: { display_name?: string } }[]>("/plugins");
+      const ps = await apiGet<{ name: string; display_name?: string | null; review_status: string }[]>("/plugins");
       setSelectablePlugins(
         ps
           .filter((x) => x.review_status === "approved")
-          .map((x) => ({ name: x.name, label: x.manifest?.display_name || x.name })),
+          .map((x) => ({ name: x.name, label: x.display_name || x.name })),
       );
     } catch (err) {
       alert(`加载机器人失败: ${err instanceof Error ? err.message : err}`);
