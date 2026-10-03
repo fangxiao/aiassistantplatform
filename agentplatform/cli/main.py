@@ -179,6 +179,14 @@ export HUB_AGENT=<你的会话名,如 plugin-myplugin>
 
 ---
 
+## 🧠 平台 AI 网关能力(模型怎么来)
+
+- **模型声明可选**:`plugin.yaml` 的 `model` 省略即走平台 **auto 调度**(推荐)——
+  网关按任务自动选型,上游故障自动切换兜底模型,插件零感知
+- **可用模型查询**:`agentplatform models`(列出网关当前真实调度池)
+- **多模态免费**:用户发图时平台自动路由多模态模型,插件无需声明
+- **不要**在插件内自建 LLM 调用/自带密钥——统一走平台网关(计量/审计/兜底都在网关层)
+
 ## 🌟 AI 辅助开发标准化流程 (AI ARCHITECT SELECTION SOP)
 作为开发者的 AI 研发伙伴，当开发者提出新插件或新业务需求时（例如「我要做个合同审核/标书比对/文章排版助手」），你必须严格遵循以下 **4 步黄金 SOP**：
 
@@ -531,6 +539,43 @@ def cmd_widgets(args: argparse.Namespace) -> int:
         print()
 
     print("👉 提示: 使用 `agentplatform widgets --json` 或访问 Web 开发者中心可体验交互预览。")
+    return 0
+
+
+
+def cmd_models(args: argparse.Namespace) -> int:
+    """列出平台 AI 网关当前可用的模型(auto 池真实调度清单)。"""
+    import httpx
+
+    from agentplatform.cli.dev import _load_dev_token
+
+    base = get_target_url(args)
+    token = _load_dev_token(base)
+    if not token:
+        print("未配置令牌:~/.agentplatform/config.json 的 token 字段(或先 export AGENTPLATFORM_TOKEN)")
+        return 1
+    try:
+        resp = httpx.get(
+            f"{base}/api/llm/auto-pool",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"查询失败(网络): {exc}")
+        return 1
+    if resp.status_code != 200:
+        print(f"查询失败: {resp.status_code} {resp.text[:200]}")
+        return 1
+    models = resp.json().get("models") or []
+    print("平台 AI 网关当前可用模型(auto 池):")
+    for m in models:
+        print(f"  · {m}")
+    print(
+        "\n说明:\n"
+        "  · plugin.yaml 的 model 字段可省略——省略即走平台 auto 调度(推荐,自动多模型兜底)\n"
+        "  · 指定模型时用上面的名字;上游故障时网关自动切换兜底模型\n"
+        "  · 含图消息自动路由到多模态模型,无需插件处理"
+    )
     return 0
 
 
@@ -897,6 +942,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_init)
 
     # 2. 共享能力与控件查询
+    sp = sub.add_parser("models", help="列出平台 AI 网关可用模型(auto 池)")
+    sp.set_defaults(func=cmd_models)
+    sp.add_argument("--target", default=None, help=argparse.SUPPRESS)
     sp = sub.add_parser("registry", help="查阅平台共享公共技能 (Skill) 与工具 (Tool) 注册表")
     sp.add_argument("--target", default=None, help="远程平台服务器地址 (默认: AGENTPLATFORM_TARGET 或 http://localhost:8000)")
     sp.add_argument("--json", action="store_true", help="以 JSON 格式输出完整 Schema")
