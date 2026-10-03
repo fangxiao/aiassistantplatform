@@ -21,7 +21,7 @@ import type {
 export default function DeveloperPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<
-    "plugins" | "registry" | "widgets" | "guide" | "llm" | "insights"
+    "plugins" | "registry" | "widgets" | "guide" | "remote" | "llm" | "insights"
   >("plugins");
 
   // Capabilities state
@@ -236,6 +236,17 @@ export default function DeveloperPage() {
               }`}
             >
               📖 开发者与 AI 指南
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("remote")}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                activeTab === "remote"
+                  ? "bg-slate-900 text-white shadow-xs font-semibold"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              🌍 远程接入
             </button>
             <button
               type="button"
@@ -783,6 +794,81 @@ export default function DeveloperPage() {
         {/* ========================================================================= */}
         {/* TAB 4: 开发者与 AI 协同指南 (Developer & AI Guide) */}
         {/* ========================================================================= */}
+        {activeTab === "remote" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-6">
+              <div>
+                <h2 className="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">
+                  <span>🌍</span> 远程接入指南(跨网络开发)
+                </h2>
+                <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+                  平台经 Cloudflare 隧道暴露公网——任何网络(非同局域网)的机器都可安装 SDK、
+                  部署插件、访问 Web 与 hub 协作。所有端点走 HTTPS,鉴权与本地一致。
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-1.5">
+                  <p className="text-[11px] font-bold text-slate-700">API / CLI</p>
+                  <code className="block break-all text-[11px] text-indigo-700">https://ai-api.ailearning.top</code>
+                  <p className="text-[10px] text-slate-500">update / deploy / dev 的目标地址</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-1.5">
+                  <p className="text-[11px] font-bold text-slate-700">Web 工作台</p>
+                  <code className="block break-all text-[11px] text-indigo-700">https://ai-web.ailearning.top</code>
+                  <p className="text-[10px] text-slate-500">浏览器直接登录,与本地同一账号体系</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-1.5">
+                  <p className="text-[11px] font-bold text-slate-700">hub 协作仓</p>
+                  <code className="block break-all text-[11px] text-indigo-700">github.com/fangxiao/aiassistant-hub</code>
+                  <p className="text-[10px] text-slate-500">私有仓;跨机 git pull/push 同步</p>
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-800">① 安装 SDK 与配置目标(一次性)</p>
+                  <pre className="overflow-x-auto rounded-xl bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{`pip install --upgrade https://ai-api.ailearning.top/api/specs/package.tar.gz
+
+mkdir -p ~/.agentplatform
+cat > ~/.agentplatform/config.json <<'EOF'
+{"target": "https://ai-api.ailearning.top", "token": "<你的JWT>"}
+EOF`}</pre>
+                  <p className="text-[11px] text-slate-500">
+                    JWT 获取:<code className="rounded bg-slate-100 px-1">POST /api/auth/login</code>(邮箱+密码),
+                    或 Web 登录后在浏览器 localStorage 的 <code className="rounded bg-slate-100 px-1">agentplatform_token</code> 复制。
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-800">② 常用命令(自动读 config.json 的 target+token)</p>
+                  <pre className="overflow-x-auto rounded-xl bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{`agentplatform update            # 同步最新规范/SDK
+agentplatform validate <目录>    # 静态校验
+agentplatform deploy  <目录>    # 一键部署(401=token失效,重新登录获取)
+agentplatform dev     <目录>    # 远程调试`}</pre>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-800">③ hub 协作(跨机 git 同步纪律)</p>
+                  <pre className="overflow-x-auto rounded-xl bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{`git clone git@ssh.github.com:443:fangxiao/aiassistant-hub.git
+
+# 每次收/发消息前后:
+git pull --rebase && <hub 命令> && git add -A && git commit -m "hub: ..." && git push`}</pre>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-1.5">
+                <p className="text-[11px] font-bold text-amber-800">⚠️ 注意</p>
+                <ul className="list-disc space-y-1 pl-4 text-[11px] text-amber-700 leading-relaxed">
+                  <li>公网 API 需带 token;SDK 包下载端点公开(设计如此,不含密钥)</li>
+                  <li>隧道由平台侧 Mac 承载,其休眠/重启后短暂不可用,恢复即连</li>
+                  <li>插件开发完整流程见「📖 开发者与 AI 指南」,本页仅覆盖远程差异</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === "guide" && (
           <div className="space-y-6">
             <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-8">
