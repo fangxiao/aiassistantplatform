@@ -392,6 +392,29 @@ def _block_cards(block: dict, base_url: str = "") -> list[dict]:
         link = f"[{name}]({url})" if url.startswith("http") else name
         return [_md_card(None, f"📎 {link}")]
 
+    if btype in ("card", "collapsible"):
+        # 容器类:标题 + 描述平铺(飞书 v1 卡无原生折叠,内容完整可见即降级可接受)
+        title = str(data.get("title") or ("折叠面板" if btype == "collapsible" else "卡片"))
+        parts = [f"**🗂 {title}**"]
+        if data.get("description"):
+            parts.append(str(data["description"]))
+        inner = data.get("blocks") or []
+        for b in inner:
+            if isinstance(b, dict):
+                bt = b.get("type") or ""
+                bd = b.get("data") or {}
+                if bt == "markdown" and bd.get("text"):
+                    parts.append(str(bd["text"])[:1500])
+                elif bt == "code" and (bd.get("code") or bd.get("text")):
+                    parts.append(f"```{bd.get('language') or ''}\n{str(bd.get('code') or bd.get('text'))[:1200]}\n```")
+        return [_md_card(None, "\n\n".join(parts))]
+
+    if btype == "action.copy":
+        content = str(data.get("text") or data.get("content") or "")
+        if not content:
+            return []
+        return [_md_card("📋 可复制内容", f"```\n{content[:4000]}\n```")]
+
     return []
 
 
@@ -725,7 +748,13 @@ async def _run_agent_round(
                 elif frame.startswith("event: error"):
                     payload = frame.split("data: ", 1)[1].strip()
                     parts.append(f"\n[生成中断:{json.loads(payload).get('message', '')}]")
-        mappable = ("input.form", "input.confirm", "table", "image", "code", "file", "mermaid")
+        mappable = (
+            "input.form", "input.confirm", "table", "image", "code", "file", "mermaid",
+            "card", "collapsible", "action.copy",
+            "input.text", "input.textarea", "input.number", "input.select",
+            "input.radio", "input.checkbox", "input.toggle", "input.date",
+            "input.datetime", "input.file",
+        )
         handled = [b for b in blocks if isinstance(b, dict) and b.get("type") in mappable]
         unmapped = len(blocks) - len(handled)
         await _deliver(_reply_text("".join(parts), len(blocks), unmapped))
@@ -736,6 +765,19 @@ async def _run_agent_round(
             cards: list[dict] = []
             if b.get("type") == "input.form":
                 c = _form_card(b, str(sid))
+                cards = [c] if c else []
+            elif str(b.get("type", "")).startswith("input.") and b.get("type") not in ("input.form", "input.confirm"):
+                # 独立输入控件:包装成单字段表单卡(提交→interact→续跑,同表单链路)
+                wrapped = {
+                    "type": "input.form",
+                    "data": {
+                        "title": (b.get("data") or {}).get("label") or "请填写",
+                        "action": (b.get("data") or {}).get("action") or b.get("type"),
+                        "submit_text": "提交",
+                        "fields": [b],
+                    },
+                }
+                c = _form_card(wrapped, str(sid))
                 cards = [c] if c else []
             elif b.get("type") == "mermaid":
                 c = await _mermaid_card(b)

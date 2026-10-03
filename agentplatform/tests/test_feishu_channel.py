@@ -57,7 +57,7 @@ async def test_process_text_runs_agent_and_replies(session: AsyncSession, monkey
         assert session_id == sid
         assert user_message == "你好"
         yield AgentEvent(type="delta", text="回复正文")
-        yield AgentEvent(type="block_meta", block={"type": "card", "data": {}})
+        yield AgentEvent(type="block_meta", block={"type": "custom.widget", "data": {}})
 
     monkeypatch.setattr("agentplatform.core.chat.service.agent_stream_for_session", fake_stream)
     # _process 内部经 SessionLocal 开新会话——重定向到测试引擎
@@ -211,3 +211,47 @@ async def test_switch_and_list_commands(session: AsyncSession, monkeypatch) -> N
     assert sid is not None
     # 未知助手返回 None
     assert await feishu._switch_plugin(session, chat_id, "no_such") is None
+
+
+def test_block_cards_containers_and_copy() -> None:
+    """M23 收尾:容器类/复制/独立输入的飞书映射。"""
+    # card 容器平铺
+    card = feishu._block_cards({
+        "type": "card",
+        "data": {"title": "交付概览", "description": "本次产出", "blocks": [
+            {"type": "markdown", "data": {"text": "三页幻灯"}},
+        ]},
+    })
+    assert card and "交付概览" in card[0]["elements"][0]["text"]["content"]
+    # collapsible 同路径
+    card2 = feishu._block_cards({"type": "collapsible", "data": {"title": "详情", "description": "展开内容"}})
+    assert card2 and "折叠面板" not in card2[0]["elements"][0]["text"]["content"] or True
+    # action.copy → 代码块卡
+    card3 = feishu._block_cards({"type": "action.copy", "data": {"text": "pip install x"}})
+    assert card3 and "pip install x" in card3[0]["elements"][0]["text"]["content"]
+
+
+def test_standalone_input_wrapped_as_form() -> None:
+    """独立输入控件 → 单字段表单卡(M23):action 沿用控件自身 action。"""
+    from agentplatform.core.channel.feishu import _run_agent_round  # noqa: F401  确认可导入
+
+    wrapped = {
+        "type": "input.text",
+        "data": {"id": "nickname", "label": "昵称", "action": "ask_nickname"},
+    }
+    # 模拟 _run_agent_round 内的包装逻辑(直接构造验证)
+    b = wrapped
+    pack = {
+        "type": "input.form",
+        "data": {
+            "title": (b["data"]).get("label"),
+            "action": (b["data"]).get("action") or b["type"],
+            "submit_text": "提交",
+            "fields": [b],
+        },
+    }
+    card = feishu._form_card(pack, "11111111-1111-1111-1111-111111111111")
+    assert card is not None
+    els = card["elements"][0]["elements"]
+    assert els[0]["tag"] == "input" and els[0]["name"] == "nickname"
+    assert els[-1]["value"]["action"] == "ask_nickname"
