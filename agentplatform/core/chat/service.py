@@ -87,7 +87,10 @@ async def make_llm_client(
                 )
             )
 
-    return OpenAIClient(endpoint, fallback_endpoints=fallbacks)
+    client = OpenAIClient(endpoint, fallback_endpoints=fallbacks)
+    # H5(需求 011):端点能力标记——native 工具调用端点跳过文本兜底解析
+    client.supports_native_tools = getattr(endpoint, "supports_native_tools", True)
+    return client
 
 
 
@@ -168,6 +171,11 @@ async def agent_stream_for_session(
         prior = prior_history
     else:
         prior = []
+    # M21 P3:超阈值触发滚动摘要(ADR 0011;频率闸内/失败均原样返回)
+    if prior:
+        from agentplatform.core.agent.context import maybe_compact_history
+
+        prior = await maybe_compact_history(session, session_id, prior, client)
     effective_message = (
         f"{doc_context}\n\n---\n\n用户问题: {user_message}" if doc_context else user_message
     )

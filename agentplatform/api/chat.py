@@ -214,7 +214,7 @@ async def history_messages(
     session: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_user),
 ) -> list[MessageOut]:
-    """会话历史消息。"""
+    """会话历史消息(summary 行不渲染为气泡,经 /summary 端点查看,ADR 0011)。"""
     await _ensure_session_owned(session, sid, user.id)
     return [
         MessageOut(
@@ -225,7 +225,27 @@ async def history_messages(
             created_at=m.created_at,
         )
         for m in await list_messages(session, sid)
+        if m.role != MessageRole.summary
     ]
+
+
+@router.get("/sessions/{sid}/summary")
+async def context_summary(
+    sid: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """上下文滚动摘要(可知情入口,需求 011 A3);无摘要返回空。"""
+    await _ensure_session_owned(session, sid, user.id)
+    from sqlalchemy import select as _sel
+
+    row = await session.scalar(
+        _sel(Message)
+        .where(Message.session_id == sid, Message.role == MessageRole.summary)
+        .order_by(Message.created_at.desc())
+        .limit(1)
+    )
+    return {"text": message_text(row) if row is not None else None}
 
 
 _DRAFT_FLUSH_CHARS = 4000  # 检查点 flush 的正文增量阈值(工具边界为主,此为纯长文本兜底)

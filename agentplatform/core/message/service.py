@@ -153,11 +153,30 @@ async def list_messages(
 async def build_history(
     session: AsyncSession, session_id: uuid.UUID
 ) -> list[dict]:
-    """组装 agent 输入历史 [{role, content}],仅 user/assistant 且非空且无思考标签消息。"""
+    """组装 agent 输入历史 [{role, content}],仅 user/assistant 且非空且无思考标签消息。
+
+    M21 P3(ADR 0011):存在 summary 行时,仅取其之后的消息 + 摘要以
+    "(系统注入)"消息前置——压缩结果成为历史组装基线,不再回涨。
+    """
     import re
 
+    msgs = await list_messages(session, session_id)
+    summary_row = None
+    for m in reversed(msgs):
+        if m.role == MessageRole.summary:
+            summary_row = m
+            break
+
     history: list[dict] = []
-    for m in await list_messages(session, session_id):
+    if summary_row is not None:
+        sm = message_text(summary_row)
+        if sm.strip():
+            history.append(
+                {"role": "user", "content": f"(系统注入:此前对话的上下文摘要,作为背景知识)\n{sm}"}
+            )
+        msgs = [m for m in msgs if m.created_at > summary_row.created_at]
+
+    for m in msgs:
         if m.role not in (MessageRole.user, MessageRole.assistant):
             continue
         txt = message_text(m)

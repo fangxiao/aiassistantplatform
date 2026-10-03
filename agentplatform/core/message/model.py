@@ -25,6 +25,7 @@ class MessageRole(str, Enum):
     assistant = "assistant"
     tool = "tool"
     system = "system"
+    summary = "summary"  # 上下文滚动摘要(ADR 0011;不渲染为气泡)
 
 
 class Message(Base):
