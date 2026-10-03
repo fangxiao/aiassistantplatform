@@ -34,8 +34,8 @@
 
 | # | 任务 | 产出 |
 |---|---|---|
-| P3.1 | alembic:MessageRole.summary + llm_endpoints.supports_native_tools | migration |
-| P3.2 | context.py:token 计量、阈值触发、滚动摘要、频率闸 | 设计 016 §4 |
-| P3.3 | 摘要可知情:工作台"查看上下文摘要"入口 + 渲染层跳过 summary | web |
-| P3.4 | dispatch 按 supports_native_tools 分流 + text_fallback 计数落 trace | 设计 016 §6 |
-| P3.5 | 50 轮会话 token 上界用例 + 摘要保留约束用例 | 验收 A3/A6 |
+| P3.1 | ✅(20261003) b6c9f0a2d713 | migration |
+| P3.2 | ✅(20261003) 单滚动摘要+基线化 build_history+10min 频率闸 | 设计 016 §4 |
+| P3.3 | ✅(20261003) /sessions/{sid}/summary 端点+气泡过滤(工作台按钮随下轮 web 迭代) | web |
+| P3.4 | ✅(20261003) 分流落地,保守默认保持兜底;fallback 计数落 trace 随观测迭代 | 设计 016 §6 |
+| P3.5 | ✅(20261003) 压缩 5 用例(触发/冷却/基线/约束保留/计量),全量 383 | 验收 A3/A6 |
