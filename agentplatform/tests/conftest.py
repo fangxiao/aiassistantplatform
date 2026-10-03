@@ -60,7 +60,23 @@ def _isolate_dev_settings() -> "object":
     导致 bridge/tunnel 的严格鉴权单测随本机配置飘移。
     """
     settings.browser_dev_route_any = False
+    # M24:默认旁路邀请码与限频(专项测试 test_auth_hardening 自行恢复)
+    settings.invite_required = False
+    import agentplatform.api.auth_ext as _ax
+    import agentplatform.core.auth.ratelimit as _rl
+
+    _orig = {
+        m: {k: getattr(m, k) for k in ("allow_ip_auth", "allow_ip_register", "account_locked")}
+        for m in (_rl, _ax)
+    }
+    for m in (_rl, _ax):
+        m.allow_ip_auth = lambda ip: True
+        m.allow_ip_register = lambda ip: True
+        m.account_locked = lambda email: False
     yield
+    for m, kv in _orig.items():
+        for k, v in kv.items():
+            setattr(m, k, v)
 
 
 @pytest.fixture(scope="session")

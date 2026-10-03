@@ -17,6 +17,7 @@ class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=6)
     role: UserRole = UserRole.user
+    invite_code: str = ""  # M24 邀请码制(必填)
 
 
 class LoginRequest(BaseModel):

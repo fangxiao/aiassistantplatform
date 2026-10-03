@@ -74,8 +74,14 @@ export async function register(
   email: string,
   password: string,
   role: "user" | "developer" = "user",
+  inviteCode = "",
 ): Promise<AuthUser> {
-  return apiPost<AuthUser>("/auth/register", { email, password, role });
+  return apiPost<AuthUser>("/auth/register", {
+    email,
+    password,
+    role,
+    ...(inviteCode ? { invite_code: inviteCode } : {}),
+  });
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {

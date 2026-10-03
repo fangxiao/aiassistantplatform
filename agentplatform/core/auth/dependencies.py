@@ -32,16 +32,41 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """解析 Bearer JWT → 查库返回当前用户;缺失/无效抛 401;禁用账号抛 403。"""
+    """解析 Bearer JWT / PAT → 查库返回当前用户;缺失/无效抛 401;禁用 403。
+
+    M24:JWT 失败后回落 PAT(ap_ 前缀,sha256 查 personal_access_tokens)。
+    """
     if credentials is None:
         raise HTTPException(
             status_code=401, detail={"code": "unauthorized", "message": "缺少认证令牌"}
         )
+    user = None
     try:
         payload = decode_access_token(credentials.credentials)
-    except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.__dict__) from exc
-    user = await session.get(User, payload.get("sub"))
+        user = await session.get(User, payload.get("sub"))
+    except AuthError:
+        raw = credentials.credentials
+        if raw.startswith("ap_"):
+            from datetime import UTC as _UTC, datetime as _dt
+            from hashlib import sha256 as _sha
+
+            from sqlalchemy import select as _sel
+
+            from agentplatform.core.auth.oauth_model import PersonalAccessToken
+
+            pat = await session.scalar(
+                _sel(PersonalAccessToken).where(
+                    PersonalAccessToken.token_hash == _sha(raw.encode()).hexdigest(),
+                    PersonalAccessToken.revoked_at.is_(None),
+                )
+            )
+            if pat is not None:
+                pat.last_used_at = _dt.now(_UTC)
+                user = await session.get(User, pat.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=401, detail={"code": "unauthorized", "message": "令牌无效或已过期"}
+            )
     if user is None:
         raise HTTPException(
             status_code=401, detail={"code": "unauthorized", "message": "用户不存在"}

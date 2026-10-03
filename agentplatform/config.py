@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     feishu_asr_key: str = ""
     feishu_asr_model: str = "whisper-1"
 
+    # 邀请码制(M24/需求 013):生产公网开启;本地开发/测试可关
+    invite_required: bool = True
+
+    # GitHub OAuth 联登(M24/需求 013):缺失时 /auth/github 返回 503
+    github_client_id: str = ""
+    github_client_secret: str = ""
+
     # 上下文压缩(M21 P3/ADR 0011):历史估算超阈值触发滚动摘要
     context_compact_max_tokens: int = 24000
     context_compact_keep_recent: int = 12  # 保留最近 N 条消息原文

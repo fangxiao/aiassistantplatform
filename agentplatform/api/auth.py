@@ -6,7 +6,7 @@ GET  /auth/me        当前用户(受保护)
 错误走统一 {error: {code, message}} 信封(AuthError / HTTPException)。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import get_current_user
@@ -37,15 +37,29 @@ def _auth_error_to_http(exc: AuthError) -> HTTPException:
 @router.post("/register", response_model=UserOut, status_code=201)
 async def register(
     payload: RegisterRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """注册新用户;email 冲突 409。
+    """注册新用户;email 冲突 409;邀请码制+限频(M24/需求 013)。
 
     角色收紧(2026-09-17):自选 developer 仅在 settings.allow_self_promote_developer
     显式开启(本地开发)时生效;默认一律注册为普通 user,防止接口自行提权。
     """
     from agentplatform.config import settings
 
+    from agentplatform.api.auth_ext import allow_ip_auth, allow_ip_register, consume_invite, _client_ip
+
+    ip = _client_ip(request)
+    if not allow_ip_auth(ip) or not allow_ip_register(ip):
+        raise HTTPException(
+            status_code=429, detail={"code": "rate_limited", "message": "操作过于频繁,请稍后再试"}
+        )
+    if settings.invite_required:
+        if not getattr(payload, "invite_code", ""):
+            raise HTTPException(
+                status_code=403, detail={"code": "invite_required", "message": "注册需邀请码(向管理员索取)"}
+            )
+        await consume_invite(session, payload.invite_code)
     role = payload.role
     if role == UserRole.developer and not settings.allow_self_promote_developer:
         role = UserRole.user
@@ -64,15 +78,35 @@ async def register(
 @router.post("/login", response_model=TokenOut)
 async def login(
     payload: LoginRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> TokenOut:
-    """登录;凭据错误 401(不区分邮箱不存在/密码错误)。"""
+    """登录;凭据错误 401;限频+账号锁定(M24/需求 013 A5)。"""
+    from agentplatform.api.auth_ext import (  # noqa: F401
+        _client_ip,
+        account_locked,
+        allow_ip_auth,
+        clear_login_fail,
+        record_login_fail,
+    )
+
+    ip = _client_ip(request)
+    if not allow_ip_auth(ip):
+        raise HTTPException(
+            status_code=429, detail={"code": "rate_limited", "message": "尝试过于频繁,请 1 分钟后再试"}
+        )
+    if account_locked(payload.email):
+        raise HTTPException(
+            status_code=429, detail={"code": "account_locked", "message": "连续失败过多,账号锁定 15 分钟"}
+        )
     user = await authenticate(session, payload.email, payload.password)
     if user is None:
+        record_login_fail(payload.email)
         raise HTTPException(
             status_code=401,
             detail={"code": "unauthorized", "message": "邮箱或密码错误"},
         )
+    clear_login_fail(payload.email)
     token = create_access_token(str(user.id), user.role.value)
     return TokenOut(token=token, user=UserOut.model_validate(user))
 

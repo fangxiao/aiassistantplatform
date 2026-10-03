@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "../../components/layout/Navbar";
 import { BlockRenderer } from "../../components/renderers/BlockRenderer";
 import { PluginKbMountModal } from "../../components/kb/PluginKbMountModal";
 import { InsightsPanel } from "../../components/developer/InsightsPanel";
 import { MyModelsPanel } from "../../components/settings/MyModelsPanel";
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
+import { apiDelete, apiFetch, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 import { isAuthed } from "../../lib/api/auth";
 import type {
   BuiltinResourceInfo,
@@ -21,8 +21,20 @@ import type {
 export default function DeveloperPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<
-    "plugins" | "registry" | "widgets" | "guide" | "remote" | "llm" | "insights"
+    "plugins" | "registry" | "widgets" | "guide" | "remote" | "tokens" | "llm" | "insights"
   >("plugins");
+  // PAT(M24):CLI 开发令牌管理
+  const [pats, setPats] = useState<{ id: string; name: string; prefix: string; created_at: string }[]>([]);
+  const [patName, setPatName] = useState("");
+  const [patOnce, setPatOnce] = useState<string | null>(null);
+
+  const loadPats = useCallback(async () => {
+    try {
+      setPats(await apiGet<typeof pats>("/auth/pat"));
+    } catch {
+      setPats([]);
+    }
+  }, []);
 
   // Capabilities state
   const [capabilities, setCapabilities] = useState<CapabilitiesInfo | null>(null);
@@ -247,6 +259,17 @@ export default function DeveloperPage() {
               }`}
             >
               🌍 远程接入
+            </button>
+            <button
+              type="button"
+              onClick={() => { setActiveTab("tokens"); void loadPats(); }}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                activeTab === "tokens"
+                  ? "bg-slate-900 text-white shadow-xs font-semibold"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              🔑 开发令牌
             </button>
             <button
               type="button"
@@ -794,6 +817,94 @@ export default function DeveloperPage() {
         {/* ========================================================================= */}
         {/* TAB 4: 开发者与 AI 协同指南 (Developer & AI Guide) */}
         {/* ========================================================================= */}
+        {activeTab === "tokens" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-5">
+              <div>
+                <h2 className="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">
+                  <span>🔑</span> CLI 开发令牌(PAT)
+                </h2>
+                <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+                  供远程机器的 <code className="rounded bg-slate-100 px-1">agentplatform</code> CLI 使用:
+                  写入 <code className="rounded bg-slate-100 px-1">~/.agentplatform/config.json</code> 的
+                  <code className="rounded bg-slate-100 px-1">token</code> 字段。长效可撤销,与网页登录互不影响。
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={patName}
+                  onChange={(e) => setPatName(e.target.value)}
+                  placeholder="令牌名(如 macbook-remote)"
+                  className="w-64 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs shadow-xs"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const r = await apiFetch<{ token: string }>("/auth/pat", {
+                        method: "POST",
+                        body: { name: patName || "cli" },
+                      });
+                      setPatOnce(r.token);
+                      setPatName("");
+                      await loadPats();
+                    } catch (err) {
+                      alert(`生成失败: ${err instanceof Error ? err.message : err}`);
+                    }
+                  }}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800"
+                >
+                  ＋ 生成令牌
+                </button>
+              </div>
+
+              {patOnce && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="text-[11px] font-bold text-emerald-800">
+                    令牌已生成(仅此一次展示,请立即复制到远程机器):
+                  </p>
+                  <code className="mt-1 block break-all text-[11px] text-emerald-900">{patOnce}</code>
+                  <button
+                    type="button"
+                    onClick={() => { void navigator.clipboard.writeText(patOnce); setPatOnce(null); }}
+                    className="mt-2 rounded-md border border-emerald-300 bg-white px-3 py-1 text-[10px] text-emerald-700 hover:bg-emerald-100"
+                  >
+                    复制并关闭
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {pats.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xs">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-800">{t.name} <span className="ml-2 font-mono text-[10px] text-slate-400">{t.prefix}…</span></p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">创建于 {new Date(t.created_at).toLocaleString("zh-CN")}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/auth/pat/${t.id}`, { method: "DELETE" });
+                          await loadPats();
+                        } catch (err) {
+                          alert(`撤销失败: ${err instanceof Error ? err.message : err}`);
+                        }
+                      }}
+                      className="rounded-md border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50"
+                    >
+                      撤销
+                    </button>
+                  </div>
+                ))}
+                {pats.length === 0 && <p className="text-center text-xs text-slate-400">暂无令牌</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === "remote" && (
           <div className="space-y-6">
             <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-6">
