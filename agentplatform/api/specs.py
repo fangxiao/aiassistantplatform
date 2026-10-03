@@ -55,6 +55,9 @@ async def download_package() -> Response:
         media_type="application/gzip",
         headers={
             "Content-Disposition": "attachment; filename=agentplatform.tar.gz",
+            # CF 按扩展名缓存 .gz(max-age=14400)导致远程 update 拿到旧包
+            # (20261003 实证同 URL 多体积变体)——origin 明示禁缓存
+            "Cache-Control": "no-store",
             # 部署水位(T18.21):CLI 比对此值判断本地包是否落后,避免
             # "平台热更已生效但本地 CLI 未同步"被误判为缺陷未修(今日三次)
             "X-Agentplatform-Rev": _deployed_rev(),
