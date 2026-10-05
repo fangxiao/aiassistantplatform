@@ -17,7 +17,7 @@
 | 014 | [014-task-deliverables.md](./014-task-deliverables.md) | 任务面板与交付物(工作台任务视角) | v0.1 已交付 | [019-task-deliverables.md](../design/019-task-deliverables.md) |
 | 015 | [015-registry-usage.md](./015-registry-usage.md) | 注册表运营面:热度与一键引用 | v0.1 已交付 | [020-registry-usage.md](../design/020-registry-usage.md) |
 | 016 | [016-org-context-pack.md](./016-org-context-pack.md) | 组织上下文包(对标千问企业上下文) | v0.1 已交付 | [021-org-context-pack.md](../design/021-org-context-pack.md) |
-| 017 | [017-task-entity.md](./017-task-entity.md) | 任务实体化(M25 聚合的实体演进) | v0.1 方向确认中 | [022-task-entity.md](../design/022-task-entity.md) |
+| 017 | [017-task-entity.md](./017-task-entity.md) | 任务实体化(M25 聚合的实体演进) | v0.1 已交付 | [022-task-entity.md](../design/022-task-entity.md) |
 
 ## 阅读路径
 

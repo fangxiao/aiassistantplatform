@@ -9,6 +9,9 @@ import { TasksCard } from "./TasksCard";
 import * as client from "../../lib/api/client";
 
 const PANEL = {
+  tasks: [
+    { id: "e1", title: "季度评审", status: "active" as const, kind: "manual" as const, session_id: "s1", artifact_count: 2, created_at: "2026-10-06T10:00:00Z", completed_at: null },
+  ],
   running: [
     { kind: "session" as const, id: "s1", title: "评审会话", detail: "评审完成", session_id: "s1", started_at: null, updated_at: "2026-10-06T10:00:00Z" },
     { kind: "run" as const, id: "r1", title: "每日简报", detail: "定时任务执行中", session_id: "s2", started_at: "2026-10-06T09:00:00Z", updated_at: null },
@@ -31,6 +34,8 @@ describe("TasksCard", () => {
     vi.spyOn(client, "apiGet").mockResolvedValue(PANEL);
     render(<TasksCard onContinue={vi.fn()} onSaveToKb={vi.fn()} />);
     expect(await screen.findByText("评审会话")).toBeTruthy();
+    expect(screen.getByText("季度评审")).toBeTruthy(); // M28 实体区
+    expect(screen.getByText(/2 个交付物/)).toBeTruthy();
     expect(screen.getAllByText("每日简报").length).toBeGreaterThanOrEqual(2); // run + scheduled(+report 标题)
     expect(screen.getByText("柴犬水彩")).toBeTruthy();
     expect(screen.getByText("成功")).toBeTruthy();
@@ -54,9 +59,10 @@ describe("TasksCard", () => {
   });
 
   it("空态:三区各自占位文案", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue({ running: [], scheduled: [], artifacts: [] });
+    vi.spyOn(client, "apiGet").mockResolvedValue({ tasks: [], running: [], scheduled: [], artifacts: [] });
     render(<TasksCard onContinue={vi.fn()} onSaveToKb={vi.fn()} />);
-    expect(await screen.findByText("暂无进行中的任务")).toBeTruthy();
+    expect(await screen.findByText(/暂无任务/)).toBeTruthy();
+    expect(screen.getByText("暂无进行中的任务")).toBeTruthy();
     expect(screen.getByText("暂无定时任务")).toBeTruthy();
     expect(screen.getByText(/暂无产出/)).toBeTruthy();
   });

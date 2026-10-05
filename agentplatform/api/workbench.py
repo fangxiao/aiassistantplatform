@@ -146,7 +146,21 @@ class ArtifactItem(BaseModel):
     content: str | None = None  # report 类带产出摘要(存 KB 用,截断)
 
 
+class TaskEntityItem(BaseModel):
+    """任务实体(M28/需求 017):列表优先区,聚合三栏为「未提升会话」视图。"""
+
+    id: str
+    title: str
+    status: str  # active/done/archived
+    kind: str  # manual/scheduled
+    session_id: str | None
+    artifact_count: int = 0
+    created_at: datetime
+    completed_at: datetime | None
+
+
 class TasksPanelOut(BaseModel):
+    tasks: list[TaskEntityItem] = []  # M28:实体区在前
     running: list[RunningItem]
     scheduled: list[ScheduledItem]
     artifacts: list[ArtifactItem]
@@ -172,22 +186,56 @@ async def tasks_panel(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> TasksPanelOut:
-    """任务中心聚合:进行中(活跃会话 + running runs)/ 定时任务 / 交付物。
+    """任务中心聚合:任务实体(M28)/ 进行中(活跃会话+running runs)/ 定时任务 / 交付物。
 
-    三路各一条查询,均按当前用户隔离(需求 014 A1/A4)。
+    各路一条查询,均按当前用户隔离(需求 014 A1/A4 + 017 A3)。
     """
     from datetime import UTC
     from datetime import datetime as _dt
     from datetime import timedelta as _td
 
+    from sqlalchemy import func as _func
     from sqlalchemy import select as _sel
 
     from agentplatform.core.artifacts.model import Artifact
     from agentplatform.core.message.model import Message
     from agentplatform.core.scheduler.model import ScheduledTask, TaskRun
     from agentplatform.core.session.model import Session as ChatSession
+    from agentplatform.core.task.model import TaskEntity
 
     uid = user.id
+
+    # 任务实体区(M28):active 优先展示,置顶最近创建
+    entities = (
+        await db.scalars(
+            _sel(TaskEntity)
+            .where(TaskEntity.user_id == uid, TaskEntity.status == "active")
+            .order_by(TaskEntity.created_at.desc())
+            .limit(20)
+        )
+    ).all()
+    ent_counts = (
+        dict(
+            (await db.execute(
+                _sel(Artifact.session_id, _func.count())
+                .where(
+                    Artifact.session_id.in_([e.session_id for e in entities if e.session_id])
+                )
+                .group_by(Artifact.session_id)
+            )).all()
+        )
+        if entities
+        else {}
+    )
+    tasks = [
+        TaskEntityItem(
+            id=str(e.id), title=e.title, status=e.status, kind=e.kind,
+            session_id=str(e.session_id) if e.session_id else None,
+            artifact_count=int(ent_counts.get(e.session_id, 0)) if e.session_id else 0,
+            created_at=e.created_at, completed_at=e.completed_at,
+        )
+        for e in entities
+    ]
     since = _dt.now(UTC) - _td(minutes=30)
 
     # 进行中:近 30 分钟有消息的会话(取 5)
@@ -248,7 +296,7 @@ async def tasks_panel(
     )
 
     # 定时任务:enabled 按下次运行排序(取 8)
-    tasks = (
+    sched_rows = (
         await db.scalars(
             _sel(ScheduledTask)
             .where(ScheduledTask.user_id == str(uid), ScheduledTask.enabled.is_(True))
@@ -261,7 +309,7 @@ async def tasks_panel(
             id=str(t.id), name=t.name, kind=t.kind,
             next_run_at=t.next_run_at, last_status=t.last_status,
         )
-        for t in tasks
+        for t in sched_rows
     ]
 
     # 交付物:最近 30 条,文件类现签 URL;report 类带产出摘要(存 KB 用)
@@ -298,4 +346,4 @@ async def tasks_panel(
         for a in arts
     ]
 
-    return TasksPanelOut(running=running, scheduled=scheduled, artifacts=artifacts)
+    return TasksPanelOut(tasks=tasks, running=running, scheduled=scheduled, artifacts=artifacts)

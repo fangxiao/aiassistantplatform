@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { apiGet } from "../../lib/api/client";
+import { apiGet, apiPatch } from "../../lib/api/client";
 import { Card } from "./WorkbenchView";
 
-/** 任务中心(M25/需求 014):进行中 / 定时任务 / 交付物 三栏聚合。
+/** 任务中心(M25 需求 014 + M28 需求 017):我的任务(实体)/ 最近活动 / 定时 / 交付物。
  *  数据源 GET /workbench/tasks;60s 轮询与简报卡同节奏。
- *  交付物:点击打开(现签 URL)、跳会话续问、report 类可存知识库。 */
+ *  实体区:完成/归档操作;交付物:点击打开(现签 URL)、跳会话续问、存知识库。 */
 
 interface RunningItem {
   kind: "session" | "run";
@@ -36,7 +36,19 @@ interface ArtifactItem {
   content: string | null;
 }
 
+interface TaskEntityItem {
+  id: string;
+  title: string;
+  status: "active" | "done" | "archived";
+  kind: "manual" | "scheduled";
+  session_id: string | null;
+  artifact_count: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
 interface TasksPanel {
+  tasks: TaskEntityItem[]; // M28:实体区优先
   running: RunningItem[];
   scheduled: ScheduledItem[];
   artifacts: ArtifactItem[];
@@ -92,13 +104,71 @@ export function TasksCard({
     return () => clearInterval(timer);
   }, [refresh]);
 
+  const patchTask = useCallback(
+    async (id: string, body: { status?: string; title?: string }) => {
+      try {
+        await apiPatch(`/tasks/${id}`, body);
+        await refresh();
+      } catch {
+        // 静默:下轮轮询自愈
+      }
+    },
+    [refresh],
+  );
+
   return (
     <Card title="📋 任务中心">
       {loading && <p className="py-2 text-center text-xs text-slate-400">加载中…</p>}
       {error && <p className="py-2 text-center text-xs text-rose-500">{error}</p>}
       {panel && (
         <div className="space-y-3">
-          {/* 进行中 */}
+          {/* 我的任务(M28 实体区):命名任务,可完成/归档 */}
+          <section>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">我的任务</p>
+            {panel.tasks.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                暂无任务——在会话页点「⭐ 保存为任务」,或创建定时任务
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {panel.tasks.map((t) => (
+                  <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+                    <span className="shrink-0 text-xs">{t.kind === "scheduled" ? "⏰" : "⭐"}</span>
+                    <button
+                      type="button"
+                      onClick={() => t.session_id && onContinue(t.session_id)}
+                      disabled={!t.session_id}
+                      className="min-w-0 flex-1 text-left disabled:cursor-default"
+                    >
+                      <span className="block truncate text-xs font-medium text-slate-800">{t.title}</span>
+                      <span className="block text-[10px] text-slate-400">
+                        {t.artifact_count > 0 ? `📦 ${t.artifact_count} 个交付物 · ` : ""}
+                        {fmtTime(t.created_at)}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void patchTask(t.id, { status: "done" })}
+                      className="shrink-0 rounded border border-emerald-200 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50"
+                      title="标记完成"
+                    >
+                      ✓ 完成
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void patchTask(t.id, { status: "archived" })}
+                      className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+                      title="归档(不出现在默认列表)"
+                    >
+                      归档
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* 最近活动(M25 聚合:未提升为任务的会话与运行) */}
           <section>
             <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">进行中</p>
             {panel.running.length === 0 ? (

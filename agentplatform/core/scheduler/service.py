@@ -74,6 +74,16 @@ async def create_task(db: AsyncSession, user_id: str, **kwargs) -> ScheduledTask
     task.next_run_at = compute_next_run(task, datetime.now(UTC))
     db.add(task)
     await db.flush()
+    # M28 实体联动(需求 017 A1):定时任务天然是任务实体的一员
+    from agentplatform.core.task.model import TaskEntity
+
+    db.add(
+        TaskEntity(
+            user_id=uuid.UUID(str(user_id)), title=task.name, status="active",
+            kind="scheduled", scheduled_task_id=task.id,
+        )
+    )
+    await db.flush()
     return task
 
 
@@ -98,6 +108,22 @@ async def delete_task(db: AsyncSession, user_id: str, task_id: uuid.UUID) -> boo
     if task is None:
         return False
     await db.delete(task)  # task_runs 无 FK,保留审计
+    # M28 联动:实体转 done(不级联删,交付物与会话保留)
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from sqlalchemy import update as _upd
+
+    from agentplatform.core.task.model import TaskEntity
+
+    await db.execute(
+        _upd(TaskEntity)
+        .where(
+            TaskEntity.scheduled_task_id == task_id,
+            TaskEntity.status != "archived",
+        )
+        .values(status="done", completed_at=_dt.now(_UTC))
+    )
     await db.flush()
     return True
 

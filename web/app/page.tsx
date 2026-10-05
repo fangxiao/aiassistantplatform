@@ -27,7 +27,7 @@ import {
   fetchAutoPool,
   setSessionModel,
 } from "../lib/api/chat";
-import { apiGet } from "../lib/api/client";
+import { apiGet, apiPost } from "../lib/api/client";
 import { getUser, isAuthed } from "../lib/api/auth";
 import type {
   AssistantInfo,
@@ -69,6 +69,9 @@ function ChatHome() {
   const [showKbModal, setShowKbModal] = useState(false);
   // 上下文摘要(设计 016 §4 P3.3 尾项):会话级滚动摘要查看入口
   const [summary, setSummary] = useState<{ text: string | null } | null>(null);
+  // 任务实体(M28/需求 017):会话提升状态与轻提示
+  const [promotedTaskIds, setPromotedTaskIds] = useState<Set<string>>(new Set());
+  const [taskToast, setTaskToast] = useState<string | null>(null);
   // 会话产出收藏(设计 008 §11):记录待收藏正文与来源
   const [kbSaveTarget, setKbSaveTarget] = useState<{ content: string; source: { app: string; session_id?: string; message_id?: string } } | null>(null);
 
@@ -721,6 +724,32 @@ function ChatHome() {
                   <span>摘要</span>
                 </button>
               )}
+              {current && !promotedTaskIds.has(current.id) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const title = window.prompt("任务名称:", current.title || "未命名任务");
+                    if (!title) return;
+                    void apiPost<{ id: string }>(`/tasks/from-session/${current.id}`, { title })
+                      .then(() => {
+                        setPromotedTaskIds((s) => new Set(s).add(current.id));
+                        setTaskToast("⭐ 已保存为任务(工作台任务中心可管理)");
+                      })
+                      .catch((err: unknown) => {
+                        setTaskToast(
+                          String(err).includes("409") ? "该会话已是任务" : "保存任务失败",
+                        );
+                      });
+                    setTimeout(() => setTaskToast(null), 2500);
+                  }}
+                  title="把本会话保存为任务:命名、归集交付物、可完成/归档"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-700 transition hover:bg-amber-100"
+                >
+                  <span>⭐</span>
+                  <span>保存为任务</span>
+                </button>
+              )}
+              {taskToast && <span className="text-[10px] text-emerald-600">{taskToast}</span>}
               {streaming ? (
                 <span className="inline-flex items-center gap-1.5 text-indigo-600 font-medium animate-pulse">
                   <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping" />
