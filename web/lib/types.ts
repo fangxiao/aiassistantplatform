@@ -134,6 +134,7 @@ export interface KbInfo {
   size_bytes: number;
   can_write: boolean; // 服务端计算:private=owner / shared=owner+成员 / public=developer(设计 008 §11.2/§12.2)
   can_manage?: boolean; // 服务端计算(§12.2):改名/成员/数据源等管理入口渲染用
+  is_context_pack?: boolean; // M27:组织上下文包 🏢 徽标
 }
 
 export interface KbMemberInfo {

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import get_current_user, is_developer
-from agentplatform.core.auth.model import User
+from agentplatform.core.auth.model import User, UserRole
 from agentplatform.core.db.session import get_session
 from agentplatform.core.kb import pipeline as kb_pipeline
 from agentplatform.core.kb import service as kb_service
@@ -38,6 +38,7 @@ class KbCreate(BaseModel):
     slug: str = Field(min_length=2, max_length=64)
     visibility: KbVisibility = KbVisibility.private
     description: str | None = None
+    context_pack: bool = False  # M27:组织上下文包(强制 shared + 四分区预置)
 
 
 class KbUpdate(BaseModel):
@@ -60,6 +61,7 @@ class KbOut(BaseModel):
     size_bytes: int
     can_write: bool = False  # 服务端计算(设计 008 §11.2),前端渲染收藏目标
     can_manage: bool = False  # 服务端计算(§12.2),数据源/成员等管理入口渲染用
+    is_context_pack: bool = False  # M27:组织上下文包 🏢 徽标渲染
 
 
 class KbDocOut(BaseModel):
@@ -227,11 +229,64 @@ async def create_kb(
             owner=user,
             visibility=payload.visibility,
             description=payload.description,
+            context_pack=payload.context_pack,
         )
     except kb_service.KbError as exc:
         raise _http_error(exc) from exc
     await db.commit()
     return await _kb_out(db, kb, user)
+
+
+class MountBatchIn(BaseModel):
+    plugin_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
+@router.post("/kbs/{kb_id}/mount-batch")
+async def mount_pack_to_assistants(
+    kb_id: uuid.UUID,
+    payload: MountBatchIn,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """上下文包批量挂载到一组助手(M27/需求 016 A2;幂等合并)。
+
+    语义:写入 plugins.mounted_kb_ids;运行时 kb_search 按成员资格过滤——
+    非包成员的会话检索不到包内容(安全不变式保持,设计 021 §3)。
+    """
+    from agentplatform.core.kb.model import KbVisibility as _Vis
+    from agentplatform.core.plugin.model import Plugin
+
+    kb = await kb_service.get_kb(db, kb_id)
+    if (
+        kb is None
+        or not kb.is_context_pack
+        or kb.visibility != _Vis.shared
+        or kb.status != "active"
+    ):
+        raise HTTPException(
+            status_code=404, detail={"code": "not_found", "message": "上下文包不存在"}
+        )
+    if not kb_service.can_manage(kb, user):
+        raise HTTPException(
+            status_code=403, detail={"code": "forbidden", "message": "仅包管理员可批量挂载"}
+        )
+    mounted: list[str] = []
+    for pid in payload.plugin_ids:
+        plugin = await db.get(Plugin, pid)
+        if plugin is None or (
+            str(plugin.owner_id) != str(user.id) and user.role != UserRole.admin
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"助手不存在或无权操作: {pid}"},
+            )
+        ids = list(plugin.mounted_kb_ids or [])
+        if str(kb_id) not in ids:
+            ids.append(str(kb_id))
+            plugin.mounted_kb_ids = ids
+        mounted.append(str(pid))
+    await db.commit()
+    return {"ok": True, "mounted": len(mounted)}
 
 
 @router.patch("/kbs/{kb_id}", response_model=KbOut)

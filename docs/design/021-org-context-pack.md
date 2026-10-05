@@ -36,3 +36,14 @@
 - 批量挂载:manifest 写入、幂等(重复挂不重复写)、权限(仅 admin/owner 可批量)
 - 检索:挂载后 kb_search 命中(E2E:问术语→答案含模板内容)
 - web vitest:新建类型切换、徽标渲染
+
+## 6. 落地记录(2026-10-06)
+
+- 迁移 `a9c4e8f1d7b3`;全量 438 绿(新增 4),web tsc+vitest 绿
+- 与设计的偏差:批量挂载写 plugins.mounted_kb_ids(非 manifest);**关键安全决策**——
+  插件级挂载沿用「仅 public」不变式,shared 上下文包作为受控例外进入
+  resolve_allowed_kb_ids:仅当 `is_context_pack + shared + active + 当前用户是包成员`
+  才放进检索范围(非成员/匿名全部过滤);单插件挂载端点同步放行(操作者须包成员)
+- 建包即预置四分区文档(走 add_document_from_text 标准管道,含向量化);
+  slug 规则沿用(小写/数字/下划线)
+- E2E:建包 → 四分区落库;成员/owner 运行时可检索、非成员被过滤

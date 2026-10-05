@@ -149,9 +149,9 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
         make_llm_client,
         resource_ids_from_plugin,
     )
-    from agentplatform.core.message.service import save_user_message
     from agentplatform.core.db.engine import SessionLocal
     from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, resolve_allowed_kb_ids
+    from agentplatform.core.message.service import save_user_message
     from agentplatform.core.plugin.loader import get_plugin
     from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
 
@@ -178,14 +178,15 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
                 mounted_kb_ids=[uuid.UUID(k) for k in (chat_sess.mounted_kb_ids or [])],
                 plugin_manifest=manifest,
                 plugin_mounted_kb_ids=plugin_mounted,
+                session_user_id=str(task.user_id),
             )
             if allowed_kb_ids and KB_SEARCH_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
             if WORKBENCH_TODO_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, WORKBENCH_TODO_TOOL_ID]
-            from agentplatform.core.memory.tool import MEMORY_TOOL_ID
             from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
             from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
+            from agentplatform.core.memory.tool import MEMORY_TOOL_ID
 
             if MEMORY_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, MEMORY_TOOL_ID]
@@ -202,7 +203,6 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             client = await make_llm_client(db, (manifest or {}).get("model") if manifest else None)
             await save_user_message(db, chat_sess.id, prompt)
             from agentplatform.core.agent.loop import run_agent
-
             from agentplatform.core.memory import service as memory_service
 
             memories = await memory_service.memories_for_prompt(db, str(task.user_id))
@@ -283,9 +283,10 @@ async def _maybe_autosave(db: AsyncSession, task: ScheduledTask, chat_sess, outp
     if not task.auto_save_kb or not output:
         return
     try:
+        from sqlalchemy import select as _select
+
         from agentplatform.core.auth.model import User
         from agentplatform.core.kb import service as kb_service
-        from sqlalchemy import select as _select
 
         owner = await db.scalar(_select(User).where(User.id == str(task.user_id)))
         if owner is None:

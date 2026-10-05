@@ -98,12 +98,19 @@ async def create_kb(
     owner: User,
     visibility: KbVisibility = KbVisibility.private,
     description: str | None = None,
+    context_pack: bool = False,
 ) -> KnowledgeBase:
-    """新建库;slug 唯一且格式受限(public 要求 developer 角色)。"""
+    """新建库;slug 唯一且格式受限(public 要求 developer 角色)。
+
+    context_pack(M27/需求 016):建为 shared + is_context_pack,并预置四分区
+    模板文档(术语表/业务规范/决策记录/常用联系人)——组织上下文包。
+    """
     if not SLUG_RE.match(slug):
         raise KbError(f"slug 不合法(小写字母开头,字母/数字/下划线,2-64 位): {slug!r}")
     if visibility == KbVisibility.public and owner.role != UserRole.developer:
         raise KbError("仅 developer 角色可创建公共知识库")
+    if context_pack:
+        visibility = KbVisibility.shared
     existing = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.slug == slug))
     if existing is not None:
         raise KbError(f"slug 已存在: {slug!r}")
@@ -113,10 +120,38 @@ async def create_kb(
         visibility=visibility,
         owner_id=str(owner.id),
         description=description,
+        is_context_pack=context_pack,
     )
     db.add(kb)
     await db.flush()
+    if context_pack:
+        for title, tpl in CONTEXT_PACK_SECTIONS:
+            await add_document_from_text(
+                db, kb, owner, title=title, content=tpl.format(org=name),
+                source={"app": "context_pack"},
+            )
     return kb
+
+
+# 组织上下文包预置四分区(设计 021 §2):标题 + 填写引导模板
+CONTEXT_PACK_SECTIONS: list[tuple[str, str]] = [
+    (
+        "术语表",
+        "# {org} · 术语表\n\n> 每行一条:`术语 = 含义(使用场景)`。成员共同维护,助手检索时自动命中。\n\n(示例)OKR = 目标与关键成果法(季度规划使用)\n",
+    ),
+    (
+        "业务规范",
+        "# {org} · 业务规范\n\n> 写清团队约定:命名规范、流程红线、审批要求等。条目化,一条一段。\n\n(待补充)\n",
+    ),
+    (
+        "决策记录",
+        "# {org} · 决策记录\n\n> 格式:`日期 · 决策 · 背景/理由`。新决策追加在文末,供助手回答\"当时为什么这么定\"。\n\n(待补充)\n",
+    ),
+    (
+        "常用联系人",
+        "# {org} · 常用联系人\n\n> 每行一条:`事项 - 角色/部门 - 联系方式`。仅写工作联系信息。\n\n(待补充)\n",
+    ),
+]
 
 
 async def get_kb(db: AsyncSession, kb_id: uuid.UUID) -> KnowledgeBase | None:

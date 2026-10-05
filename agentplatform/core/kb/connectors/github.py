@@ -5,7 +5,6 @@ Git Trees API 一次枚举全量文件树 → 按 路径前缀/后缀 过滤 →
 凭据: PAT(credentials.token,密文存储);external_id = 文件路径。
 """
 
-import json
 import logging
 from urllib.parse import quote
 

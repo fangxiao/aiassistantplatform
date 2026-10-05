@@ -17,6 +17,7 @@ import {
   searchKb,
   uploadDocument,
 } from "../../lib/api/kb";
+import { apiGet, apiPost } from "../../lib/api/client";
 import type {
   KbDocumentInfo,
   KbInfo,
@@ -58,7 +59,13 @@ export default function KbPage() {
 
   // 新建库表单
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", slug: "", visibility: "private", description: "" });
+  const [createForm, setCreateForm] = useState({
+    name: "",
+    slug: "",
+    visibility: "private",
+    description: "",
+    context_pack: false,
+  });
   const [creating, setCreating] = useState(false);
 
   // 文档上传
@@ -73,6 +80,10 @@ export default function KbPage() {
 
   // 成员管理弹窗(shared 库,设计 008 §12.3)
   const [membersFor, setMembersFor] = useState<KbInfo | null>(null);
+  // M27:上下文包批量挂载弹窗
+  const [mountPackFor, setMountPackFor] = useState<KbInfo | null>(null);
+  const [mountTargets, setMountTargets] = useState<Record<string, boolean>>({});
+  const [mountBusy, setMountBusy] = useState(false);
 
   const hasIntermediateDoc = docs.some((d) => INTERMEDIATE_STATUSES.has(d.status));
 
@@ -139,11 +150,14 @@ export default function KbPage() {
       const kb = await createKb({
         name: createForm.name.trim(),
         slug: createForm.slug.trim(),
-        visibility: createForm.visibility as "private" | "shared" | "public",
+        visibility: createForm.context_pack
+          ? "shared"
+          : (createForm.visibility as "private" | "shared" | "public"),
         description: createForm.description.trim() || undefined,
+        context_pack: createForm.context_pack,
       });
       setShowCreate(false);
-      setCreateForm({ name: "", slug: "", visibility: "private", description: "" });
+      setCreateForm({ name: "", slug: "", visibility: "private", description: "", context_pack: false });
       await refreshKbs(kb.id);
     } catch (err) {
       alert(`创建知识库失败: ${err instanceof Error ? err.message : err}`);
@@ -266,6 +280,32 @@ export default function KbPage() {
             className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-xs space-y-4 text-xs"
           >
             <div className="font-bold text-slate-800">新建知识库</div>
+            {/* M27:类型选择——组织上下文包 = shared + 四分区预置模板 */}
+            <div className="flex gap-2">
+              {[
+                { pack: false, label: "📁 普通知识库" },
+                { pack: true, label: "🏢 组织上下文包" },
+              ].map((t) => (
+                <button
+                  key={String(t.pack)}
+                  type="button"
+                  onClick={() => setCreateForm({ ...createForm, context_pack: t.pack })}
+                  className={`rounded-md border px-3 py-1.5 font-medium transition ${
+                    createForm.context_pack === t.pack
+                      ? "border-indigo-500 bg-white text-indigo-700 shadow-xs"
+                      : "border-slate-300 bg-white/60 text-slate-600 hover:bg-white"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {createForm.context_pack && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                上下文包按组织知识结构预置四个分区(术语表 / 业务规范 / 决策记录 / 常用联系人),
+                成员共同维护;可批量挂载到一组助手,挂载后助手对话自动检索组织知识(仅包成员可见)。
+              </p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-slate-600 mb-1">库名称</label>
@@ -294,9 +334,10 @@ export default function KbPage() {
               <div>
                 <label className="block text-slate-600 mb-1">可见性</label>
                 <select
-                  value={createForm.visibility}
+                  value={createForm.context_pack ? "shared" : createForm.visibility}
+                  disabled={createForm.context_pack}
                   onChange={(e) => setCreateForm({ ...createForm, visibility: e.target.value })}
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 focus:border-indigo-500 focus:outline-hidden"
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 focus:border-indigo-500 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
                 >
                   <option value="private">私有（仅自己）</option>
                   <option value="shared">共享（owner + 邀请成员）</option>
@@ -366,6 +407,14 @@ export default function KbPage() {
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-base shrink-0">{vis.icon}</span>
                         <span className="truncate text-sm font-bold text-slate-900">{kb.name}</span>
+                        {kb.is_context_pack && (
+                          <span
+                            className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                            title="组织上下文包:预置四分区,可批量挂载到助手"
+                          >
+                            🏢 上下文包
+                          </span>
+                        )}
                       </div>
                       <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold border ${vis.cls}`}>
                         {vis.label}
@@ -384,17 +433,32 @@ export default function KbPage() {
                     </div>
                     <div className="mt-2.5 pt-2 border-t border-slate-100 flex gap-1.5">
                       {kb.visibility === "shared" ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMembersFor(kb);
-                          }}
-                          className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-50 transition"
-                          title="管理共享库成员"
-                        >
-                          👥 成员
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMembersFor(kb);
+                            }}
+                            className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-50 transition"
+                            title="管理共享库成员"
+                          >
+                            👥 成员
+                          </button>
+                          {kb.is_context_pack && kb.can_manage && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMountPackFor(kb);
+                              }}
+                              className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50 transition"
+                              title="批量挂载到我的助手(成员会话自动检索组织知识)"
+                            >
+                              🔗 挂载到助手
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <button
                           type="button"
@@ -631,6 +695,85 @@ export default function KbPage() {
           onChanged={() => void refreshKbs(membersFor.id)}
         />
       )}
+
+      {/* M27:上下文包批量挂载(需求 016 A2)——选我的助手,幂等合并写入 */}
+      {mountPackFor && <MountPackModal pack={mountPackFor} onClose={() => setMountPackFor(null)} />}
+    </div>
+  );
+}
+
+function MountPackModal({ pack, onClose }: { pack: KbInfo; onClose: () => void }) {
+  const [assistants, setAssistants] = useState<{ id: string; display_name?: string | null; name: string }[]>([]);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<{ id: string; display_name?: string | null; name: string }[]>("/assistants")
+      .then(setAssistants)
+      .catch(() => setAssistants([]));
+  }, []);
+
+  const pickedIds = Object.keys(picked).filter((k) => picked[k]);
+
+  const submit = async () => {
+    if (pickedIds.length === 0) return;
+    setBusy(true);
+    try {
+      const r = await apiPost<{ ok: boolean; mounted: number }>(`/kb/kbs/${pack.id}/mount-batch`, {
+        plugin_ids: pickedIds,
+      });
+      setMsg(`已挂载到 ${r.mounted} 个助手(包成员的会话将自动检索组织知识)`);
+      setTimeout(onClose, 1200);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "挂载失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h3 className="text-sm font-bold text-slate-900">🔗 挂载「{pack.name}」到助手</h3>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          选择要挂载的助手(可多选,重复挂载幂等);仅上下文包成员的会话会检索到包内容。
+        </p>
+        <div className="max-h-64 space-y-1 overflow-y-auto">
+          {assistants.map((a) => (
+            <label
+              key={a.id}
+              className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 hover:bg-slate-50"
+            >
+              <input
+                type="checkbox"
+                checked={!!picked[a.id]}
+                onChange={(e) => setPicked({ ...picked, [a.id]: e.target.checked })}
+                className="h-3.5 w-3.5"
+              />
+              <span className="text-xs text-slate-800">{a.display_name || a.name}</span>
+            </label>
+          ))}
+          {assistants.length === 0 && <p className="text-center text-xs text-slate-400">暂无可挂载的助手</p>}
+        </div>
+        {msg && <p className="text-[11px] text-indigo-600">{msg}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100">
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={busy || pickedIds.length === 0}
+            onClick={() => void submit()}
+            className="rounded-md bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {busy ? "挂载中…" : `挂载 ${pickedIds.length > 0 ? `(${pickedIds.length})` : ""}`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

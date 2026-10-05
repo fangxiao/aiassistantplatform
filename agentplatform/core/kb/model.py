@@ -12,6 +12,7 @@ from enum import Enum
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -80,6 +81,8 @@ class KnowledgeBase(Base):
     version: Mapped[str] = mapped_column(Text, nullable=False, default="0.0.0")  # public 库 semver
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")  # active / disabled
+    # 组织上下文包(M27/需求 016):shared 库 + 此标记 = 上下文包;建包时预置四分区
+    is_context_pack: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     doc_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

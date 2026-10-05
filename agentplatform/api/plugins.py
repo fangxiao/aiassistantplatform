@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.auth.dependencies import (
-    get_current_user,
     is_admin,
     require_admin,
     require_developer,
@@ -193,11 +192,26 @@ async def set_mounted_kbs(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_developer),
 ) -> PluginOut:
-    """给助手挂载知识库(全量覆盖;仅 owner/admin;仅 public+active 库,设计 008 §4.3)。"""
+    """给助手挂载知识库(全量覆盖;仅 owner/admin)。
+
+    设计 008 §4.3:仅 public+active 库(对全部使用者生效,不能带入私有/共享)。
+    M27 例外:组织上下文包(shared)可挂——运行时 kb_search 按当前用户成员资格
+    过滤,非成员检索不到,安全不变式保持(设计 021 §3);操作者须为包成员。
+    """
     plugin = await _get_owned_plugin(plugin_id, session, user)
     # 去重保序;逐个校验公共可读(助手挂载对全部使用者生效,不能带入私有/共享库)
     kb_ids = list(dict.fromkeys(payload.kb_ids))
     for kid in kb_ids:
+        kb = await kb_service.get_kb(session, kid)
+        if kb is not None and kb.is_context_pack and kb.status == "active":
+            from agentplatform.core.kb.search_tool import _is_kb_member
+
+            if not await _is_kb_member(session, kb, str(user.id)):
+                raise HTTPException(
+                    status_code=403,
+                    detail={"code": "forbidden", "message": f"非该上下文包成员: {kid}"},
+                )
+            continue
         if await kb_service.get_public_kb(session, kid) is None:
             raise HTTPException(
                 status_code=404,

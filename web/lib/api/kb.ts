@@ -89,6 +89,7 @@ export interface KbCreatePayload {
   slug: string;
   visibility: "private" | "shared" | "public";
   description?: string;
+  context_pack?: boolean; // M27:组织上下文包(shared + 四分区预置)
 }
 
 export async function createKb(payload: KbCreatePayload): Promise<KbInfo> {

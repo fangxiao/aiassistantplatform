@@ -8,9 +8,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from sqlalchemy import Text, bindparam, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import bindparam, select
 from sqlalchemy import text as sa_text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.kb.model import KbChunk, KbDocument, KbDocumentStatus, KnowledgeBase
 

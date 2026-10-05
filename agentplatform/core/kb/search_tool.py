@@ -65,12 +65,14 @@ async def resolve_allowed_kb_ids(
     mounted_kb_ids: list[uuid.UUID] | None,
     plugin_manifest: dict | None,
     plugin_mounted_kb_ids: list[uuid.UUID] | None = None,
+    session_user_id: str | None = None,
 ) -> list[uuid.UUID]:
     """组装会话允许检索的库(设计 008 §3.3 / §4.3)。
 
     = sessions.mounted_kb_ids(用户挂载,创建/更新时已校验可读)
     ∪ 插件 depends_on 中 kb: 资源解析出的公共库(注册表 kind=kb → knowledge_bases)
-    ∪ plugins.mounted_kb_ids(助手运行时挂载,写入时已校验 public+active)。
+    ∪ plugins.mounted_kb_ids(助手运行时挂载,写入时已校验 public+active;
+      例外:M27 组织上下文包 shared 可挂,但运行时按当前用户成员资格过滤)。
     去重;防御性二次校验可见性(挂载校验之后库被转 private 等边界)。
     """
     allowed: dict[uuid.UUID, None] = {}
@@ -93,15 +95,34 @@ async def resolve_allowed_kb_ids(
             kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.slug == slug))
             if kb is not None and kb.visibility == KbVisibility.public and kb.status == "active":
                 allowed.setdefault(kb.id, None)
-    # 防御性过滤:public 需 active;private 须来自挂载入口(写入时已校验可读)
+    # 防御性过滤:public 需 active;private 须来自挂载入口(写入时已校验可读);
+    # 组织上下文包(M27,shared)可经插件挂载进入,但仅当当前用户是包成员
     valid: list[uuid.UUID] = []
     for kid in allowed:
         kb = await db.get(KnowledgeBase, kid)
         if kb is None or kb.status != "active":
             continue
-        if kb.visibility == KbVisibility.public or kid in mounted_set:
+        if kb.visibility == KbVisibility.public or kid in mounted_set or (
+            kb.is_context_pack
+            and kb.visibility == KbVisibility.shared
+            and kid in (plugin_mounted_kb_ids or [])
+            and session_user_id
+            and await _is_kb_member(db, kb, session_user_id)
+        ):
             valid.append(kid)
     return valid
+
+
+async def _is_kb_member(db: AsyncSession, kb: KnowledgeBase, user_id: str) -> bool:
+    """包成员资格(owner 或 KbMember 行)。"""
+    from agentplatform.core.kb.model import KbMember
+
+    if str(kb.owner_id) == str(user_id):
+        return True
+    row = await db.scalar(
+        select(KbMember).where(KbMember.kb_id == kb.id, KbMember.user_id == str(user_id))
+    )
+    return row is not None
 
 
 async def run_kb_search(
