@@ -258,3 +258,31 @@ async def resend_verification(
 async def me(user: User = Depends(get_current_user)) -> User:
     """当前用户信息(需 Bearer 令牌)。"""
     return user
+
+# ── 登录设备管理(M24 P3/需求 013 C1)────────────────────────
+
+
+@router.get("/sessions")
+async def login_sessions(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """登录设备列表(活跃族 + 最近失效历史);仅本人。"""
+    from agentplatform.core.auth.tokens import list_login_sessions
+
+    return await list_login_sessions(session, str(user.id))
+
+
+@router.delete("/sessions/{family_id}")
+async def kick_login(
+    family_id: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """踢出一个登录(吊销其令牌族);不存在/越权 404。"""
+    from agentplatform.core.auth.tokens import revoke_family_by_id
+
+    ok = await revoke_family_by_id(session, str(user.id), family_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "登录不存在"})
+    return {"ok": True}

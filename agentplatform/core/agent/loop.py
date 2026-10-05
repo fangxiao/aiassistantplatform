@@ -30,6 +30,7 @@ from agentplatform.core.agent.http_action import run as http_action_run
 from agentplatform.core.agent.image_gen import IMAGE_GEN_TOOL_ID
 from agentplatform.core.agent.image_gen import run as image_gen_run
 from agentplatform.core.agent.messages import build_messages, build_system_prompt
+from agentplatform.core.agent.text_fallback import _extract_html_fallback
 from agentplatform.core.agent.tools import build_tools
 from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
 from agentplatform.core.agent.web_search import run as web_search_run
@@ -733,26 +734,6 @@ def _stream(
     return llm_client.stream(messages, tools)  # type: ignore[attr-defined]
 
 
-
-
-def _extract_html_fallback(text: str) -> str | None:
-    """从大模型生成的文本、markdown 代码块或 JSON 字符串中鲁棒提取 HTML 内容。"""
-    import re
-    if not text:
-        return None
-    # 1. 尝试匹配 ```html ... ```
-    m = re.search(r"```html\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    # 2. 尝试从 JSON "html": "..." 中提取并反转义
-    html_m = re.search(r"\"(?:html|content|html_content)\"\s*:\s*\"((?:\\.|[^\"\\])*)", text)
-    if html_m:
-        raw_html = html_m.group(1)
-        return raw_html.replace(r"\"", "\"").replace(r"\n", "\n").replace(r"\t", "\t").replace(r"\/", "/")
-    m = re.search(r"(<(?:section|div|article|html|!DOCTYPE)\s+[\s\S]*?(?:</(?:section|div|article|html)>|\Z))", text, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    return None
 
 
 def _extract_article_info(history: list[dict] | None, current_text: str) -> tuple[str, str, str]:

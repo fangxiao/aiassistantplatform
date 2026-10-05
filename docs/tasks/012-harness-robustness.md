@@ -26,9 +26,9 @@
 | P2.1 | ✅(20261002) errors.py 六类枚举 + classify_exception | core/agent/errors |
 | P2.2 | ✅(20261002) a5b7e1c8d402 + 消息轮次写入(压缩/兜底计数 P3 扩展) | migration |
 | P2.3 | ✅(20261002) SSE error 统一分类 | api 层 |
-| P2.4 | ✅(20261002) dispatch.py 迁出(1196→777 行;≤400 行目标随 P3 再瘦) | 设计 016 §3 |
+| P2.4 | ✅(20261002) dispatch.py 迁出(1196→777 行)→ ✅(20261006) 文本兜底再拆 text_fallback.py,dispatch 457→62 行,≤400 达标 | 设计 016 §3 |
 | P2.5 | ✅(20261002) _drain_until_done 并发等待,轮询清零 | 设计 016 §3.2 |
-| P2.6 | 部分(既有 378 用例含断流/session失效回归;系统化注入矩阵 P3 补) | 验收 A4 |
+| P2.6 | ✅(20261006) 系统化注入矩阵落地:test_agent_fault_injection 16 用例(六分类参数化矩阵 + SSE 分类透出三锚点) | 验收 A4 |
 
 ## P3 · 上下文压缩 + 兜底收缩(H3 + H5)
 
@@ -36,6 +36,10 @@
 |---|---|---|
 | P3.1 | ✅(20261003) b6c9f0a2d713 | migration |
 | P3.2 | ✅(20261003) 单滚动摘要+基线化 build_history+10min 频率闸 | 设计 016 §4 |
-| P3.3 | ✅(20261003) /sessions/{sid}/summary 端点+气泡过滤(工作台按钮随下轮 web 迭代) | web |
+| P3.3 | ✅(20261003) /sessions/{sid}/summary 端点+气泡过滤 → ✅(20261006) 聊天页「📝 摘要」按钮+弹窗补齐 | web |
 | P3.4 | ✅(20261003) 分流落地,保守默认保持兜底;fallback 计数落 trace 随观测迭代 | 设计 016 §6 |
 | P3.5 | ✅(20261003) 压缩 5 用例(触发/冷却/基线/约束保留/计量),全量 383 | 验收 A3/A6 |
+
+> 20261006 三尾收口记录:dispatch 拆分时顺带修复潜伏 NameError——dispatch.py 裸引用
+> loop.py 的 `_extract_html_fallback` 而未导入(兜底分支 1.5/7 命中即崩);该函数现随
+> 迁移统一落 text_fallback.py。全量 432 绿。

@@ -303,3 +303,47 @@ async def test_feishu_no_email_placeholder(client, session, monkeypatch):
     user = await session.get(User, ident.user_id)
     assert user.email.endswith("@feishu.local")
     assert user.email_verified_at is None
+
+
+# ── P3 登录设备管理(需求 013 C1)────────────────────────────
+
+
+async def test_login_sessions_lists_and_kicks(client):
+    """登录 → 设备列表含该族;下线后 refresh 失效、列表转历史。"""
+    from agentplatform.core.auth.dependencies import get_current_user
+    from agentplatform.main import app
+
+    await _register(client, "dev1@test.dev")
+    login = await _login(client, "dev1@test.dev")
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    app.dependency_overrides.pop(get_current_user, None)  # /sessions 走真实鉴权
+
+    listed = await client.get(f"{PREFIX}/sessions", headers=headers)
+    assert listed.status_code == 200
+    rows = listed.json()
+    mine = [r for r in rows if r["active"]]
+    assert len(mine) >= 1
+    fam = mine[0]["family_id"]
+    assert mine[0]["ip"] != ""  # 设备指纹字段在
+
+    kick = await client.delete(f"{PREFIX}/sessions/{fam}", headers=headers)
+    assert kick.status_code == 200
+    # 该族已吊销 → refresh 401
+    again = await client.post(f"{PREFIX}/refresh")
+    assert again.status_code == 401
+    # 列表转为历史(不活跃)
+    listed2 = await client.get(f"{PREFIX}/sessions", headers=headers)
+    fams = {r["family_id"]: r["active"] for r in listed2.json()}
+    assert fams.get(fam) is False
+
+
+async def test_kick_unknown_family_404(client):
+    from agentplatform.core.auth.dependencies import get_current_user
+    from agentplatform.main import app
+
+    await _register(client, "dev2@test.dev")
+    login = await _login(client, "dev2@test.dev")
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    app.dependency_overrides.pop(get_current_user, None)
+    resp = await client.delete(f"{PREFIX}/sessions/00000000-0000-0000-0000-000000000000", headers=headers)
+    assert resp.status_code == 404

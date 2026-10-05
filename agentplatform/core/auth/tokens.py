@@ -162,3 +162,71 @@ async def user_for_refresh(session: AsyncSession, user_id: str) -> User:
     if user is None or user.disabled_at is not None:
         raise AuthError("unauthorized", "账号不可用", 401)
     return user
+
+
+# ── 登录设备管理(M24 P3/需求 013 C1)───────────────────────
+
+async def list_login_sessions(session: AsyncSession, user_id: str) -> list[dict]:
+    """按令牌族聚合该用户的有效登录(设备视角)。
+
+    返回:活跃族(未吊销且未过期,含最近活跃/首登/IP/UA 摘要)+ 最近失效族
+    (登出/过期/重放吊销,作登录历史,取 10 条)。仅本人(user_id 过滤)。
+    """
+    from datetime import UTC, datetime
+
+    rows = (
+        await session.scalars(
+            select(RefreshToken)
+            .where(RefreshToken.user_id == uuid.UUID(user_id))
+            .order_by(RefreshToken.created_at.desc())
+            .limit(500)
+        )
+    ).all()
+    now = datetime.now(UTC)
+    families: dict[uuid.UUID, dict] = {}
+    for r in rows:
+        f = families.setdefault(
+            r.family_id,
+            {"family_id": str(r.family_id), "created_at": r.created_at, "active": False,
+             "last_used_at": None, "ip": r.ip, "user_agent": r.user_agent[:60]},
+        )
+        f["created_at"] = min(f["created_at"], r.created_at)
+        if r.last_used_at and (f["last_used_at"] is None or r.last_used_at > f["last_used_at"]):
+            f["last_used_at"] = r.last_used_at
+        if r.revoked_at is None and r.expires_at > now:
+            f["active"] = True
+    active = sorted(
+        (f for f in families.values() if f["active"]),
+        key=lambda f: f["last_used_at"] or f["created_at"],
+        reverse=True,
+    )
+    history = sorted(
+        (f for f in families.values() if not f["active"]),
+        key=lambda f: f["last_used_at"] or f["created_at"],
+        reverse=True,
+    )[:10]
+    return [{**f, "active": True} for f in active] + [
+        {**f, "active": False} for f in history
+    ]
+
+
+async def revoke_family_by_id(session: AsyncSession, user_id: str, family_id: str) -> bool:
+    """按 family_id 踢出该登录(全部 token 作废);越权/不存在返回 False。"""
+    try:
+        fid = uuid.UUID(family_id)
+    except ValueError:
+        return False
+    row = await session.scalar(
+        select(RefreshToken).where(
+            RefreshToken.family_id == fid, RefreshToken.user_id == uuid.UUID(user_id)
+        )
+    )
+    if row is None:
+        return False
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.family_id == fid, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(UTC))
+    )
+    await session.commit()
+    return True

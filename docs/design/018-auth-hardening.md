@@ -126,6 +126,13 @@ GET /api/auth/feishu/callback  → 校验 state(cookie 对照)
 - `UserOut` 增 `email_verified: bool`;web 顶栏横幅(未验证且邮箱可投递时显示,可关,sessionStorage 记忆);设置页显示状态+重发;admin 用户列表加列
 - 新配置:`public_web_base`(默认 http://localhost:3000,邮件链接用)
 
+## 11. P3 落地记录(2026-10-06,裁剪版见需求 013 §6-§7)
+
+- 设备管理:tokens.list_login_sessions 按族聚合(活跃=未吊销未过期;历史取 10);
+  revoke_family_by_id 校验属主;web「登录设备」卡(下线+登录记录=C2 知情降级)
+- 测试:auth 16/16;live 冒烟 列表→下线→refresh 401 全过
+- deferred 项与理由:需求 013 §7
+
 ## 10. P2 落地记录(2026-10-05)
 
 - 迁移 `d8f3a1c6b9e2`(users.email_verified_at + refresh_tokens + 绑定用户回填);全量 pytest 403 绿(新增 test_auth_p2 14 用例),web tsc/vitest 绿

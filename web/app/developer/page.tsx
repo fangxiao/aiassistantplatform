@@ -838,6 +838,7 @@ export default function DeveloperPage() {
           <div className="space-y-6">
             {/* 邮箱验证(M24 P2):状态展示 + 重发;横幅提醒不阻断功能 */}
             <EmailVerifyCard />
+            <LoginDevicesCard />
             <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-5">
               <div>
                 <h2 className="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">
@@ -1408,6 +1409,99 @@ function EmailVerifyCard() {
         )}
       </div>
       {msg && <p className="mt-2 text-[11px] text-slate-600">{msg}</p>}
+    </div>
+  );
+}
+
+// 登录设备管理(M24 P3/需求 013 C1):活跃登录 + 登录历史,一键下线
+function LoginDevicesCard() {
+  interface LoginSession {
+    family_id: string;
+    created_at: string;
+    last_used_at: string | null;
+    ip: string;
+    user_agent: string;
+    active: boolean;
+  }
+  const [rows, setRows] = useState<LoginSession[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await apiGet<LoginSession[]>("/auth/sessions"));
+    } catch {
+      setRows([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const kick = async (familyId: string) => {
+    try {
+      await apiFetch(`/auth/sessions/${familyId}`, { method: "DELETE" });
+      setMsg("已下线该登录");
+      await load();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "操作失败");
+    }
+  };
+
+  const active = rows.filter((r) => r.active);
+  const history = rows.filter((r) => !r.active).slice(0, 5);
+
+  const fmt = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <span>💻</span> 登录设备
+          </h3>
+          <p className="mt-1 text-[11px] text-slate-500">
+            活跃登录({active.length})与最近登录记录;下线后该设备需重新登录
+          </p>
+        </div>
+        {msg && <span className="text-[11px] text-emerald-600">{msg}</span>}
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        {active.map((r) => (
+          <div key={r.family_id} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title="活跃" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs text-slate-800">
+                {r.user_agent || "未知客户端"} <span className="ml-1 font-mono text-[10px] text-slate-400">{r.ip || "?"}</span>
+              </p>
+              <p className="text-[10px] text-slate-400">
+                首登 {fmt(r.created_at)} · 最近活跃 {fmt(r.last_used_at)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void kick(r.family_id)}
+              className="shrink-0 rounded-md border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50"
+            >
+              下线
+            </button>
+          </div>
+        ))}
+        {active.length === 0 && <p className="text-xs text-slate-400">暂无活跃登录</p>}
+      </div>
+
+      {history.length > 0 && (
+        <div className="mt-3 border-t border-slate-100 pt-2">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">最近登录记录</p>
+          {history.map((r) => (
+            <p key={r.family_id} className="text-[10px] text-slate-400">
+              {fmt(r.last_used_at ?? r.created_at)} · {r.ip || "?"} · {r.user_agent?.slice(0, 40) || "未知"}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

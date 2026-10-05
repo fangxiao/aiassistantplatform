@@ -67,6 +67,8 @@ function ChatHome() {
     localStorage.setItem("workbench_view", v);
   };
   const [showKbModal, setShowKbModal] = useState(false);
+  // 上下文摘要(设计 016 §4 P3.3 尾项):会话级滚动摘要查看入口
+  const [summary, setSummary] = useState<{ text: string | null } | null>(null);
   // 会话产出收藏(设计 008 §11):记录待收藏正文与来源
   const [kbSaveTarget, setKbSaveTarget] = useState<{ content: string; source: { app: string; session_id?: string; message_id?: string } } | null>(null);
 
@@ -704,6 +706,21 @@ function ChatHome() {
                   知识库 {(current?.mounted_kb_ids?.length ?? 0) > 0 ? `(${current?.mounted_kb_ids?.length})` : "未挂载"}
                 </span>
               </button>
+              {current && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void apiGet<{ text: string | null }>(`/chat/sessions/${current.id}/summary`)
+                      .then((r) => setSummary({ text: r.text }))
+                      .catch(() => setSummary({ text: null }));
+                  }}
+                  title="查看本会话的上下文滚动摘要(长对话自动压缩)"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600 transition hover:bg-slate-100"
+                >
+                  <span>📝</span>
+                  <span>摘要</span>
+                </button>
+              )}
               {streaming ? (
                 <span className="inline-flex items-center gap-1.5 text-indigo-600 font-medium animate-pulse">
                   <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping" />
@@ -755,6 +772,33 @@ function ChatHome() {
           onClose={() => setShowKbModal(false)}
           onSave={handleSaveKbs}
         />
+      )}
+
+      {/* 上下文摘要弹窗(设计 016 §4;无摘要时说明触发条件) */}
+      {summary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-bold text-slate-900">📝 上下文摘要</h3>
+              <button
+                type="button"
+                onClick={() => setSummary(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="mt-3 max-h-80 overflow-y-auto text-xs leading-relaxed text-slate-700">
+              {summary.text ? (
+                <pre className="whitespace-pre-wrap font-sans">{summary.text}</pre>
+              ) : (
+                <p className="text-slate-400">
+                  本会话暂无摘要——历史超阈值后自动生成滚动压缩(上下文管理,ADR 0011),无需手动触发。
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Save Assistant Message to KB (M12 增补, 设计 008 §11) */}
