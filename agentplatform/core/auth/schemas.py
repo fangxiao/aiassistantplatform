@@ -34,6 +34,7 @@ class UserOut(BaseModel):
     email: str
     role: UserRole
     created_at: datetime
+    email_verified: bool = False  # M24 P2:User.email_verified 属性派生
 
 
 class TokenOut(BaseModel):

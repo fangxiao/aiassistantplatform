@@ -29,21 +29,32 @@ def allow_ip_register(ip: str) -> bool:
     return _slide(f"reg:{ip}", 3, 3600.0)
 
 
-_account_lock: dict[str, tuple[int, float]] = {}
+_account_lock: dict[str, tuple[int, float, float]] = {}  # (count, count_window_end, locked_until)
 
 
 def account_locked(email: str) -> bool:
     info = _account_lock.get(email)
-    return bool(info and time.monotonic() < info[1])
+    return bool(info and time.monotonic() < info[2])
 
 
 def record_login_fail(email: str) -> None:
-    """连续失败 5 次锁 15 分钟;成功登录由 clear 重置。"""
+    """连续失败 5 次(5 分钟计数窗)锁 15 分钟;成功登录由 clear 重置。
+
+    P1 误写为任一次失败即 until=now+900(一错密码就锁 15 分钟);P2 修正为
+    计数窗与锁定截止分离。
+    """
     info = _account_lock.get(email)
     now = time.monotonic()
-    count = (info[0] + 1) if info and now < info[1] else 1
-    _account_lock[email] = (count, now + 900) if count >= 5 else (count, now + 900)
+    in_window = info is not None and now < info[1]
+    count = (info[0] + 1) if in_window else 1
+    locked_until = now + 900 if count >= 5 else (info[2] if in_window and now < info[2] else 0.0)
+    _account_lock[email] = (count, now + 300, locked_until)
 
 
 def clear_login_fail(email: str) -> None:
     _account_lock.pop(email, None)
+
+
+def allow_resend(user_id: str) -> bool:
+    """验证邮件重发(M24 P2 B3.2):1 次/分钟 且 3 次/天。"""
+    return _slide(f"resend-m:{user_id}", 1, 60.0) and _slide(f"resend-d:{user_id}", 3, 86400.0)

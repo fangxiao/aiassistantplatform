@@ -107,3 +107,10 @@ def test_rate_limit_and_lockout_real_functions() -> None:
     assert rl.account_locked("victim@test.dev")
     rl.clear_login_fail("victim@test.dev")
     assert not rl.account_locked("victim@test.dev")
+
+    # P2 修正回归:P1 曾误写为任一次失败即锁 15 分钟——1-4 次失败不得锁定
+    for i in range(4):
+        rl.record_login_fail("typo@test.dev")
+        assert not rl.account_locked("typo@test.dev"), f"第 {i + 1} 次失败不应锁定"
+    rl.record_login_fail("typo@test.dev")  # 第 5 次锁 15 分钟
+    assert rl.account_locked("typo@test.dev")

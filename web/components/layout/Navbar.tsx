@@ -3,17 +3,32 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AuthUser, broadcastAuthSync, getUser, isAuthed, logout } from "../../lib/api/auth";
+import {
+  AuthUser,
+  broadcastAuthSync,
+  getUser,
+  isAuthed,
+  logout,
+  resendVerification,
+} from "../../lib/api/auth";
 import { NotificationBell } from "../workbench/NotificationBell";
+
+const BANNER_DISMISSED_KEY = "agentplatform_email_banner_dismissed";
 
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUserState] = useState<AuthUser | null>(null);
   const [authed, setAuthed] = useState<boolean>(false);
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(true);
+  const [resendMsg, setResendMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setUserState(getUser());
+    // 会话级横幅:同一浏览器会话内关闭过则不再弹(sessionStorage)
+    setBannerDismissed(
+      typeof sessionStorage !== "undefined" && sessionStorage.getItem(BANNER_DISMISSED_KEY) === "1"
+    );
     // 角色实时校准(2026-09-28):localStorage 缓存的 user.role 可能过期
     // (管理员直接改库提升角色后,旧会话仍显示"普通用户")——以 /auth/me 为准刷新一次
     fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api"}/auth/me`, {
@@ -40,10 +55,39 @@ export function Navbar() {
   }, [pathname]);
 
   const handleLogout = () => {
-    logout();
+    void logout(); // M24 P2:异步吊销服务端令牌族,本地态在内部同步清理
     setAuthed(false);
     setUserState(null);
     router.push("/auth");
+  };
+
+  const showVerifyBanner =
+    authed && user?.email_verified === false && !bannerDismissed && pathname !== "/auth";
+
+  const dismissBanner = () => {
+    try {
+      sessionStorage.setItem(BANNER_DISMISSED_KEY, "1");
+    } catch {
+      // 隐私模式下忽略
+    }
+    setBannerDismissed(true);
+  };
+
+  const handleResend = async () => {
+    try {
+      const r = await resendVerification();
+      setResendMsg(r.message ?? "验证邮件已发送,请查收(注意垃圾箱)");
+      if (r.message === "邮箱已验证") {
+        const u = getUser();
+        if (u) {
+          const updated = { ...u, email_verified: true };
+          localStorage.setItem("agentplatform_user", JSON.stringify(updated));
+          setUserState(updated);
+        }
+      }
+    } catch (err) {
+      setResendMsg(err instanceof Error ? err.message : "发送失败,请稍后再试");
+    }
   };
 
   const navLinks = [
@@ -70,6 +114,34 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+      {/* 邮箱未验证横幅(M24 P2):提醒不阻断,可会话级关闭 */}
+      {showVerifyBanner && (
+        <div className="bg-amber-50 border-b border-amber-200">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-1.5 sm:px-6">
+            <p className="text-[11px] text-amber-900">
+              📧 邮箱 <strong>{user.email}</strong> 尚未验证——验证后可用于账号找回。
+              {resendMsg && <span className="ml-2 font-medium text-amber-700">{resendMsg}</span>}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleResend()}
+                className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-medium text-amber-800 hover:bg-amber-100"
+              >
+                重发验证邮件
+              </button>
+              <button
+                type="button"
+                onClick={dismissBanner}
+                className="text-[10px] text-amber-600 hover:text-amber-800"
+                aria-label="关闭提醒"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2">

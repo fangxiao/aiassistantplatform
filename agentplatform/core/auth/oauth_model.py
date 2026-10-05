@@ -1,4 +1,4 @@
-"""认证扩展模型(M24/需求 013/设计 018):第三方身份/PAT/邀请码。"""
+"""认证扩展模型(M24/需求 013/设计 018):第三方身份/PAT/邀请码/refresh 令牌族。"""
 
 import uuid
 from datetime import UTC, datetime
@@ -17,10 +17,32 @@ class UserIdentity(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     provider: Mapped[str] = mapped_column(Text, nullable=False)  # github / feishu
-    provider_uid: Mapped[str] = mapped_column(Text, nullable=False)  # GitHub uid(数字)
+    provider_uid: Mapped[str] = mapped_column(Text, nullable=False)  # GitHub uid / 飞书 union_id
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class RefreshToken(Base):
+    """refresh 令牌(M24 P2/设计 018 §5):明文仅存 cookie,库存 sha256。
+
+    一次登录 = 一条 family 轮换链;revoked_at 非空即已轮换/吊销。
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    family_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    user_agent: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ip: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
 
 class PersonalAccessToken(Base):

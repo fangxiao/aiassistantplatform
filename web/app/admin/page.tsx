@@ -483,6 +483,11 @@ export default function AdminPage() {
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium border ${u.disabled ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
                           {u.disabled ? "已禁用" : "正常"}
                         </span>
+                        {u.email_verified === false && (
+                          <span className="ml-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="邮箱未验证">
+                            未验证
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <button

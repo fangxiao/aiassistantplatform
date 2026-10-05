@@ -1,6 +1,8 @@
 // API 客户端:基础封装 + SSE 流式解析
 //
 // 已登录时统一注入 Authorization: Bearer <token>(M1);未登录请求不带该头。
+// M24 P2:401 时先用 httpOnly cookie 静默 refresh 一次并重放(单飞,防并发
+// 重放触发全族吊销);refresh 失败才清理登录态跳登录页。
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
@@ -26,85 +28,125 @@ function handleUnauthorized(): void {
   }
 }
 
+// ── 静默续期(M24 P2)────────────────────────────────────────
+// cookie 内 refresh 令牌 → POST /auth/refresh → 新 access 落 localStorage。
+// 单飞:并发 401 共享同一次 refresh(重复用已轮换 cookie 会触发全族吊销)。
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+export async function refreshSession(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const resp = await fetch(`${API_BASE}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!resp.ok) return false;
+        const data = (await resp.json()) as { token: string; user?: unknown };
+        localStorage.setItem("agentplatform_token", data.token);
+        if (data.user) {
+          localStorage.setItem("agentplatform_user", JSON.stringify(data.user));
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+function authedInit(init: RequestInit): RequestInit {
+  const base = init.headers instanceof Headers ? Object.fromEntries(init.headers) : (init.headers ?? {});
+  return { ...init, headers: { ...getAuthHeader(), ...base } };
+}
+
+// 统一请求核心:401 → 静默 refresh 一次 → 重放一次;再失败走清理跳转
+async function requestOnce(path: string, init: RequestInit): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, authedInit(init));
+}
+
+async function requestWithRefresh(path: string, init: RequestInit): Promise<Response> {
+  const first = await requestOnce(path, init);
+  if (first.status !== 401) return first;
+  if (await refreshSession()) {
+    const second = await requestOnce(path, init);
+    if (second.status !== 401) return second;
+  }
+  handleUnauthorized();
+  return first;
+}
+
+function jsonHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json" };
+}
+
+function errText(status: number, resp: Response): Promise<Error> {
+  return resp.text().then((t) => new Error(`HTTP ${status}: ${t}`));
+}
+
 export async function apiFetch<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await requestWithRefresh(path, {
     method: init.method ?? "GET",
-    headers: { ...getAuthHeader(), "Content-Type": "application/json" },
+    headers: jsonHeaders(),
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   return (await resp.json().catch(() => undefined)) as T;
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, { headers: getAuthHeader() });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  const resp = await requestWithRefresh(path, { method: "GET" });
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   return (await resp.json()) as T;
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await requestWithRefresh(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...getAuthHeader() },
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   return (await resp.json()) as T;
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await requestWithRefresh(path, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...getAuthHeader() },
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   return (await resp.json()) as T;
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await requestWithRefresh(path, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...getAuthHeader() },
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   return (await resp.json()) as T;
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method: "DELETE",
-    headers: getAuthHeader(),
-  });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  const resp = await requestWithRefresh(path, { method: "DELETE" });
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   if (resp.status === 204) return {} as T;
   return (await resp.json()) as T;
 }
@@ -113,16 +155,9 @@ export async function apiDelete<T>(path: string): Promise<T> {
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append("file", file);
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: getAuthHeader(),
-    body: form,
-  });
-  if (resp.status === 401) {
-    handleUnauthorized();
-    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  const resp = await requestWithRefresh(path, { method: "POST", body: form });
+  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  if (!resp.ok) throw await errText(resp.status, resp);
   return (await resp.json()) as T;
 }
 

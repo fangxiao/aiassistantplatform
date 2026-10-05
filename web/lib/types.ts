@@ -73,6 +73,7 @@ export interface UserAdminInfo {
   nickname?: string | null;
   role: "user" | "developer" | "admin";
   disabled: boolean;
+  email_verified?: boolean; // M24 P2:邮箱验证状态
   created_at: string;
 }
 

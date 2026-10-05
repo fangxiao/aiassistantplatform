@@ -47,7 +47,8 @@ async def get_current_user(
     except AuthError:
         raw = credentials.credentials
         if raw.startswith("ap_"):
-            from datetime import UTC as _UTC, datetime as _dt
+            from datetime import UTC as _UTC
+            from datetime import datetime as _dt
             from hashlib import sha256 as _sha
 
             from sqlalchemy import select as _sel

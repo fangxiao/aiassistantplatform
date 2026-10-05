@@ -1,10 +1,11 @@
 // 登录 / 注册页(M1):登录成功后写 localStorage,跳转聊天页
+// M24 P2:飞书扫码登录入口 + 邮箱验证链接落地(verify_token)
 
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setToken, login, me, register } from "../../lib/api/auth";
+import { setToken, login, me, register, verifyEmail } from "../../lib/api/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
 
@@ -16,21 +17,32 @@ export default function AuthPage() {
   const [role, setRole] = useState<"user" | "developer">("user");
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // GitHub OAuth 回调:/auth?token=...(M24)——落地登录态后跳首页
+  // GitHub/飞书 OAuth 回调:/auth?token=...(M24)——落地登录态后跳首页;
+  // 邮箱验证链接:/auth?verify_token=...(M24 P2)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
+    const verifyToken = params.get("verify_token");
     const err = params.get("error");
     if (err) {
       const msg: Record<string, string> = {
         github_denied: "GitHub 授权被拒绝",
         github_no_email: "GitHub 账号未公开邮箱,无法自动建号",
+        feishu_denied: "飞书授权被拒绝或已失效",
+        feishu_profile: "无法获取飞书用户信息,请重试或联系管理员",
+        oauth_state: "登录会话校验失败,请重新发起登录",
         disabled: "账号已被禁用",
       };
       setError(msg[err] ?? "第三方登录失败");
       window.history.replaceState({}, "", "/auth");
+    } else if (verifyToken) {
+      verifyEmail(verifyToken)
+        .then((r) => setNotice(`邮箱 ${r.email ?? ""} 验证成功 ✓`))
+        .catch(() => setError("验证链接无效或已过期(24 小时有效),可登录后重发"))
+        .finally(() => window.history.replaceState({}, "", "/auth"));
     } else if (token) {
       setToken(token);
       me()
@@ -132,6 +144,11 @@ export default function AuthPage() {
             {error}
           </p>
         )}
+        {notice && (
+          <p className="mb-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {notice}
+          </p>
+        )}
 
         <button
           type="submit"
@@ -153,8 +170,17 @@ export default function AuthPage() {
           </svg>
           使用 GitHub 登录
         </a>
+        <a
+          href={`${API_BASE}/auth/feishu`}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded border border-slate-300 bg-white py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
+            <path d="M3.8 5.1 12 0l8.2 5.1-2 3.2L12 4.3l-6.2 4 4.6 2.9-1.9 3.1-6.6-4.2a1.3 1.3 0 0 1 0-2.2l1.9-1.2-1.9-1.6Zm1 8.4 5 3.2v3.1c0 .9 1 1.4 1.7.9L12 20l.5.7c.7.5 1.7 0 1.7-.9v-3.1l5-3.2 1.6 2.5L12 24l-8.8-8 1.6-2.5Zm10.3-6.6-2 3.2 6.2 4-2 3.2L20.2 5.1 15.1 0l-2 3.2 2 3.7Z" />
+          </svg>
+          飞书扫码登录
+        </a>
         <p className="mt-2 text-center text-[11px] text-slate-400">
-          GitHub 登录免邀请码;同邮箱账号自动绑定
+          GitHub / 飞书登录免邀请码;同邮箱账号自动绑定
         </p>
       </form>
     </main>

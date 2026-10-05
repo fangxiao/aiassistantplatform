@@ -8,7 +8,7 @@ import { PluginKbMountModal } from "../../components/kb/PluginKbMountModal";
 import { InsightsPanel } from "../../components/developer/InsightsPanel";
 import { MyModelsPanel } from "../../components/settings/MyModelsPanel";
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost } from "../../lib/api/client";
-import { isAuthed } from "../../lib/api/auth";
+import { getUser, isAuthed, resendVerification, type AuthUser } from "../../lib/api/auth";
 import type {
   BuiltinResourceInfo,
   CapabilitiesInfo,
@@ -819,6 +819,8 @@ export default function DeveloperPage() {
         {/* ========================================================================= */}
         {activeTab === "tokens" && (
           <div className="space-y-6">
+            {/* 邮箱验证(M24 P2):状态展示 + 重发;横幅提醒不阻断功能 */}
+            <EmailVerifyCard />
             <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-5">
               <div>
                 <h2 className="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">
@@ -1327,6 +1329,68 @@ git pull --rebase && <hub 命令> && git add -A && git commit -m "hub: ..." && g
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// 邮箱验证卡片(M24 P2/需求 013 B3):状态 + 重发;提醒不阻断
+function EmailVerifyCard() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setUser(getUser());
+  }, []);
+
+  if (!user) return null;
+  const verified = user.email_verified === true;
+
+  const handleResend = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await resendVerification();
+      if (r.message === "邮箱已验证") {
+        setMsg("该邮箱已验证 ✓");
+        const updated = { ...user, email_verified: true };
+        localStorage.setItem("agentplatform_user", JSON.stringify(updated));
+        setUser(updated);
+      } else {
+        setMsg("验证邮件已发送,请查收(注意垃圾箱)");
+      }
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "发送失败,请稍后再试");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <span>📧</span> 邮箱验证
+          </h3>
+          <p className="mt-1 text-[11px] text-slate-500">
+            {verified
+              ? `${user.email} 已验证 ✓`
+              : `${user.email} 未验证——验证后可用于账号找回,不影响现有功能`}
+          </p>
+        </div>
+        {!verified && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void handleResend()}
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+          >
+            {busy ? "发送中…" : "重发验证邮件"}
+          </button>
+        )}
+      </div>
+      {msg && <p className="mt-2 text-[11px] text-slate-600">{msg}</p>}
     </div>
   );
 }

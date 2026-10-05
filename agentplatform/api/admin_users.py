@@ -33,6 +33,7 @@ class UserAdminOut(BaseModel):
     nickname: str | None = None
     role: UserRole
     disabled: bool
+    email_verified: bool = False  # M24 P2 B3.5:admin 可见验证状态
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -41,7 +42,8 @@ class UserAdminOut(BaseModel):
 def _out(u: User) -> UserAdminOut:
     return UserAdminOut(
         id=u.id, email=u.email, nickname=u.nickname,
-        role=u.role, disabled=u.disabled_at is not None, created_at=u.created_at,
+        role=u.role, disabled=u.disabled_at is not None,
+        email_verified=u.email_verified_at is not None, created_at=u.created_at,
     )
 
 

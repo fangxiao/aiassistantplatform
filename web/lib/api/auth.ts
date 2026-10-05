@@ -10,6 +10,7 @@ export interface AuthUser {
   email: string;
   role: "user" | "developer" | "admin";
   created_at: string;
+  email_verified?: boolean; // M24 P2:未验证账号顶栏横幅提醒
 }
 
 export interface LoginResult {
@@ -96,7 +97,25 @@ export async function me(): Promise<AuthUser> {
   return apiGet<AuthUser>("/auth/me");
 }
 
-export function logout(): void {
+// M24 P2:邮箱验证(邮件链接中转落地 + 登录态重发)
+export async function verifyEmail(token: string): Promise<{ ok: boolean; email?: string }> {
+  return apiPost<{ ok: boolean; email?: string }>("/auth/verify-email", { token });
+}
+
+export async function resendVerification(): Promise<{ ok: boolean; message?: string }> {
+  return apiPost<{ ok: boolean; message?: string }>("/auth/resend-verification", {});
+}
+
+export async function logout(): Promise<void> {
+  // M24 P2:吊销服务端 refresh 令牌族 + 清 cookie(尽力而为,本地态必清)
+  try {
+    await fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api"}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {
+    // 网络异常时继续清理本地登录态
+  }
   setToken(null);
   setUser(null);
   broadcastAuthSync(null, null);

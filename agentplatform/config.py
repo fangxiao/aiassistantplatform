@@ -31,7 +31,11 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://agentplatform:agentplatform@localhost:5432/agentplatform"
     )
     redis_url: str = "redis://localhost:6379/0"
-    secret_key: str = "dev-secret-change-me"  # TODO(M1): 认证启用前必须改为环境变量注入
+    # JWT 签名/文件 URL 签名密钥;生产必须经根目录 .env 注入(compose environment
+    # 段插值,写 .deploy.env 无效——20261006 轮换时踩坑)。轮换程序见
+    # docs/deployment.md「SECRET_KEY 轮换」;llm_endpoints/feishu_bots 密文
+    # 需随轮换重加密(core/llm/crypto)
+    secret_key: str = "dev-secret-change-me"
     # 默认主 LLM 端点 (个人智能网关 / 直连统一模型网关)
     openai_base_url: str = "https://api.ailearning.top/v1"
     openai_api_key: str = ""
@@ -149,6 +153,8 @@ class Settings(BaseSettings):
     # 平台 API 公网/浏览器可达基址(空=返回相对 /api 路径):签名文件 URL 由此拼绝对地址,
     # 供 HTML 产物 <img>、blob 预览页等无法携带 Bearer 的消费方直接访问
     public_api_base: str = ""
+    # Web 公网基址(M24 P2):邮箱验证等外发链接的跳转目标
+    public_web_base: str = "http://localhost:3000"
     memory_max_per_user: int = 50
     # agent-hub CLI 路径(空=init 不接入总线;开发态便利,见 cli/main._wire_hub)
     hub_cli: str = ""  # 每用户长期记忆条数上限(超出淘汰最旧)

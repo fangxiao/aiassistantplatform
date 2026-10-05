@@ -48,3 +48,13 @@ class User(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # 邮箱验证时间(非空即已验证;M24 P2/设计 018 §9):密码注册默认未验证,
+    # GitHub/飞书等受信 IdP 渠道建号即视为已验证
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
+    @property
+    def email_verified(self) -> bool:
+        """UserOut 派生字段(from_attributes 读取)。"""
+        return self.email_verified_at is not None
