@@ -2,9 +2,12 @@ import io
 import tarfile
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agentplatform.core.db.session import get_session
 
 router = APIRouter(prefix="/specs", tags=["specs"])
 
@@ -15,11 +18,18 @@ class SpecsResponse(BaseModel):
 
 
 @router.get("/capabilities")
-async def get_capabilities() -> dict:
-    """获取平台共享能力全景清单 (Skill / Tool / 22 种 ContentBlock 控件)。"""
-    from agentplatform.core.registry.capabilities import get_capabilities_manifest
+async def get_capabilities(db: AsyncSession = Depends(get_session)) -> dict:
+    """获取平台共享能力全景清单 (Skill / Tool + 22 种 ContentBlock 控件)。
 
-    return get_capabilities_manifest()
+    M26:注入 use_count 热度(web 注册表徽标 + CLI registry 表格同源);
+    计数为聚合读,不涉敏感数据(端点开放供远程 CLI)。
+    """
+    from agentplatform.core.registry.capabilities import (
+        get_capabilities_manifest,
+        usage_by_id,
+    )
+
+    return get_capabilities_manifest(await usage_by_id(db))
 
 
 @router.get("/agents-md", response_model=SpecsResponse)

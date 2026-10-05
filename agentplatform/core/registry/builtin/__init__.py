@@ -7,6 +7,11 @@
 此处仅登记其 RESOURCE 进 ALL——它经由 workbench 包导入。
 """
 
+from agentplatform.core.agent.html_render import RESOURCE as _html_render_resource
+from agentplatform.core.agent.http_action import RESOURCE as _http_action_resource
+from agentplatform.core.agent.image_gen import RESOURCE as _image_gen_resource
+from agentplatform.core.agent.web_search import RESOURCE as _web_search_resource
+from agentplatform.core.memory.tool import RESOURCE as _memory_resource
 from agentplatform.core.registry.builtin import (
     browser_action,
     browser_extract_dom,
@@ -20,11 +25,6 @@ from agentplatform.core.registry.builtin import (
     summarize,
 )
 from agentplatform.core.registry.builtin.meta import ResourceMeta
-from agentplatform.core.agent.http_action import RESOURCE as _http_action_resource
-from agentplatform.core.agent.web_search import RESOURCE as _web_search_resource
-from agentplatform.core.agent.image_gen import RESOURCE as _image_gen_resource
-from agentplatform.core.agent.html_render import RESOURCE as _html_render_resource
-from agentplatform.core.memory.tool import RESOURCE as _memory_resource
 from agentplatform.core.workbench.todo_tool import RESOURCE as _workbench_todo_resource
 
 __all__ = [

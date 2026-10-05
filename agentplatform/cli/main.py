@@ -485,8 +485,10 @@ def cmd_registry(args: argparse.Namespace) -> int:
 
     print("🔧 公共工具 (Built-in Tools):")
     print("--------------------------------------------------------------------------------")
-    for t in manifest["builtin_tools"]:
-        print(f"• ID: {t['id']}  (v{t['version']})")
+    for t in sorted(manifest["builtin_tools"], key=lambda x: -x.get("use_count", 0)):
+        usage = t.get("use_count")
+        usage_tag = f"🔥 {usage} 次" if usage else "NEW"
+        print(f"• ID: {t['id']}  (v{t['version']})  [{usage_tag}]")
         print(f"  描述: {t['description']}")
         print(f"  依赖声明: {t['dependency_example']}")
         params = t.get("schema", {}).get("parameters", {}).get("properties", {})
@@ -497,8 +499,10 @@ def cmd_registry(args: argparse.Namespace) -> int:
 
     print("🧠 公共技能 (Built-in Skills):")
     print("--------------------------------------------------------------------------------")
-    for s in manifest["builtin_skills"]:
-        print(f"• ID: {s['id']}  (v{s['version']})")
+    for s in sorted(manifest["builtin_skills"], key=lambda x: -x.get("use_count", 0)):
+        usage = s.get("use_count")
+        usage_tag = f"🔥 {usage} 次" if usage else "NEW"
+        print(f"• ID: {s['id']}  (v{s['version']})  [{usage_tag}]")
         print(f"  描述: {s['description']}")
         print(f"  依赖声明: {s['dependency_example']}")
         params = s.get("schema", {}).get("parameters", {}).get("properties", {})
@@ -876,6 +880,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
 def cmd_check_sandbox(args: argparse.Namespace) -> int:
     import platform as sys_platform
     import shutil
+
     from agentplatform.config import settings
     from agentplatform.core.sandbox.runner import is_sandbox_available
 

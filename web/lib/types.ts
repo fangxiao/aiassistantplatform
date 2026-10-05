@@ -93,6 +93,7 @@ export interface BuiltinResourceInfo {
   description: string;
   schema: Record<string, any>;
   dependency_example: string;
+  use_count?: number; // M26:跨版本调用总次数(热度徽标/默认排序)
 }
 
 export interface ContentBlockDef {

@@ -96,8 +96,7 @@ async def resolve_public(
 
 def split_dependency(dep: str) -> tuple[str, str | None]:
     """'tool:pdf_parse@^1.0' -> ('tool:pdf_parse', '^1.0');兼容可选后缀 '?'。"""
-    if dep.endswith("?"):
-        dep = dep[:-1]
+    dep = dep.removesuffix("?")
     if "@" in dep:
         resource_id, _, constraint = dep.partition("@")
         return resource_id, constraint
@@ -190,3 +189,24 @@ async def register(
     session.add(row)
     await session.flush()
     return row
+
+
+async def bump_use_count(session: AsyncSession, resource_id: str, version: str) -> None:
+    """使用计数 +1(M26/需求 015/设计 020 §2):loop 执行层埋点,原子自增。
+
+    静默自愈——计数失败不影响工具执行(调用方无需 try/except,本函数内部兜底)。
+    """
+    try:
+        from sqlalchemy import update
+
+        await session.execute(
+            update(SkillTool)
+            .where(SkillTool.id == resource_id, SkillTool.version == version)
+            .values(use_count=SkillTool.use_count + 1)
+        )
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "use_count 自增失败 %s@%s", resource_id, version
+        )

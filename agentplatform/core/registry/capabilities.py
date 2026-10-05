@@ -355,10 +355,26 @@ CONTENT_BLOCKS_CATALOG: list[dict[str, Any]] = [
 ]
 
 
-def get_capabilities_manifest() -> dict[str, Any]:
-    """返回全量平台共享能力清单 (Skill/Tool + 22 种 ContentBlock 控件)。"""
+def get_capabilities_manifest(usage: dict[str, int] | None = None) -> dict[str, Any]:
+    """返回全量平台共享能力清单 (Skill/Tool + 22 种 ContentBlock 控件)。
+
+    usage(M26/需求 015):id → use_count(跨版本 SUM),由调用方从 DB 注入;
+    离线 CLI 不传,use_count 回退 0。
+    """
+    usage = usage or {}
     skills = [r for r in BUILTIN_RESOURCES if r["kind"] == "skill"]
     tools = [r for r in BUILTIN_RESOURCES if r["kind"] == "tool"]
+
+    def _entry(r: dict) -> dict:
+        return {
+            "id": r["id"],
+            "name": r["name"],
+            "version": r["version"],
+            "description": r["description"],
+            "schema": r["schema"],
+            "dependency_example": f"- {r['id']}@^{r['version']}",
+            "use_count": usage.get(r["id"], 0),
+        }
 
     return {
         "platform": "AgentPlatform",
@@ -368,27 +384,17 @@ def get_capabilities_manifest() -> dict[str, Any]:
             "builtin_tools_count": len(tools),
             "content_blocks_count": len(CONTENT_BLOCKS_CATALOG),
         },
-        "builtin_skills": [
-            {
-                "id": s["id"],
-                "name": s["name"],
-                "version": s["version"],
-                "description": s["description"],
-                "schema": s["schema"],
-                "dependency_example": f"- {s['id']}@^{s['version']}",
-            }
-            for s in skills
-        ],
-        "builtin_tools": [
-            {
-                "id": t["id"],
-                "name": t["name"],
-                "version": t["version"],
-                "description": t["description"],
-                "schema": t["schema"],
-                "dependency_example": f"- {t['id']}@^{t['version']}",
-            }
-            for t in tools
-        ],
+        "builtin_skills": [_entry(s) for s in skills],
+        "builtin_tools": [_entry(t) for t in tools],
         "content_blocks": CONTENT_BLOCKS_CATALOG,
     }
+
+
+async def usage_by_id(db: object) -> dict[str, int]:
+    """聚合 skill_tools.use_count 为 id → 总次数(跨版本 SUM;M26 热度口径)。"""
+    from sqlalchemy import func, select
+
+    from agentplatform.core.registry.model import SkillTool
+
+    rows = await db.execute(select(SkillTool.id, func.sum(SkillTool.use_count)).group_by(SkillTool.id))
+    return {rid: int(total or 0) for rid, total in rows.all()}

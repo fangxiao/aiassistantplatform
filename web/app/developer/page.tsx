@@ -168,14 +168,17 @@ export default function DeveloperPage() {
     ...(capabilities?.builtin_skills || []).map((s) => ({ ...s, kind: "skill" as const })),
   ];
 
-  const filteredResources = allPublicResources.filter((r) => {
-    if (capFilter !== "all" && r.kind !== capFilter) return false;
-    if (capSearch) {
-      const q = capSearch.toLowerCase();
-      return r.id.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.name.toLowerCase().includes(q);
-    }
-    return true;
-  });
+  // M26:默认按热度降序(同分按 id),实战检验过的能力优先露出
+  const filteredResources = allPublicResources
+    .filter((r) => {
+      if (capFilter !== "all" && r.kind !== capFilter) return false;
+      if (capSearch) {
+        const q = capSearch.toLowerCase();
+        return r.id.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.name.toLowerCase().includes(q);
+      }
+      return true;
+    })
+    .sort((a, b) => (b.use_count ?? 0) - (a.use_count ?? 0) || a.id.localeCompare(b.id));
 
   const filteredWidgets = (capabilities?.content_blocks || []).filter((w) => {
     if (widgetCategory === "all") return true;
@@ -541,7 +544,21 @@ export default function DeveloperPage() {
                         >
                           {isTool ? "🔧 TOOL (工具)" : "🧠 SKILL (技能)"}
                         </span>
-                        <span className="font-mono text-xs text-slate-400">v{res.version}</span>
+                        <span className="flex items-center gap-1.5">
+                          {(res.use_count ?? 0) > 0 ? (
+                            <span
+                              className="rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600"
+                              title="累计调用次数(跨版本)"
+                            >
+                              🔥 {res.use_count}
+                            </span>
+                          ) : (
+                            <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
+                              NEW
+                            </span>
+                          )}
+                          <span className="font-mono text-xs text-slate-400">v{res.version}</span>
+                        </span>
                       </div>
 
                       <h3 className="text-sm font-bold text-slate-900 font-mono flex items-center gap-1.5">

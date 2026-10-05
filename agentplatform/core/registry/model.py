@@ -7,7 +7,7 @@ owner_id 为开发者标识,buildin 为 null;M1 引入 users 表后改为外键�
 
 from enum import Enum
 
-from sqlalchemy import JSON, Text
+from sqlalchemy import JSON, Integer, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -52,3 +52,5 @@ class SkillTool(Base):
     )
     impl_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 使用计数(M26/需求 015):loop 执行层原子自增,热度榜单数据源;存量从 0 起算
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

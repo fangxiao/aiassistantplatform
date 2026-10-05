@@ -5,7 +5,6 @@ RFC-2026-001 §RFC-4:多源数据横向比对矩阵抽取。
 summary_markdown。通用能力:适用于竞品研报、合同比对、多候选人评估等场景。
 """
 
-import json
 
 from agentplatform.core.registry.builtin.meta import ResourceMeta
 

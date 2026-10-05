@@ -16,25 +16,29 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.agent.bridge import bridge
-from agentplatform.core.agent.errors import AgentLoopError
 from agentplatform.core.agent.dispatch import (  # noqa: F401  P2.4 迁出,兼容既有导入点
     _extract_text_tool_calls,
     _find_resource,
     _parse_args,
-    _strip_tool_syntax,
 )
+from agentplatform.core.agent.errors import AgentLoopError
 from agentplatform.core.agent.executor import execute_skill, execute_tool
+from agentplatform.core.agent.html_render import HTML_RENDER_TOOL_ID
+from agentplatform.core.agent.html_render import run as html_render_run
+from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
+from agentplatform.core.agent.http_action import run as http_action_run
+from agentplatform.core.agent.image_gen import IMAGE_GEN_TOOL_ID
+from agentplatform.core.agent.image_gen import run as image_gen_run
 from agentplatform.core.agent.messages import build_messages, build_system_prompt
 from agentplatform.core.agent.tools import build_tools
+from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
+from agentplatform.core.agent.web_search import run as web_search_run
 from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, run_kb_search
 from agentplatform.core.llm.client import ToolCall
+from agentplatform.core.memory.tool import MEMORY_TOOL_ID
+from agentplatform.core.memory.tool import run as memory_run
 from agentplatform.core.registry.model import SkillTool, SkillToolKind
 from agentplatform.core.registry.service import resolve
-from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID, run as http_action_run
-from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID, run as web_search_run
-from agentplatform.core.agent.image_gen import IMAGE_GEN_TOOL_ID, run as image_gen_run
-from agentplatform.core.agent.html_render import HTML_RENDER_TOOL_ID, run as html_render_run
-from agentplatform.core.memory.tool import MEMORY_TOOL_ID, run as memory_run
 from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
 from agentplatform.core.workbench.todo_tool import run as todo_run
 
@@ -260,6 +264,7 @@ async def stream_agent(
         # 执行完成后再摸 ORM 属性会触发刷新抛 DetachedInstanceError(20260928 断流事故)
         rid = resource.id if resource is not None else None
         rkind = resource.kind if resource is not None else None
+        rver = resource.version if resource is not None else None
         # 入参引用了平台文件 URL(签名/编码形态)→ 记为已消费(交付链:
         # 如 image_gen 的图被嵌进 preview 的 html_content)
         arg_urls = set(
@@ -268,6 +273,11 @@ async def stream_agent(
         if arg_urls:
             _run_state.consumed_urls.update(u for u in arg_urls if "%" in u or "sig=" in u)
         result = await _execute_inner(resource, arguments)
+        # M26 使用计数(设计 020 §2):tool/skill 每次执行 +1(内部静默自愈)
+        if rid and rver:
+            from agentplatform.core.registry.service import bump_use_count
+
+            await bump_use_count(session, rid, rver)
         if rid and rkind == SkillToolKind.tool:
             urls = set(
                 _re.findall(r'https?://[^\s\"<>]+|/api/files/raw\?[^\s\"<>]+', result or "")

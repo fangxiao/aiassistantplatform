@@ -19,22 +19,32 @@ router = APIRouter(prefix="/registry", tags=["registry"])
 
 @router.get("/skills", response_model=list[SkillToolOut])
 async def list_skills(
+    sort: str = "name",
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[SkillToolOut]:
-    """公共 skill 列表(每资源取最高版本)。"""
+    """公共 skill 列表(每资源取最高版本);?sort=usage 按热度降序(M26)。"""
     rows = latest_of_each(await list_public(session, kind=SkillToolKind.skill))
-    return [to_out(r) for r in rows]
+    return _sorted_out(rows, sort)
 
 
 @router.get("/tools", response_model=list[SkillToolOut])
 async def list_tools(
+    sort: str = "name",
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[SkillToolOut]:
-    """公共 tool 列表(每资源取最高版本)。"""
+    """公共 tool 列表(每资源取最高版本);?sort=usage 按热度降序(M26)。"""
     rows = latest_of_each(await list_public(session, kind=SkillToolKind.tool))
-    return [to_out(r) for r in rows]
+    return _sorted_out(rows, sort)
+
+
+def _sorted_out(rows: list, sort: str) -> list:
+    """sort=usage → use_count desc(同分按 name);缺省维持既有顺序(兼容)。"""
+    out = [to_out(r) for r in rows]
+    if sort == "usage":
+        out.sort(key=lambda o: (-o.use_count, o.name))
+    return out
 
 
 @router.get("/{kind}/{name}", response_model=SkillToolOut)

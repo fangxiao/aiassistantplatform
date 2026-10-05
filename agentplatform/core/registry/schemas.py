@@ -17,6 +17,7 @@ class SkillToolOut(BaseModel):
     source: SkillToolSource
     description: str | None = None
     schema_: dict = Field(alias="schema")  # JSON 键为 schema,避免遮蔽 BaseModel 属性
+    use_count: int = 0  # M26:该版本被调用次数(loop 埋点)
 
 
 def to_out(row: SkillTool) -> SkillToolOut:
@@ -29,4 +30,5 @@ def to_out(row: SkillTool) -> SkillToolOut:
         source=row.source,
         description=row.description,
         schema=row.schema_,
+        use_count=getattr(row, "use_count", 0) or 0,
     )
