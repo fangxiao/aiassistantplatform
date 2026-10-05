@@ -118,6 +118,7 @@ async def run_agent(
     allowed_kb_ids: list[uuid.UUID] | None = None,
     memories: list[str] | None = None,
     display_name: str | None = None,
+    chat_session_id: str | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
@@ -134,6 +135,7 @@ async def run_agent(
         allowed_kb_ids=allowed_kb_ids,
         memories=memories,
         display_name=display_name,
+        chat_session_id=chat_session_id,
     ):
         if ev.type == "delta" and ev.text:
             text_parts.append(ev.text)
@@ -191,12 +193,14 @@ async def stream_agent(
     memories: list[str] | None = None,
     images: list[str] | None = None,
     display_name: str | None = None,
+    chat_session_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
     owner_id 为资源属主(会话用户 id),用于端侧工具经浏览器隧道路由;
     为 None 或浏览器未连接时,端侧工具降级为 await_external SSE + 暂停。
     allowed_kb_ids 为知识库检索允许范围(M12,chat 侧组装,设计 008 §3.3)。
+    chat_session_id 为所属聊天会话(M25 交付物登记用;不传则不登记)。
     """
     tools = await build_tools(session, resource_ids)
     resources: dict[str, SkillTool] = {}
@@ -270,6 +274,18 @@ async def stream_agent(
             )
             if urls:
                 _run_state.produced_urls.setdefault(rid, set()).update(urls)
+            # M25 交付物登记(设计 019 §3.1):白名单工具产物落 artifacts;
+            # 登记内部自愈,失败仅日志
+            from agentplatform.core.artifacts.service import register_tool_artifact
+
+            await register_tool_artifact(
+                session,
+                tool_id=rid,
+                result=result or "",
+                args=_parse_args(arguments),
+                owner_id=owner_id,
+                chat_session_id=chat_session_id,
+            )
         return result
 
     # M17 P1:写操作确认框积攒区(执行后由 block_meta 通道下发)

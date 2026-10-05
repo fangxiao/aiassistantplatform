@@ -191,6 +191,7 @@ async def agent_stream_for_session(
         allowed_kb_ids=allowed_kb_ids,
         memories=memories,
         images=images,
+        chat_session_id=str(session_id),
     ):
         yield ev
 

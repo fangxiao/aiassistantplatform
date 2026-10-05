@@ -13,6 +13,8 @@
 | 005 | [005-knowledge-base.md](./005-knowledge-base.md) | 知识库(个人库 + 公共库,增量) | v0.1 草稿待评审 | 008(待产出) |
 | 011 | [011-harness-robustness.md](./011-harness-robustness.md) | Agent Harness 加固(断线恢复/并发重构/上下文管理/错误体系) | v0.1 已确认 | [016-harness-robustness.md](../design/016-harness-robustness.md) |
 | 012 | [012-feishu-channel.md](./012-feishu-channel.md) | 飞书通道(单聊文本桥接) | v0.1 已实现 | [017-feishu-channel.md](../design/017-feishu-channel.md) |
+| 013 | [013-auth-hardening.md](./013-auth-hardening.md) | 认证与账号体系加固(P1 联登/邀请码/PAT;P2 双令牌/飞书扫码/邮箱验证) | v0.3 P1/P2 已交付 | [018-auth-hardening.md](../design/018-auth-hardening.md) |
+| 014 | [014-task-deliverables.md](./014-task-deliverables.md) | 任务面板与交付物(工作台任务视角) | v0.1 已交付 | [019-task-deliverables.md](../design/019-task-deliverables.md) |
 
 ## 阅读路径
 

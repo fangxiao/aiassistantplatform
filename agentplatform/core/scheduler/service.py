@@ -216,6 +216,7 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
                     owner_id=str(task.user_id),
                     allowed_kb_ids=allowed_kb_ids,
                     memories=memories,
+                    chat_session_id=str(chat_sess.id),
                 ),
                 timeout=settings.scheduler_run_timeout_s,
             )
@@ -245,6 +246,18 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             # P1 通知分级:产出首行 [ALERT] 标记 → alert=True 进通知;正常静默落卡
             run.alert = output.splitlines()[0].strip().startswith("[ALERT]") if output else False
             task.last_status = "success"
+            # M25:成功产出登记交付物(kind=report,双引用跳会话;设计 019 §3.2)
+            from datetime import datetime as _dt
+
+            from agentplatform.core.artifacts.service import register_task_report
+
+            await register_task_report(
+                db,
+                owner_id=str(task.user_id),
+                title=f"{task.name} · {_dt.now().strftime('%m-%d')}",
+                chat_session_id=str(chat_sess.id),
+                task_run_id=str(run.id),
+            )
             await _maybe_autosave(db, task, chat_sess, output)
         except Exception as exc:  # noqa: BLE001  任何异常都落终态(验收 3)
             await db.rollback()
