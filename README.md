@@ -110,6 +110,10 @@ uv run python -m agentplatform.cli.main update ./my-assistant --target http://lo
 
 ---
 
+## 🤝 商务合作
+
+对外私有化方案册(企业客户介绍):[docs/solution-brief.md](docs/solution-brief.md)
+
 ## 📚 详细文档
 
 - [部署与运维指南](docs/deployment.md)
