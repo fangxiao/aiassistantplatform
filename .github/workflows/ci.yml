@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: 后端(pytest + PG)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector 扩展随镜像(kb 混合检索测试需要;pg_trgm 由 conftest 自建)
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentplatform
+          POSTGRES_PASSWORD: agentplatform
+          POSTGRES_DB: agentplatform
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentplatform"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # conftest 直连 localhost:5432 建 agentplatform_test 库
+      SECRET_KEY: ci-secret-key-for-tests-only-0000000000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: uv sync --group dev
+      - name: pytest(真实 PG 测试库)
+        run: uv run pytest agentplatform/tests -q
+
+  web:
+    name: 前端(tsc + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 安装依赖
+        run: npm ci
+      - name: 类型检查
+        run: npx tsc --noEmit
+      - name: 单元测试
+        run: npx vitest run
