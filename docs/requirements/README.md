@@ -18,7 +18,7 @@
 | 015 | [015-registry-usage.md](./015-registry-usage.md) | 注册表运营面:热度与一键引用 | v0.1 已交付 | [020-registry-usage.md](../design/020-registry-usage.md) |
 | 016 | [016-org-context-pack.md](./016-org-context-pack.md) | 组织上下文包(对标千问企业上下文) | v0.1 已交付 | [021-org-context-pack.md](../design/021-org-context-pack.md) |
 | 017 | [017-task-entity.md](./017-task-entity.md) | 任务实体化(M25 聚合的实体演进) | v0.1 已交付 | [022-task-entity.md](../design/022-task-entity.md) |
-| 018 | [018-model-providers.md](./018-model-providers.md) | 模型供应商管理(默认网关+自定义供应商,参考 WorkBuddy/Trae) | v0.1 方向确认中 | [023-model-providers.md](../design/023-model-providers.md) |
+| 018 | [018-model-providers.md](./018-model-providers.md) | 模型供应商管理(默认网关+自定义供应商,参考 WorkBuddy/Trae) | v0.1 已交付 | [023-model-providers.md](../design/023-model-providers.md) |
 
 ## 阅读路径
 

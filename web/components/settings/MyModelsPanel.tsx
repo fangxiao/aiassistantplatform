@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { apiDelete, apiGet, apiPost } from "../../lib/api/client";
+import { ProviderModal } from "../chat/ProviderModal";
 
 /** 我的模型(用户自定义 LLM 端点,OpenAI 格式)——个人密钥仅本人可用;
  *  统一模型目录 = 个人 + 平台共享 + 默认,助手选模型的数据源。 */
@@ -13,6 +14,16 @@ interface MyEndpoint {
   model: string;
   is_default: boolean;
   endpoint_type?: string;
+}
+
+interface MyProvider {
+    id: string;
+    name: string;
+    preset: string;
+    base_url: string;
+    status: "verified" | "unverified" | "invalid";
+    last_checked_at: string | null;
+    models: { model: string; endpoint_id: string; is_default: boolean }[];
 }
 
 interface CatalogModel {
@@ -28,15 +39,20 @@ export function MyModelsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", base_url: "", model: "", api_key: "", is_default: false });
+  // M29 供应商
+  const [providers, setProviders] = useState<MyProvider[]>([]);
+  const [showProvider, setShowProvider] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [m, c] = await Promise.all([
+      const [m, c, pv] = await Promise.all([
         apiGet<MyEndpoint[]>("/llm/endpoints"),
         apiGet<{ models: CatalogModel[] }>("/llm/models"),
+        apiGet<{ providers: MyProvider[] }>("/llm/providers"),
       ]);
       setMine(m);
       setCatalog(c.models);
+      setProviders(pv.providers || []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -53,6 +69,30 @@ export function MyModelsPanel() {
       await apiPost("/llm/endpoints", form);
       setShowForm(false);
       setForm({ name: "", base_url: "", model: "", api_key: "", is_default: false });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const removeProvider = async (id: string) => {
+    if (!confirm("删除该供应商?其下模型将从可选列表移除。")) return;
+    try {
+      await apiDelete(`/llm/providers/${id}`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const rediscover = async (id: string) => {
+    try {
+      const r = await apiGet<{ verified: boolean; models_found: string[]; message: string }>(
+        `/llm/providers/${id}/models`,
+      );
+      if (r.verified && r.models_found.length > 0) {
+        await apiPost(`/llm/providers/${id}/models`, { models: r.models_found.slice(0, 20) });
+      }
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -82,6 +122,62 @@ export function MyModelsPanel() {
 
   return (
     <div className="space-y-5">
+      {/* M29:我的供应商(一个 Key 管一组模型,WorkBuddy/Trae 范式) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="mb-1 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">🔌 我的模型供应商</h3>
+            <p className="text-[11px] text-slate-400">
+              默认用平台网关;添加供应商(自带 Key)后,其模型进入会话选择器
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowProvider(true)}
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+          >
+            ＋ 添加供应商
+          </button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {providers.map((pv) => (
+            <div key={pv.id} className="flex items-center gap-3 rounded-xl border border-slate-100 px-3 py-2">
+              <span
+                className={`h-2 w-2 shrink-0 rounded-full ${pv.status === "verified" ? "bg-emerald-500" : "bg-amber-400"}`}
+                title={pv.status === "verified" ? "已验证" : "未验证(可重试)"}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-slate-800">
+                  {pv.name}
+                  <span className="ml-2 font-mono text-[10px] text-slate-400">{pv.models.length} 个模型</span>
+                </p>
+                <p className="truncate font-mono text-[10px] text-slate-400">{pv.base_url}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void rediscover(pv.id)}
+                className="rounded-md border border-slate-200 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50"
+                title="重新验证并刷新模型列表"
+              >
+                重验
+              </button>
+              <button
+                type="button"
+                onClick={() => void removeProvider(pv.id)}
+                className="rounded-md border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50"
+              >
+                删除
+              </button>
+            </div>
+          ))}
+          {providers.length === 0 && (
+            <p className="text-center text-xs text-slate-400">
+              暂无自定义供应商——会话模型下拉旁「+」也可直接添加
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h3 className="mb-1 text-sm font-bold text-slate-900">🧠 可用模型目录</h3>
         <p className="mb-3 text-[11px] text-slate-400">
@@ -187,6 +283,10 @@ export function MyModelsPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {showProvider && (
+        <ProviderModal onClose={() => setShowProvider(false)} onCreated={() => void refresh()} />
       )}
     </div>
   );

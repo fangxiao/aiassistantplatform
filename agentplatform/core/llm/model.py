@@ -41,3 +41,6 @@ class LlmEndpoint(Base):
         default=EndpointType.chat,
         server_default="chat",
     )
+    # M29 供应商挂靠:非空=属于我的某个自定义供应商(删供应商级联删);
+    # 空=平台共享端点或迁移前的存量个人端点
+    provider_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)

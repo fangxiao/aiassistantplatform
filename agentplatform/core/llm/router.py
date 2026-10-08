@@ -5,7 +5,7 @@
 """
 
 import itertools
-from typing import Iterator
+from collections.abc import Iterator
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

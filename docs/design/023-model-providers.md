@@ -78,3 +78,13 @@ GET {base_url}/models  (Authorization: Bearer <key>)
 - 模型勾选全量覆盖;删除供应商级联;存量端点迁移幂等
 - `/llm/models` 分组;会话选自定义模型 → make_llm_client 命中该端点(E2E)
 - web vitest:下拉分组渲染/添加弹窗状态机/Key 不回显
+
+## 8. 落地记录(2026-10-08)
+
+- 迁移 `c8e2b6f4a9d1`;全量 451 绿(新增 7),web tsc+vitest 绿
+- 与设计一致;补充:换 Key 时既有端点密文同步刷新(rotate_key);目录 personal 条目
+  带 provider 名(无归属的存量端点前端归「导入的端点」组)
+- E2E(live):以平台网关为自定义供应商真实连通(发现 56 模型)→勾选 3 个 →
+  目录分组带供应商名 → 会话 override DeepSeek-V4-Flash → resolve_endpoint 命中
+  供应商挂靠端点(provider_id=True)
+- 存量迁移:live 库个人端点为 0(仅 admin 共享),回填 0 行,幂等留验

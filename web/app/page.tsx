@@ -3,6 +3,7 @@
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Composer from "../components/chat/Composer";
+import { ProviderModal } from "../components/chat/ProviderModal";
 import MessageList from "../components/chat/MessageList";
 import { Navbar } from "../components/layout/Navbar";
 import { WorkbenchView } from "../components/workbench/WorkbenchView";
@@ -515,9 +516,22 @@ function ChatHome() {
 
   const currentAssistant = assistants.find((a) => a.id === current?.plugin_id);
 
-  // 会话级模型动态切换(T18.19):auto 池下拉,override 即时生效
+  // 会话级模型动态切换(T18.19):auto 池下拉,override 即时生效;
+  // M29:目录升级三组(平台网关/我的供应商/平台共享),自定义模型可选
   const [autoPool, setAutoPool] = useState<string[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
+  const [catalog, setCatalog] = useState<
+    { model: string; source: string; provider: string | null }[]
+  >([]);
+  const [showProviderModal, setShowProviderModal] = useState(false);
+  const loadCatalog = useCallback(() => {
+    apiGet<{ models: { model: string; source: string; provider: string | null }[] }>("/llm/models")
+      .then((d) => setCatalog(d.models || []))
+      .catch(() => setCatalog([]));
+  }, []);
+  useEffect(() => {
+    loadCatalog();
+  }, [loadCatalog]);
   useEffect(() => {
     if (!current || autoPool.length > 0 || poolLoading) return;
     setPoolLoading(true);
@@ -660,18 +674,54 @@ function ChatHome() {
                       <div className="text-[11px] text-slate-400 truncate max-w-sm">
                         {current?.title || "专属助手会话"}
                       </div>
-                      {current && (autoPool.length > 0 || current.model_override) && (
-                        <select
-                          value={current.model_override || "auto"}
-                          onChange={(e) => void changeSessionModel(e.target.value)}
-                          className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300"
-                          title="会话模型:切换后下一条消息生效(auto=平台智能路由)"
-                        >
-                          <option value="auto">⚡ auto(智能路由)</option>
-                          {autoPool.filter((m) => m !== "auto").map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
+                      {current && (
+                        <>
+                          <select
+                            value={current.model_override || "auto"}
+                            onChange={(e) => void changeSessionModel(e.target.value)}
+                            className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300"
+                            title="会话模型:切换后下一条消息生效(auto=平台智能路由)"
+                          >
+                            <optgroup label="平台网关(默认)">
+                              <option value="auto">⚡ auto(智能路由)</option>
+                              {autoPool.filter((m) => m !== "auto").map((m) => (
+                                <option key={`gw-${m}`} value={m}>{m}</option>
+                              ))}
+                            </optgroup>
+                            {catalog
+                              .filter((m) => m.source === "personal")
+                              .reduce<{ name: string; models: string[] }[]>((groups, m) => {
+                                const g = groups.find((x) => x.name === (m.provider || "导入的端点"));
+                                if (g) g.models.push(m.model);
+                                else groups.push({ name: m.provider || "导入的端点", models: [m.model] });
+                                return groups;
+                              }, [])
+                              .map((g) => (
+                                <optgroup key={g.name} label={`我的供应商 · ${g.name}`}>
+                                  {g.models.map((m) => (
+                                    <option key={`p-${m}`} value={m}>{m}</option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            {catalog.filter((m) => m.source === "platform").length > 0 && (
+                              <optgroup label="平台共享">
+                                {catalog
+                                  .filter((m) => m.source === "platform")
+                                  .map((m) => (
+                                    <option key={`s-${m.model}`} value={m.model}>{m.model}</option>
+                                  ))}
+                              </optgroup>
+                            )}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setShowProviderModal(true)}
+                            className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                            title="添加自定义模型供应商(自带 API Key)"
+                          >
+                            +
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -804,6 +854,14 @@ function ChatHome() {
       )}
 
       {/* 上下文摘要弹窗(设计 016 §4;无摘要时说明触发条件) */}
+      {/* M29:添加自定义模型供应商(会话选择器直达) */}
+      {showProviderModal && (
+        <ProviderModal
+          onClose={() => setShowProviderModal(false)}
+          onCreated={loadCatalog}
+        />
+      )}
+
       {summary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">

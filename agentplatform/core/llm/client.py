@@ -8,15 +8,13 @@ transport 参数供测试注入 httpx.MockTransport,不发起真实请求。
 """
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-
-import logging
 
 import httpx
 
 from agentplatform.config import settings
-
 from agentplatform.core.llm.http_client import make_http_client
 from agentplatform.core.llm.model import LlmEndpoint
 from agentplatform.core.llm.service import get_api_key
