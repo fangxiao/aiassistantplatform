@@ -81,6 +81,11 @@ export async function loginViaToken(page: Page) {
   await expect(page.getByRole("button", { name: "退出" })).toBeVisible({ timeout: 30_000 });
 }
 
+/** 按任务名精确定位 SchedulerCard 行(data-task-name 锚点) */
+export function taskRow(page: Page, name: string) {
+  return page.locator(`[data-task-name="${name}"]`);
+}
+
 /** 跑最新任务(列表按创建时间倒序,最新任务行的「跑一次」排第一) */
 export async function runLatestTask(page: Page) {
   const btn = page.getByRole("button", { name: "跑一次" }).first();

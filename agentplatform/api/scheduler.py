@@ -160,6 +160,16 @@ async def update_task(
     task.notify = payload.notify
     task.feishu_chat_id = payload.feishu_chat_id
     task.enabled = payload.enabled
+    # M31(20261009 E2E 发现):改名同步任务实体——任务中心此前一直显示旧名
+    from sqlalchemy import update as _upd
+
+    from agentplatform.core.task.model import TaskEntity
+
+    await db.execute(
+        _upd(TaskEntity)
+        .where(TaskEntity.scheduled_task_id == task_id)
+        .values(title=task.name)
+    )
     from datetime import UTC as _UTC
 
     task.next_run_at = scheduler_service.compute_next_run(task, datetime.now(_UTC))

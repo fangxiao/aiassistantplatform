@@ -283,3 +283,24 @@ async def test_reap_ignores_healthy_runs(session):
     assert await reap_zombie_runs(session) == 0
     statuses = sorted(r.status for r in (await session.scalars(_sel2(TaskRun))).all())
     assert statuses == ["running", "success"]
+
+
+async def test_rename_task_syncs_entity(client, session):
+    """定时任务改名 → 任务实体标题同步(20261009 E2E 发现的缺口)。"""
+    user, _ = await _ctx(session, "rename1@test.dev")
+    sched = await create_scheduled(
+        session, str(user.id),
+        name="旧名字", kind="custom", prompt="x", schedule_type="daily", daily_at="05:00",
+    )
+    await session.commit()
+    r = await client.patch(
+        f"/api/scheduler/tasks/{sched.id}",
+        json={"name": "新名字", "kind": "custom", "prompt": "x",
+              "schedule_type": "daily", "daily_at": "05:00"},
+    )
+    assert r.status_code == 200
+    from sqlalchemy import select as _sel3
+
+    entity = (await session.scalars(_sel3(TaskEntity).where(TaskEntity.scheduled_task_id == sched.id))).first()
+    await session.refresh(entity)
+    assert entity.title == "新名字"

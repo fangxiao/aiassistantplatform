@@ -120,6 +120,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
     if (!confirm(`删除定时任务「${t.name}」?\n\n执行配置将删除;任务中心记录转为「已完成」,运行历史与交付物保留。`)) return;
     try {
       await apiDelete(`/scheduler/tasks/${t.id}`);
+      notifyTasksChanged(); // M31 补:删除也要广播(任务中心即时转已完成,20261009 E2E)
       await refresh();
     } catch (err) {
       alert(`删除失败: ${err instanceof Error ? err.message : err}`);
@@ -173,7 +174,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
             const kind = KIND_META[t.kind] ?? { icon: "🧩", label: t.kind };
             const st = STATUS_META[t.last_status] ?? STATUS_META.never;
             return (
-              <div key={t.id} className="px-4 py-3">
+              <div key={t.id} data-task-name={t.name} className="px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -218,6 +219,15 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
                       className="rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
                     >
                       跑一次
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void toggleEnabled(t)}
+                      disabled={t.last_status === "running"}
+                      title={t.enabled ? "停用:不再按计划运行" : "启用:恢复按计划运行"}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      {t.enabled ? "停用" : "启用"}
                     </button>
                     <button
                       type="button"

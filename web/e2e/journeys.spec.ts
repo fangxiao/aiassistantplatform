@@ -5,6 +5,7 @@ import {
   loginViaToken,
   registerAndLogin,
   runLatestTask,
+  taskRow,
 } from "./helpers";
 
 /**
@@ -74,4 +75,67 @@ test("旅程 5:登出 → 回登录页", async ({ page }) => {
   await page.getByRole("button", { name: "退出" }).click();
   await expect(page).toHaveURL(/\/auth/);
   await expect(page.getByText("agentplatform").first()).toBeVisible();
+});
+
+// ── 定时任务面板全覆盖(M31:用户随手测踩坑区,20261009 补)──
+
+test("旅程 6:模板任务(晨报)快速创建 → 列表出现", async ({ page }) => {
+  await loginViaToken(page);
+  await clickStable(page, "＋ 新建任务");
+  await page.getByPlaceholder("例如: 每日晨报").fill("E2E晨报");
+  await clickStable(page, "创建任务");
+  await expect(page.getByText("E2E晨报").first()).toBeVisible({ timeout: 10_000 });
+});
+
+test("旅程 7:编辑任务改名 → 列表即时更新", async ({ page }) => {
+  await loginViaToken(page);
+  const row = page.locator("div").filter({ hasText: "E2E晨报" }).locator("button", { hasText: "编辑" }).first();
+  await row.click();
+  await page.getByPlaceholder("例如: 每日晨报").fill("E2E晨报改名");
+  await clickStable(page, "保存修改");
+  await expect(page.getByText("E2E晨报改名").first()).toBeVisible({ timeout: 10_000 });
+});
+
+test("旅程 8:启停切换 → 删除 → 任务中心转已完成折叠区", async ({ page }) => {
+  await loginViaToken(page);
+  // 启停:每行一个开关按钮(标题为 启用/停用 之一)——先展开确认按钮名
+  const target = taskRow(page, "E2E晨报改名");
+  await target.getByRole("button", { name: "停用" }).click();
+  await expect(target.getByText("已停用")).toBeVisible({ timeout: 10_000 });
+
+  // 删除(confirm 自动接受)
+  page.once("dialog", (d) => d.accept());
+  await target.getByRole("button", { name: "删除" }).click();
+  await expect(page.getByText("E2E晨报改名").first()).toBeHidden({ timeout: 10_000 });
+
+  // 任务中心:折叠区出现该任务(定时删除 → 实体转已完成)
+  await page.getByRole("button", { name: /已完成\(/ }).click();
+  await expect(page.getByText("E2E晨报改名").first()).toBeVisible({ timeout: 10_000 });
+});
+
+test("旅程 9:运行记录展开 → 看到产出 → 进入会话(真实运行后)", async ({ page }) => {
+  await loginViaToken(page);
+  await createScheduledTask(page, "E2E记录", "只回复:记录验证");
+  await runLatestTask(page);
+  // 等运行完成(记录里出现产出)
+  const recBtn = taskRow(page, "E2E记录").getByRole("button", { name: "记录" });
+  await expect(recBtn).toBeVisible({ timeout: 15_000 });
+  // 展开一次(按钮是 toggle,反复点会开开关关),等运行完成产出出现
+  await recBtn.click();
+  await expect(page.getByText("记录验证").first()).toBeVisible({ timeout: 150_000 });
+  // 从记录「继续追问」进入会话
+  await page.getByRole("button", { name: "继续追问 →" }).first().click();
+  await expect(page.getByText("记录验证").first()).toBeVisible({ timeout: 20_000 });
+});
+
+test("旅程 10:推送区渲染(目标下拉 + 测试按钮,不真推)", async ({ page }) => {
+  await loginViaToken(page);
+  await clickStable(page, "＋ 新建任务");
+  await page.getByPlaceholder("例如: 每日晨报").fill("E2E推送UI");
+  // 飞书推送下拉存在且含「不推送」默认项
+  const pushSelect = page.locator("select").filter({ hasText: "不推送" }).first();
+  await expect(pushSelect).toBeVisible({ timeout: 5_000 });
+  // 测试按钮存在(未选目标时禁用)
+  await expect(page.getByRole("button", { name: "测试" }).first()).toBeDisabled();
+  await page.getByRole("button", { name: "取消" }).click();
 });
