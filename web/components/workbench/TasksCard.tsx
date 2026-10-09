@@ -42,6 +42,8 @@ interface TaskEntityItem {
   status: "active" | "done" | "archived";
   kind: "manual" | "scheduled";
   session_id: string | null;
+  scheduled_task_id?: string | null;
+  latest_session_id?: string | null;
   artifact_count: number;
   created_at: string;
   completed_at: string | null;
@@ -49,6 +51,7 @@ interface TaskEntityItem {
 
 interface TasksPanel {
   tasks: TaskEntityItem[]; // M28:实体区优先
+  done_tasks?: TaskEntityItem[]; // M30:已完成/已归档(折叠区)
   running: RunningItem[];
   scheduled: ScheduledItem[];
   artifacts: ArtifactItem[];
@@ -86,6 +89,7 @@ export function TasksCard({
   const [panel, setPanel] = useState<TasksPanel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showDone, setShowDone] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -137,42 +141,110 @@ export function TasksCard({
               </p>
             ) : (
               <ul className="space-y-1">
-                {panel.tasks.map((t) => (
-                  <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
-                    <span className="shrink-0 text-xs">{t.kind === "scheduled" ? "⏰" : "⭐"}</span>
-                    <button
-                      type="button"
-                      onClick={() => t.session_id && onContinue(t.session_id)}
-                      disabled={!t.session_id}
-                      className="min-w-0 flex-1 text-left disabled:cursor-default"
-                    >
-                      <span className="block truncate text-xs font-medium text-slate-800">{t.title}</span>
-                      <span className="block text-[10px] text-slate-400">
-                        {t.artifact_count > 0 ? `📦 ${t.artifact_count} 个交付物 · ` : ""}
-                        {fmtTime(t.created_at)}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void patchTask(t.id, { status: "done" })}
-                      className="shrink-0 rounded border border-emerald-200 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50"
-                      title="标记完成"
-                    >
-                      ✓ 完成
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void patchTask(t.id, { status: "archived" })}
-                      className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
-                      title="归档(不出现在默认列表)"
-                    >
-                      归档
-                    </button>
-                  </li>
-                ))}
+                {panel.tasks.map((t) => {
+                  // 定时任务关联的执行状态(运行中/成功/失败 + 下次运行)
+                  const sched = t.scheduled_task_id
+                    ? panel.scheduled.find((s) => s.id === t.scheduled_task_id)
+                    : undefined;
+                  return (
+                    <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+                      <span className="shrink-0 text-xs">{t.kind === "scheduled" ? "⏰" : "⭐"}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = t.kind === "scheduled" ? (t.latest_session_id ?? t.session_id) : t.session_id;
+                          if (target) onContinue(target);
+                        }}
+                        disabled={t.kind === "scheduled" ? !(t.latest_session_id ?? t.session_id) : !t.session_id}
+                        className="min-w-0 flex-1 text-left disabled:cursor-default"
+                        title={t.kind === "scheduled" ? "打开最近一次执行的会话(查看执行过程与产出)" : undefined}
+                      >
+                        <span className="block truncate text-xs font-medium text-slate-800">{t.title}</span>
+                        <span className="block text-[10px] text-slate-400">
+                          {t.kind === "scheduled" && sched
+                            ? `${STATUS_BADGE[sched.last_status]?.label ?? sched.last_status} · 下次 ${fmtTime(sched.next_run_at)}`
+                            : `${t.artifact_count > 0 ? `📦 ${t.artifact_count} 个交付物 · ` : ""}${fmtTime(t.created_at)}`}
+                        </span>
+                      </button>
+                      {t.kind === "scheduled" && sched && STATUS_BADGE[sched.last_status] && (
+                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${STATUS_BADGE[sched.last_status]!.cls}`}>
+                          {sched.last_status === "running" && <span className="mr-0.5 inline-block animate-pulse">●</span>}
+                          {STATUS_BADGE[sched.last_status]!.label}
+                        </span>
+                      )}
+                      {t.kind === "manual" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void patchTask(t.id, { status: "done" })}
+                            className="shrink-0 rounded border border-emerald-200 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50"
+                            title="标记完成(手动任务用;定时任务随删除自动完结)"
+                          >
+                            ✓ 完成
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void patchTask(t.id, { status: "archived" })}
+                            className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+                            title="归档(不出现在默认列表)"
+                          >
+                            归档
+                          </button>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
+
+          {(panel.done_tasks?.length ?? 0) > 0 && (
+            <section>
+              <button
+                type="button"
+                onClick={() => setShowDone((v) => !v)}
+                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 hover:text-slate-600"
+              >
+                <span className={`transition ${showDone ? "rotate-90" : ""}`}>▶</span>
+                已完成({panel.done_tasks!.length})
+              </button>
+              {showDone && (
+                <ul className="mt-1 space-y-1">
+                  {panel.done_tasks!.map((t) => (
+                    <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1 opacity-75 hover:bg-slate-50">
+                      <span className="shrink-0 text-xs">{t.kind === "scheduled" ? "⏰" : "⭐"}</span>
+                      <button
+                        type="button"
+                        onClick={() => t.session_id && onContinue(t.session_id)}
+                        disabled={!t.session_id}
+                        className="min-w-0 flex-1 text-left disabled:cursor-default"
+                      >
+                        <span className="block truncate text-xs text-slate-600">
+                          {t.status === "archived" ? "📦 " : ""}
+                          {t.title}
+                        </span>
+                        <span className="block text-[10px] text-slate-400">
+                          {t.completed_at ? `完成于 ${fmtTime(t.completed_at)}` : fmtTime(t.created_at)}
+                          {t.artifact_count > 0 ? ` · 📦 ${t.artifact_count}` : ""}
+                        </span>
+                      </button>
+                      {t.status === "done" && (
+                        <button
+                          type="button"
+                          onClick={() => void patchTask(t.id, { status: "active" })}
+                          className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+                          title="重新打开"
+                        >
+                          重开
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           {/* 最近活动(M25 聚合:未提升为任务的会话与运行) */}
           <section>

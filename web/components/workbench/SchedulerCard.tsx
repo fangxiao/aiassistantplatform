@@ -117,7 +117,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
   };
 
   const remove = async (t: SchedTask) => {
-    if (!confirm(`删除定时任务「${t.name}」?历史运行记录将保留。`)) return;
+    if (!confirm(`删除定时任务「${t.name}」?\n\n执行配置将删除;任务中心记录转为「已完成」,运行历史与交付物保留。`)) return;
     try {
       await apiDelete(`/scheduler/tasks/${t.id}`);
       await refresh();
