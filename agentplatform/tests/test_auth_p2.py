@@ -347,3 +347,31 @@ async def test_kick_unknown_family_404(client):
     app.dependency_overrides.pop(get_current_user, None)
     resp = await client.delete(f"{PREFIX}/sessions/00000000-0000-0000-0000-000000000000", headers=headers)
     assert resp.status_code == 404
+
+
+# ── M31:登录方式探测 + 来源感知回调(20261009 用户反馈)──────
+
+
+async def test_providers_probe(client):
+    r = await client.get(f"{PREFIX}/providers")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"github", "feishu"}
+    assert isinstance(body["github"], bool) and isinstance(body["feishu"], bool)
+
+
+async def test_feishu_redirect_uses_request_origin(client, monkeypatch):
+    """本地访问 → 回调指回本地(不再甩去公网隧道)。"""
+    import agentplatform.api.auth_ext as ax
+
+    monkeypatch.setattr(ax.settings, "feishu_app_id", "cli_x")
+    monkeypatch.setattr(ax.settings, "feishu_app_secret", "s")
+    resp = await client.get(
+        f"{PREFIX}/feishu",
+        headers={"host": "localhost:8000"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    loc = resp.headers["location"]
+    assert "passport.feishu.cn" in loc
+    assert "redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fauth%2Ffeishu%2Fcallback" in loc

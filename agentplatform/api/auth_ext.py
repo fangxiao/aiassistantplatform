@@ -49,6 +49,26 @@ def _client_ip(request: Request) -> str:
     return fwd.split(",")[0].strip() or (request.client.host if request.client else "?")
 
 
+def _request_base(request: Request) -> str:
+    """请求自身的外部基址(协议+主机;隧道/代理头优先)。
+
+    OAuth 回调按访问来源构造(20261009 修复):本地访问回本地、公网访问回公网,
+    不再写死 PUBLIC_API_BASE——本地扫码不再被甩去公网隧道。
+    """
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    return f"{proto}://{host}" if host else ""
+
+
+@router.get("/providers")
+async def auth_providers() -> dict:
+    """登录页可用的第三方登录探测(无鉴权;未配置的按钮前端不再裸露 503 JSON)。"""
+    return {
+        "github": bool(settings.github_client_id and settings.github_client_secret),
+        "feishu": _feishu_configured(),
+    }
+
+
 # ── OAuth 公共:state + 建号/绑定(设计 018 §7-§8)──────────
 
 
@@ -123,18 +143,20 @@ GH_EMAILS = "https://api.github.com/user/emails"
 
 
 @router.get("/github")
-async def github_login() -> Response:
+async def github_login(request: Request) -> Response:
     """跳转 GitHub 授权(回调自动建号/绑定,同邮箱即绑定)。"""
     if not (settings.github_client_id and settings.github_client_secret):
         raise HTTPException(
             status_code=503,
             detail={"code": "not_configured", "message": "GitHub 登录未配置(缺 GITHUB_CLIENT_ID/SECRET)"},
         )
-    redirect = f"{(settings.public_api_base or '').rstrip('/')}/api/auth/github/callback"
+    from urllib.parse import quote as _q
+
+    redirect = f"{_request_base(request) or (settings.public_api_base or '').rstrip('/')}/api/auth/github/callback"
     state = new_oauth_state()
     resp = RedirectResponse(
         f"{GH_AUTHORIZE}?client_id={settings.github_client_id}"
-        f"&redirect_uri={redirect}&scope=read:user user:email&state={state}"
+        f"&redirect_uri={_q(redirect, safe='')}&scope=read:user user:email&state={state}"
     )
     # cookie 挂在最终返回的响应上(注入 response 参数对自定义响应不生效)
     set_oauth_state_cookie(resp, state)
@@ -153,7 +175,7 @@ async def github_callback(
         raise HTTPException(status_code=503, detail={"code": "not_configured", "message": "GitHub 登录未配置"})
     if not check_oauth_state(request, state):
         return RedirectResponse("/auth?error=oauth_state")
-    redirect_uri = f"{(settings.public_api_base or '').rstrip('/')}/api/auth/github/callback"
+    redirect_uri = f"{_request_base(request) or (settings.public_api_base or '').rstrip('/')}/api/auth/github/callback"
     async with httpx.AsyncClient(timeout=20) as hc:
         tok_resp = await hc.post(
             GH_TOKEN,
@@ -200,18 +222,20 @@ def _feishu_configured() -> bool:
 
 
 @router.get("/feishu")
-async def feishu_login() -> Response:
+async def feishu_login(request: Request) -> Response:
     """跳转飞书扫码授权页(passport)。"""
     if not _feishu_configured():
         raise HTTPException(
             status_code=503,
             detail={"code": "not_configured", "message": "飞书登录未配置(缺 FEISHU_APP_ID/SECRET)"},
         )
-    redirect = f"{(settings.public_api_base or '').rstrip('/')}/api/auth/feishu/callback"
+    from urllib.parse import quote as _q
+
+    redirect = f"{_request_base(request) or (settings.public_api_base or '').rstrip('/')}/api/auth/feishu/callback"
     state = new_oauth_state()
     resp = RedirectResponse(
         f"{FS_AUTHORIZE}?client_id={settings.feishu_app_id}"
-        f"&redirect_uri={redirect}&response_type=code&state={state}"
+        f"&redirect_uri={_q(redirect, safe='')}&response_type=code&state={state}"
     )
     set_oauth_state_cookie(resp, state)
     return resp
@@ -229,7 +253,7 @@ async def feishu_callback(
         raise HTTPException(status_code=503, detail={"code": "not_configured", "message": "飞书登录未配置"})
     if not check_oauth_state(request, state):
         return RedirectResponse("/auth?error=oauth_state")
-    redirect_uri = f"{(settings.public_api_base or '').rstrip('/')}/api/auth/feishu/callback"
+    redirect_uri = f"{_request_base(request) or (settings.public_api_base or '').rstrip('/')}/api/auth/feishu/callback"
     async with httpx.AsyncClient(timeout=20) as hc:
         tok_resp = await hc.post(
             FS_TOKEN,
