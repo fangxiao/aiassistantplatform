@@ -33,6 +33,7 @@ class TaskIn(BaseModel):
     auto_save_kb: bool = False
     target_kb_id: uuid.UUID | None = None  # P1:自动存库目标(空=回退首个可写库)
     notify: dict = {}  # 成熟度④:{webhook?, webhook_payload?: feishu|raw, email?}
+    feishu_chat_id: str | None = Field(default=None, max_length=120)  # M22 P2-3 应用内机器人推送目标
     enabled: bool = True
 
 
@@ -49,6 +50,7 @@ class TaskOut(BaseModel):
     auto_save_kb: bool
     target_kb_id: uuid.UUID | None
     notify: dict
+    feishu_chat_id: str | None = None
     enabled: bool
     last_run_at: datetime | None
     next_run_at: datetime | None
@@ -74,7 +76,8 @@ def _task_out(t: ScheduledTask) -> TaskOut:
         schedule_type=t.schedule_type, daily_at=t.daily_at,
         interval_minutes=t.interval_minutes, plugin_id=t.plugin_id,
         mounted_kb_ids=[uuid.UUID(k) for k in (t.mounted_kb_ids or [])],
-        auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id, notify=t.notify or {}, enabled=t.enabled,
+        auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id, notify=t.notify or {},
+        feishu_chat_id=t.feishu_chat_id, enabled=t.enabled,
         last_run_at=t.last_run_at, next_run_at=t.next_run_at,
         last_status=t.last_status, last_error=t.last_error, created_at=t.created_at,
     )
@@ -126,6 +129,7 @@ async def create_task(
             auto_save_kb=payload.auto_save_kb,
             target_kb_id=payload.target_kb_id,
             notify=payload.notify,
+            feishu_chat_id=payload.feishu_chat_id,
             enabled=payload.enabled,
         )
     except scheduler_service.SchedulerError as exc:
@@ -154,6 +158,7 @@ async def update_task(
     task.auto_save_kb = payload.auto_save_kb
     task.target_kb_id = payload.target_kb_id
     task.notify = payload.notify
+    task.feishu_chat_id = payload.feishu_chat_id
     task.enabled = payload.enabled
     from datetime import UTC as _UTC
 
@@ -225,3 +230,84 @@ async def latest_success_run(
         .limit(1)
     )
     return _run_out(row) if row is not None else None
+
+
+# ── 推送目标与测试(M30:任务推送体验)────────────────────────
+
+
+@router.get("/push-targets")
+async def push_targets(
+    db=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """飞书推送目标(已有会话,选择代替手填 chat_id)+ SMTP 状态。
+
+    push_to_chat 遍历在岗机器人试发,目标只需 chat_id;会话列表来自
+    channel_sessions(与机器人对话过的群/人)。
+    """
+    from sqlalchemy import Text as _Text
+    from sqlalchemy import select as _sel
+
+    from agentplatform.config import settings
+    from agentplatform.core.channel.model import ChannelSession
+    from agentplatform.core.session.model import Session as ChatSession
+    from agentplatform.core.auth.model import User as _U
+
+    rows = (
+        await db.execute(
+            _sel(ChannelSession, ChatSession, _U.email)
+            .join(ChatSession, ChannelSession.session_id == ChatSession.id)
+            .outerjoin(_U, ChatSession.user_id == _U.id.cast(_Text))
+            .where(ChannelSession.channel == "feishu")
+            .order_by(ChatSession.updated_at.desc())
+            .limit(50)
+        )
+    ).all()
+    chats = [
+        {
+            "chat_id": cs.chat_id,
+            "label": f"{s.title or '飞书会话'} · {email or '未知用户'}",
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+        }
+        for cs, s, email in rows
+    ]
+    from agentplatform.core.channel.feishu import _GATEWAYS
+
+    bots = [
+        {"app_id": g.get("app_id", ""), "name": g.get("name", "")}
+        for g in _GATEWAYS.values()
+        if g.get("client")
+    ]
+    return {
+        "feishu_chats": chats,
+        "feishu_bots_online": bots,
+        "smtp_configured": bool(settings.notify_smtp_host),
+    }
+
+
+@router.post("/push-test")
+async def push_test(
+    payload: dict,
+    user: User = Depends(get_current_user),
+) -> dict:
+    """向目标会话发一条测试卡片(限频 1 次/10 秒/用户)。"""
+    import time
+
+    chat_id = (payload or {}).get("chat_id", "")
+    if not chat_id:
+        raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "缺少 chat_id"})
+    now = time.monotonic()
+    last = _PUSH_TEST_TS.get(str(user.id), 0.0)
+    if now - last < 10:
+        raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": "测试太频繁,稍后再试"})
+    _PUSH_TEST_TS[str(user.id)] = now
+
+    from agentplatform.core.channel.feishu import push_to_chat
+
+    ok = await push_to_chat(chat_id, "✅ 推送测试", "AgentPlatform 定时任务推送通道正常。")
+    if not ok:
+        raise HTTPException(status_code=502, detail={"code": "push_failed", "message": "推送失败:会话不存在或机器人不在该会话中"})
+    return {"ok": True}
+
+
+_PUSH_TEST_TS: dict[str, float] = {}

@@ -784,6 +784,7 @@ function ChatHome() {
                       .then(() => {
                         setPromotedTaskIds((s) => new Set(s).add(current.id));
                         setTaskToast("⭐ 已保存为任务(工作台任务中心可管理)");
+                        window.dispatchEvent(new Event("ap:tasks-changed"));
                       })
                       .catch((err: unknown) => {
                         setTaskToast(

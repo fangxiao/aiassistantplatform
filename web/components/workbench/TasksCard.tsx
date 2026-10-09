@@ -101,7 +101,13 @@ export function TasksCard({
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => void refresh(), 60_000);
-    return () => clearInterval(timer);
+    // M30:定时任务增删改/会话提升后即时刷新(60s 轮询兜底)
+    const onChanged = () => void refresh();
+    window.addEventListener("ap:tasks-changed", onChanged);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("ap:tasks-changed", onChanged);
+    };
   }, [refresh]);
 
   const patchTask = useCallback(

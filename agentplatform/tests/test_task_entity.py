@@ -115,3 +115,61 @@ async def test_isolation_404(client, session):
     assert r.status_code == 404
     r2 = await client.delete(f"/api/tasks/{uuid.uuid4()}")
     assert r2.status_code == 404
+
+
+# ── M30:推送目标/测试/feishu_chat_id 透传 ────────────────────
+
+
+async def test_push_targets_lists_feishu_chats(client, session):
+    from agentplatform.core.channel.model import ChannelSession
+    from agentplatform.core.session.model import Session as ChatSession
+
+    user, sess = await _ctx(session, "push1@test.dev")
+    session.add(ChannelSession(channel="feishu", chat_id="oc_test123", session_id=sess.id))
+    await session.commit()
+
+    r = await client.get("/api/scheduler/push-targets")
+    assert r.status_code == 200
+    body = r.json()
+    ids = [c["chat_id"] for c in body["feishu_chats"]]
+    assert "oc_test123" in ids
+    label = next(c["label"] for c in body["feishu_chats"] if c["chat_id"] == "oc_test123")
+    assert "评审会话" in label
+    assert "smtp_configured" in body
+
+
+async def test_push_test_rate_limited(client, session, monkeypatch):
+    from agentplatform.api import scheduler as sched_api
+
+    calls = []
+
+    async def fake_push(chat_id, title, text):
+        calls.append(chat_id)
+        return True
+
+    monkeypatch.setattr("agentplatform.core.channel.feishu.push_to_chat", fake_push)
+    await _ctx(session, "push2@test.dev")
+
+    r1 = await client.post("/api/scheduler/push-test", json={"chat_id": "oc_x"})
+    assert r1.status_code == 200 and r1.json()["ok"] is True
+    r2 = await client.post("/api/scheduler/push-test", json={"chat_id": "oc_x"})
+    assert r2.status_code == 429
+
+
+async def test_task_create_carries_feishu_chat_id(client, session):
+    from agentplatform.core.scheduler.model import ScheduledTask
+    from sqlalchemy import select
+
+    user, _ = await _ctx(session, "push3@test.dev")
+    r = await client.post(
+        "/api/scheduler/tasks",
+        json={
+            "name": "推送任务", "kind": "custom", "prompt": "x",
+            "schedule_type": "daily", "daily_at": "09:00",
+            "feishu_chat_id": "oc_target",
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["feishu_chat_id"] == "oc_target"
+    row = (await session.scalars(select(ScheduledTask).where(ScheduledTask.name == "推送任务"))).first()
+    assert row.feishu_chat_id == "oc_target"

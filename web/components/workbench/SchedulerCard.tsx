@@ -2,6 +2,11 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
+
+/** 任务变更事件(M30):定时任务增删改/手动运行后广播,任务中心即时刷新 */
+export function notifyTasksChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("ap:tasks-changed"));
+}
 import { Card, Placeholder } from "./WorkbenchView";
 import type { KbInfo } from "../../lib/types";
 
@@ -18,6 +23,7 @@ interface SchedTask {
   interval_minutes: number | null;
   auto_save_kb: boolean;
   target_kb_id: string | null;
+  feishu_chat_id?: string | null;
   notify?: Record<string, any>;
   enabled: boolean;
   last_run_at: string | null;
@@ -86,6 +92,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
   const toggleEnabled = async (t: SchedTask) => {
     try {
       await apiPatch(`/scheduler/tasks/${t.id}`, { ...t, enabled: !t.enabled });
+      notifyTasksChanged();
       await refresh();
     } catch (err) {
       alert(`操作失败: ${err instanceof Error ? err.message : err}`);
@@ -96,6 +103,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
     setRunning((prev) => new Set(prev).add(t.id));
     try {
       await apiPost(`/scheduler/tasks/${t.id}/run`, {});
+      notifyTasksChanged();
       await refresh();
     } catch (err) {
       alert(`触发失败: ${err instanceof Error ? err.message : err}`);
@@ -298,6 +306,13 @@ function TaskFormModal({
   const [channelOptions, setChannelOptions] = useState<
     { id: string; name: string; platform: boolean }[]
   >([]);
+  const [pushTargets, setPushTargets] = useState<{
+    feishu_chats: { chat_id: string; label: string }[];
+    feishu_bots_online: { app_id: string; name: string }[];
+    smtp_configured: boolean;
+  } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
   useEffect(() => {
     (async () => {
       try {
@@ -305,8 +320,26 @@ function TaskFormModal({
       } catch {
         setChannelOptions([]);
       }
+      try {
+        setPushTargets(await apiGet("/scheduler/push-targets"));
+      } catch {
+        setPushTargets(null);
+      }
     })();
   }, []);
+  const testPush = async () => {
+    if (!form.feishu_chat_id) return;
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      await apiPost("/scheduler/push-test", { chat_id: form.feishu_chat_id });
+      setTestMsg("✅ 已发送测试消息,请到飞书查看");
+    } catch (err) {
+      setTestMsg(`❌ ${err instanceof Error ? err.message : "推送失败"}`);
+    } finally {
+      setTesting(false);
+    }
+  };
   const [form, setForm] = useState(() => ({
     name: task?.name ?? "",
     kind: task?.kind ?? "briefing",
@@ -320,6 +353,7 @@ function TaskFormModal({
     notify_webhook: (task?.notify?.webhook as string) ?? "",
     notify_webhook_payload: (task?.notify?.webhook_payload as string) ?? "feishu",
     notify_email: (task?.notify?.email as string) ?? "",
+    feishu_chat_id: task?.feishu_chat_id ?? "",
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -342,6 +376,7 @@ function TaskFormModal({
           ...(form.notify_webhook ? { webhook: form.notify_webhook, webhook_payload: form.notify_webhook_payload } : {}),
           ...(form.notify_email ? { email: form.notify_email } : {}),
         },
+        feishu_chat_id: form.feishu_chat_id || null,
         enabled: task?.enabled ?? true,
       };
       if (isEdit && task) {
@@ -349,6 +384,7 @@ function TaskFormModal({
       } else {
         await apiPost("/scheduler/tasks", body);
       }
+      notifyTasksChanged();
       await onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -503,6 +539,44 @@ function TaskFormModal({
               </div>
             )}
             <label className="block">
+              <span className="mb-1 block text-[10px] text-slate-500">
+                飞书机器人(平台在岗机器人直推,从已有会话选择)
+              </span>
+              <div className="flex gap-1.5">
+                <select
+                  value={form.feishu_chat_id}
+                  onChange={(e) => setForm((f) => ({ ...f, feishu_chat_id: e.target.value }))}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-indigo-400"
+                >
+                  <option value="">不推送</option>
+                  {(pushTargets?.feishu_chats ?? []).map((c) => (
+                    <option key={c.chat_id} value={c.chat_id}>{c.label}</option>
+                  ))}
+                  {form.feishu_chat_id && !(pushTargets?.feishu_chats ?? []).some((c) => c.chat_id === form.feishu_chat_id) && (
+                    <option value={form.feishu_chat_id}>{form.feishu_chat_id}(手填)</option>
+                  )}
+                </select>
+                <input
+                  value={form.feishu_chat_id}
+                  onChange={(e) => setForm((f) => ({ ...f, feishu_chat_id: e.target.value }))}
+                  placeholder="或手填 chat_id"
+                  className="w-32 shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 font-mono text-[10px] outline-none focus:border-indigo-400"
+                />
+                <button
+                  type="button"
+                  disabled={!form.feishu_chat_id || testing}
+                  onClick={() => void testPush()}
+                  className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[10px] font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-40"
+                >
+                  {testing ? "发送中…" : "测试"}
+                </button>
+              </div>
+              {(pushTargets?.feishu_bots_online.length ?? 0) === 0 && (
+                <span className="mt-1 block text-[10px] text-amber-600">⚠ 平台无在岗飞书机器人,推送不可用</span>
+              )}
+              {testMsg && <span className="mt-1 block text-[10px] text-slate-500">{testMsg}</span>}
+            </label>
+            <label className="block">
               <span className="mb-1 block text-[10px] text-slate-500">Webhook(飞书自定义机器人直接粘贴地址)</span>
               <input
                 value={form.notify_webhook}
@@ -525,7 +599,7 @@ function TaskFormModal({
               </label>
             )}
             <label className="mt-2 block">
-              <span className="mb-1 block text-[10px] text-slate-500">邮件(需平台配置 SMTP)</span>
+              <span className="mb-1 block text-[10px] text-slate-500">邮件{pushTargets && !pushTargets.smtp_configured ? "(平台未配置 SMTP,发送不会生效)" : ""}</span>
               <input
                 type="email"
                 value={form.notify_email}
