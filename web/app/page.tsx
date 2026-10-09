@@ -599,8 +599,14 @@ function ChatHome() {
             }
             setShowNewSessionModal(true);
           }}
-          onContinue={(sessionId) => {
-            const s = sessions.find((x) => x.id === sessionId);
+          onContinue={async (sessionId) => {
+            // 定时任务新建的执行会话可能不在前端快照里(20261009 E2E 发现):
+            // 找不到时先拉最新列表再选,避免静默落回当前会话
+            let s = sessions.find((x) => x.id === sessionId);
+            if (!s) {
+              const list = await refreshSessions();
+              s = list.find((x) => x.id === sessionId);
+            }
             if (s) void selectSession(s);
             switchView("chat");
           }}

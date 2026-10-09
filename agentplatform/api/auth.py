@@ -70,7 +70,7 @@ async def register(
     from agentplatform.config import settings
 
     ip = _client_ip(request)
-    if not allow_ip_auth(ip) or not allow_ip_register(ip):
+    if not settings.e2e_no_ratelimit and (not allow_ip_auth(ip) or not allow_ip_register(ip)):
         raise HTTPException(
             status_code=429, detail={"code": "rate_limited", "message": "操作过于频繁,请稍后再试"}
         )
@@ -112,9 +112,10 @@ async def login(
         clear_login_fail,
         record_login_fail,
     )
+    from agentplatform.config import settings
 
     ip = _client_ip(request)
-    if not allow_ip_auth(ip):
+    if not settings.e2e_no_ratelimit and not allow_ip_auth(ip):
         raise HTTPException(
             status_code=429, detail={"code": "rate_limited", "message": "尝试过于频繁,请 1 分钟后再试"}
         )

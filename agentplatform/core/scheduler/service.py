@@ -297,6 +297,12 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             if not output:
                 raise RuntimeError("agent 未返回内容")
 
+            # 产出落会话(20261009 E2E 发现):非流式 run_agent 只返回文本不落
+            # assistant 消息——执行现场此前只有指令没有产出,点开看不到结果
+            from agentplatform.core.message.service import save_assistant_message
+
+            await save_assistant_message(db, chat_sess.id, output)
+
             run.output = output
             run.session_id = chat_sess.id
             run.status = "success"

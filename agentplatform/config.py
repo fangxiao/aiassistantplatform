@@ -167,6 +167,8 @@ class Settings(BaseSettings):
     notify_smtp_user: str = ""
     notify_smtp_pass: str = ""
     notify_from: str = ""
+    # E2E 测试旁路(20261009):本地/测试环境关闭注册登录限频;生产保持 False
+    e2e_no_ratelimit: bool = False
     kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 
