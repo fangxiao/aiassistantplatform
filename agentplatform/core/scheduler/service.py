@@ -128,6 +128,40 @@ async def delete_task(db: AsyncSession, user_id: str, task_id: uuid.UUID) -> boo
     return True
 
 
+async def reap_zombie_runs(db: AsyncSession) -> int:
+    """僵尸 run 清道夫(20261009 事故):running 但已结束(finished_at 非空)或
+    超时 2 倍仍无终态的 run 一律判失败;同步任务 last_status。返回修复数。
+
+    成因:后台 task 曾被 GC 回收 → CancelledError 逃逸 except → 只记 finished_at。
+    根因已修(强引用),此处兜底历史数据与未知逃逸路径。
+    """
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from agentplatform.config import settings as _settings
+
+    cutoff = _dt.now(_UTC) - _td(seconds=_settings.scheduler_run_timeout_s * 2)
+    zombies = (
+        await db.scalars(
+            select(TaskRun).where(
+                TaskRun.status == "running",
+                (TaskRun.finished_at.isnot(None)) | (TaskRun.started_at < cutoff),
+            )
+        )
+    ).all()
+    for z in zombies:
+        z.status = "failed"
+        z.error = (z.error or "")[:400] or "执行中断(僵尸 run 清道夫标记)"
+        task = await db.get(ScheduledTask, z.task_id)
+        if task is not None and task.last_status == "running":
+            task.last_status = "failed"
+            task.last_error = z.error
+    if zombies:
+        await db.commit()
+    return len(zombies)
+
+
 async def list_runs(db: AsyncSession, user_id: str, task_id: uuid.UUID, limit: int = 10) -> list[TaskRun]:
     task = await get_task(db, user_id, task_id)
     if task is None:
@@ -160,11 +194,17 @@ async def trigger_run(db: AsyncSession, task: ScheduledTask) -> TaskRun:
     await db.flush()
     task_id, run_id = task.id, run.id
     t = asyncio.create_task(_execute_run(task_id, run_id))
+    _BG_RUN_TASKS.add(t)  # 强引用:事件循环仅持弱引用,缺引用会被 GC 中途取消(20261009 僵尸 run 事故)
     t.add_done_callback(_log_task_exception)
     return run
 
 
+# 后台执行任务强引用集合(完成即弃;防 GC 回收导致 CancelledError)
+_BG_RUN_TASKS: set[asyncio.Task] = set()
+
+
 def _log_task_exception(task: asyncio.Task) -> None:
+    _BG_RUN_TASKS.discard(task)
     if not task.cancelled() and task.exception() is not None:
         logger.error("scheduler: 任务执行异常 %s", task.exception())
 
@@ -193,6 +233,13 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             mounted = [uuid.UUID(k) for k in (task.mounted_kb_ids or [])]
             chat_sess = await create_session(db, plugin_id=task.plugin_id, user_id=str(task.user_id),
                                              mounted_kb_ids=mounted)
+            # 会话即绑 + 提交检查点:运行中任务中心即可点开执行现场(M30 反馈)
+            run.session_id = chat_sess.id
+            await db.commit()
+            task = await db.get(ScheduledTask, task_id)
+            run = await db.get(TaskRun, run_id)
+            if task is None or run is None:
+                return
 
             # 2. 组装资源与权限(与会话链路同规则)
             plugin = await get_plugin(db, task.plugin_id) if task.plugin_id else None
@@ -280,7 +327,7 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             await register_task_report(
                 db,
                 owner_id=str(task.user_id),
-                title=f"{task.name} · {_dt.now().strftime('%m-%d')}",
+                title=f"{task.name} · {_dt.now(UTC).strftime('%m-%d')}",
                 chat_session_id=str(chat_sess.id),
                 task_run_id=str(run.id),
             )
@@ -299,6 +346,13 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run = await db.get(TaskRun, run_id)
             if task is not None and run is not None:
                 run.finished_at = datetime.now(UTC)
+                # 自愈:except Exception 抓不住 CancelledError 等逃逸路径——
+                # 走到 finally 仍是 running 说明从未落终态,一律判失败并留痕
+                if run.status == "running":
+                    run.status = "failed"
+                    run.error = (run.error or "")[:400] or "执行中断(后台任务被取消/回收,无终态)"
+                    task.last_status = "failed"
+                    task.last_error = run.error
                 task.last_run_at = run.finished_at
                 task.next_run_at = compute_next_run(task, datetime.now(UTC))
                 await db.commit()

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from agentplatform.config import settings
 from agentplatform.core.scheduler.model import ScheduledTask, TaskRun
-from agentplatform.core.scheduler.service import compute_next_run, trigger_run
+from agentplatform.core.scheduler.service import trigger_run
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,10 @@ async def _tick() -> int:
 
     triggered = 0
     async with SessionLocal() as db:
+        # 僵尸清道夫先行:僵尸 run 会永久占用并发额度(20261009 事故)
+        from agentplatform.core.scheduler.service import reap_zombie_runs
+
+        await reap_zombie_runs(db)
         # 全局并发上限:已有运行中 run 数
         running = await db.scalar(select(func.count()).select_from(TaskRun).where(TaskRun.status == "running"))
         slots = max(0, settings.scheduler_max_concurrent - (running or 0))
@@ -68,7 +72,7 @@ async def _loop() -> None:
             await _tick()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001  调度循环永不退出
+        except Exception:
             logger.exception("scheduler: 调度 tick 异常")
         await asyncio.sleep(settings.scheduler_tick_seconds)
 

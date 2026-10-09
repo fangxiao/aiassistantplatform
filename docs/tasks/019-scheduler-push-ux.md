@@ -21,3 +21,25 @@
 
 - pytest 3 用例(目标列表/限频/字段透传),全量 454 绿;web tsc 绿
 - E2E(live):push-targets 返回真实会话;push-test 真实投递 studyassistant 群成功
+
+## 事故记录(20261009 晚):僵尸 run
+
+**现象**:用户任务「跑一次」后永久"正在运行中",无终态/无推送/无产出,任务行置灰。
+
+**根因**:`trigger_run` 的 `asyncio.create_task` 未保存强引用——事件循环对 task 仅持
+弱引用,**后台执行体可能被 GC 中途回收 → CancelledError**,而 `except Exception`
+抓不住它(BaseException)→ 直接跳 finally 只记 finished_at,status 永远 running。
+两条僵尸 run(3/9 分钟随机中断)与全部观察吻合:无日志、error 空、finished_at 有值。
+
+**修复**:
+1. 根治:`_BG_RUN_TASKS` 强引用集合(done_callback 弃引)
+2. finally 自愈:走到终局仍 running → 判 failed 留痕(兜底一切逃逸路径)
+3. 僵尸清道夫:tick 每轮先修历史坏数据(僵尸会永久占满并发额度)
+4. 会话即绑:run 开始就写 session_id 并提交——运行中任务行可点开执行现场
+
+**测试补强**:reaper 2 用例(僵尸判失败/健康 run 不动),全量 458 绿;
+E2E 真实链复验(success + 飞书推送 + 交付物 + 行可点)。
+
+**教训(对"测试用例缺失"怀疑的回应)**:此类 bug 属「真实时序 + 运行时生命周期」
+类,单元测试结构性抓不住——需要:① 用户旅程级 E2E(Playwright,待办 C2);
+② 长跑冒烟(定时任务真实连跑多轮)。已列入补强计划。

@@ -217,3 +217,69 @@ async def test_panel_scheduled_entity_has_latest_session(client, session):
     item = next(t for t in panel["tasks"] if t["title"] == "看执行任务")
     assert item["scheduled_task_id"] == str(sched.id)
     assert item["latest_session_id"] == str(run_sess.id)
+
+
+# ── 僵尸 run 自愈与清道夫(20261009 事故回归)────────────────
+
+
+async def test_reap_zombie_runs_marks_failed(session):
+    """finished 但 status=running 的僵尸 → 判失败并同步任务状态。"""
+    from datetime import UTC, datetime, timedelta
+
+    from agentplatform.core.scheduler.model import TaskRun
+    from agentplatform.core.scheduler.service import reap_zombie_runs
+
+    user, _ = await _ctx(session, "zombie1@test.dev")
+    sched = await create_scheduled(
+        session, str(user.id),
+        name="僵尸任务", kind="custom", prompt="x", schedule_type="daily", daily_at="05:00",
+    )
+    await session.flush()
+    session.add(
+        TaskRun(
+            task_id=sched.id, status="running",
+            started_at=datetime.now(UTC) - timedelta(minutes=30),
+            finished_at=datetime.now(UTC) - timedelta(minutes=27),  # 已结束但无终态
+        )
+    )
+    sched.last_status = "running"
+    await session.commit()
+
+    from sqlalchemy import select as _sel
+
+    fixed = await reap_zombie_runs(session)
+    assert fixed == 1
+    run = (await session.scalars(_sel(TaskRun))).first()
+    assert run.status == "failed"
+    assert "僵尸" in run.error or "中断" in run.error
+    await session.refresh(sched)
+    assert sched.last_status == "failed"
+
+
+async def test_reap_ignores_healthy_runs(session):
+    """正常运行中(started 不久、无 finished_at)与已终态的 run 不动。"""
+    from datetime import UTC, datetime
+
+    from agentplatform.core.scheduler.model import TaskRun
+    from agentplatform.core.scheduler.service import reap_zombie_runs
+
+    user, _ = await _ctx(session, "zombie2@test.dev")
+    sched = await create_scheduled(
+        session, str(user.id),
+        name="健康任务", kind="custom", prompt="x", schedule_type="daily", daily_at="05:00",
+    )
+    await session.flush()
+    session.add(TaskRun(task_id=sched.id, status="running", started_at=datetime.now(UTC)))
+    session.add(
+        TaskRun(
+            task_id=sched.id, status="success",
+            started_at=datetime.now(UTC), finished_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+    from sqlalchemy import select as _sel2
+
+    assert await reap_zombie_runs(session) == 0
+    statuses = sorted(r.status for r in (await session.scalars(_sel2(TaskRun))).all())
+    assert statuses == ["running", "success"]
