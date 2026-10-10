@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   clickStable,
+  createWeeklyTask,
   createScheduledTask,
   loginViaToken,
   registerAndLogin,
@@ -144,4 +145,16 @@ test("旅程 10:推送区渲染(目标下拉 + 测试按钮,不真推)", async (
   // 测试按钮存在(未选目标时禁用)
   await expect(page.getByRole("button", { name: "测试" }).first()).toBeDisabled();
   await page.getByRole("button", { name: "取消" }).click();
+});
+
+test("旅程 11:每周任务(周报)创建 → 显示每周周一(20261010 对标补齐)", async ({ page }) => {
+  await loginViaToken(page);
+  await createWeeklyTask(page, "E2E周报任务");
+  await expect(page.locator('[data-task-name="E2E周报任务"]').getByText(/每周一/)).toBeVisible({
+    timeout: 10_000,
+  });
+  const target = taskRow(page, "E2E周报任务");
+  page.once("dialog", (d) => d.accept());
+  await target.getByRole("button", { name: "删除" }).click();
+  await expect(page.locator('[data-task-name="E2E周报任务"]')).toBeHidden({ timeout: 10_000 });
 });

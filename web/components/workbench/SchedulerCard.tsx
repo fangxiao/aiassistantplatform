@@ -20,6 +20,7 @@ interface SchedTask {
   prompt: string;
   schedule_type: string;
   daily_at: string | null;
+  weekly_day: number | null;
   interval_minutes: number | null;
   auto_save_kb: boolean;
   target_kb_id: string | null;
@@ -141,8 +142,13 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
     }
   };
 
+  const WEEK_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const freqLabel = (t: SchedTask) =>
-    t.schedule_type === "daily" ? `每天 ${t.daily_at ?? "--:--"}` : `每 ${t.interval_minutes} 分钟`;
+    t.schedule_type === "daily"
+      ? `每天 ${t.daily_at ?? "--:--"}`
+      : t.schedule_type === "weekly"
+        ? `每${WEEK_NAMES[(t.weekly_day ?? 1) - 1]} ${t.daily_at ?? "--:--"}`
+        : `每 ${t.interval_minutes} 分钟`;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-xs">
@@ -271,6 +277,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
                             </span>
                             <span className={r.status === "success" ? "font-medium text-emerald-600" : "font-medium text-rose-600"}>
                               {r.status === "success" ? "成功" : r.status === "failed" ? "失败" : "运行中"}
+                              {(r as any).attempt === 2 ? <span className="ml-1 text-amber-600" title="首次失败后自动重试">↻</span> : null}
                             </span>
                             {r.session_id && (
                               <button
@@ -367,6 +374,7 @@ function TaskFormModal({
     kind: task?.kind ?? "briefing",
     prompt: task?.prompt ?? "",
     schedule_type: task?.schedule_type ?? "daily",
+    weekly_day: task?.weekly_day ?? 1,
     daily_at: task?.daily_at ?? "08:00",
     interval_minutes: String(task?.interval_minutes ?? 60),
     auto_save_kb: task?.auto_save_kb ?? false,
@@ -389,7 +397,8 @@ function TaskFormModal({
         kind: form.kind,
         prompt: form.prompt,
         schedule_type: form.schedule_type,
-        daily_at: form.schedule_type === "daily" ? form.daily_at : null,
+        daily_at: form.schedule_type === "daily" || form.schedule_type === "weekly" ? form.daily_at : null,
+        weekly_day: form.schedule_type === "weekly" ? form.weekly_day : null,
         interval_minutes: form.schedule_type === "interval" ? parseInt(form.interval_minutes, 10) || 60 : null,
         auto_save_kb: form.auto_save_kb,
         target_kb_id: form.target_kb_id || null,
@@ -488,10 +497,25 @@ function TaskFormModal({
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
               >
                 <option value="daily">每天固定时刻</option>
+                <option value="weekly">每周固定星期</option>
                 <option value="interval">固定间隔</option>
               </select>
             </label>
-            {form.schedule_type === "daily" ? (
+            {form.schedule_type === "weekly" && (
+              <label className="block flex-1">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">星期</span>
+                <select
+                  value={String(form.weekly_day)}
+                  onChange={(e) => setForm((f) => ({ ...f, weekly_day: parseInt(e.target.value, 10) }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                    <option key={d} value={d}>{["周一", "周二", "周三", "周四", "周五", "周六", "周日"][d - 1]}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {form.schedule_type === "daily" || form.schedule_type === "weekly" ? (
               <label className="block flex-1">
                 <span className="mb-1 block text-[11px] font-semibold text-slate-600">执行时刻</span>
                 <input

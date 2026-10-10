@@ -27,6 +27,7 @@ class TaskIn(BaseModel):
     prompt: str = Field(default="", max_length=2000)  # custom 必填;模板任务可填补充要求
     schedule_type: str = "daily"
     daily_at: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    weekly_day: int | None = Field(default=None, ge=1, le=7)  # weekly 调度:1-7(周一到周日)
     interval_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 30)
     plugin_id: uuid.UUID | None = None
     mounted_kb_ids: list[uuid.UUID] = []
@@ -44,6 +45,7 @@ class TaskOut(BaseModel):
     prompt: str
     schedule_type: str
     daily_at: str | None
+    weekly_day: int | None = None
     interval_minutes: int | None
     plugin_id: uuid.UUID | None
     mounted_kb_ids: list[uuid.UUID]
@@ -60,6 +62,7 @@ class TaskOut(BaseModel):
 
 
 class RunOut(BaseModel):
+    attempt: int = 1
     id: uuid.UUID
     task_id: uuid.UUID
     started_at: datetime
@@ -76,7 +79,8 @@ def _task_out(t: ScheduledTask) -> TaskOut:
         schedule_type=t.schedule_type, daily_at=t.daily_at,
         interval_minutes=t.interval_minutes, plugin_id=t.plugin_id,
         mounted_kb_ids=[uuid.UUID(k) for k in (t.mounted_kb_ids or [])],
-        auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id, notify=t.notify or {},
+        auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id,
+        weekly_day=t.weekly_day, notify=t.notify or {},
         feishu_chat_id=t.feishu_chat_id, enabled=t.enabled,
         last_run_at=t.last_run_at, next_run_at=t.next_run_at,
         last_status=t.last_status, last_error=t.last_error, created_at=t.created_at,
@@ -87,6 +91,7 @@ def _run_out(r) -> RunOut:
     return RunOut(
         id=r.id, task_id=r.task_id, started_at=r.started_at, finished_at=r.finished_at,
         status=r.status, output=r.output, session_id=r.session_id, error=r.error,
+        attempt=getattr(r, "attempt", 1) or 1,
     )
 
 
@@ -123,6 +128,7 @@ async def create_task(
             prompt=payload.prompt,
             schedule_type=payload.schedule_type,
             daily_at=payload.daily_at,
+            weekly_day=payload.weekly_day,
             interval_minutes=payload.interval_minutes,
             plugin_id=payload.plugin_id,
             mounted_kb_ids=[str(k) for k in payload.mounted_kb_ids],
@@ -152,6 +158,7 @@ async def update_task(
     task.prompt = payload.prompt
     task.schedule_type = payload.schedule_type
     task.daily_at = payload.daily_at
+    task.weekly_day = payload.weekly_day
     task.interval_minutes = payload.interval_minutes
     task.plugin_id = payload.plugin_id
     task.mounted_kb_ids = [str(k) for k in payload.mounted_kb_ids]

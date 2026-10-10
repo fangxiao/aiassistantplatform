@@ -36,20 +36,43 @@ def compute_next_run(task: ScheduledTask, now: datetime) -> datetime | None:
             return None
         return now + timedelta(minutes=minutes)
     if task.schedule_type == "daily":
-        if not task.daily_at or ":" not in task.daily_at:
+        nxt = _next_local_time(now, task.daily_at)
+        if nxt is None:
             return None
-        try:
-            hh, mm = (int(p) for p in task.daily_at.split(":", 1))
-        except ValueError:
+        return nxt
+    if task.schedule_type == "weekly":
+        # weekly_day: 1-7(周一到周日);时刻复用 daily_at(本地时区)
+        if not task.weekly_day or not (1 <= task.weekly_day <= 7):
             return None
-        # daily_at 为服务器本地时区时刻(用户视角);now 为 UTC——先转本地再算,
-        # 否则 16:20 本地会变成 UTC16:20 = 次日 00:20(时区 bug 修复)
+        nxt = _next_local_time(now, task.daily_at, force_future=False)
+        if nxt is None:
+            return None
         local = now.astimezone()
-        candidate = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        days_ahead = (task.weekly_day - 1 - local.weekday()) % 7
+        candidate = nxt + timedelta(days=days_ahead)
         if candidate <= local:
-            candidate += timedelta(days=1)
+            candidate += timedelta(days=7)
         return candidate.astimezone(UTC)
     return None
+
+
+def _next_local_time(now: datetime, hhmm: str | None, force_future: bool = True) -> datetime | None:
+    """本地时区的下一个 hh:mm 时刻;force_future=False 时返回今天的该时刻(可能已过)。
+
+    daily_at 为服务器本地时区时刻(用户视角);now 为 UTC——先转本地再算,
+    否则 16:20 本地会变成 UTC16:20 = 次日 00:20(时区 bug 修复)。
+    """
+    if not hhmm or ":" not in hhmm:
+        return None
+    try:
+        hh, mm = (int(p) for p in hhmm.split(":", 1))
+    except ValueError:
+        return None
+    local = now.astimezone()
+    candidate = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if force_future and candidate <= local:
+        candidate += timedelta(days=1)
+    return candidate
 
 
 # ---------------------------------------------------------------- 任务 CRUD
@@ -69,6 +92,8 @@ async def create_task(db: AsyncSession, user_id: str, **kwargs) -> ScheduledTask
         raise SchedulerError("自定义任务必须填写任务指令(prompt)")
     if task.schedule_type == "daily" and not task.daily_at:
         raise SchedulerError("每天调度必须指定执行时刻(daily_at)")
+    if task.schedule_type == "weekly" and not (task.weekly_day and task.daily_at):
+        raise SchedulerError("每周调度必须指定星期(weekly_day)与执行时刻(daily_at)")
     if task.schedule_type == "interval" and not (task.interval_minutes and task.interval_minutes > 0):
         raise SchedulerError("间隔调度必须指定正整数分钟数")
     task.next_run_at = compute_next_run(task, datetime.now(UTC))
@@ -296,20 +321,44 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             from agentplatform.core.memory import service as memory_service
 
             memories = await memory_service.memories_for_prompt(db, str(task.user_id))
-            result = await asyncio.wait_for(
-                run_agent(
-                    db,
-                    client,
-                    resource_ids=resource_ids,
-                    user_message=prompt,
-                    history=[],
-                    owner_id=str(task.user_id),
-                    allowed_kb_ids=allowed_kb_ids,
-                    memories=memories,
-                    chat_session_id=str(chat_sess.id),
-                ),
-                timeout=settings.scheduler_run_timeout_s,
-            )
+
+            # M32(20261010 对标):失败自动重试一次——上游审核误杀/限流/网络抖动
+            # 等瞬时错误占失败大头,重试一次成功率显著(WorkBuddy/千问同款行为);
+            # attempt 落 run 行,UI 可见"重试过"
+            async def _run_once():
+                return await asyncio.wait_for(
+                    run_agent(
+                        db,
+                        client,
+                        resource_ids=resource_ids,
+                        user_message=prompt,
+                        history=[],
+                        owner_id=str(task.user_id),
+                        allowed_kb_ids=allowed_kb_ids,
+                        memories=memories,
+                        chat_session_id=str(chat_sess.id),
+                    ),
+                    timeout=settings.scheduler_run_timeout_s,
+                )
+
+            result = None
+            last_exc: Exception | None = None
+            for attempt in (1, 2):
+                run.attempt = attempt
+                try:
+                    result = await _run_once()
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt == 1:
+                        logger.warning(
+                            "定时任务第 1 次执行失败,20s 后自动重试 task=%s: %s",
+                            task.id, str(exc)[:200],
+                        )
+                        await asyncio.sleep(20)
+            if result is None:
+                assert last_exc is not None
+                raise last_exc
             output = (result.text or "").strip()
             if not output:
                 raise RuntimeError("agent 未返回内容")

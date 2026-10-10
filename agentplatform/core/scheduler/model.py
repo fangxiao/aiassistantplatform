@@ -28,6 +28,7 @@ class ScheduledTask(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")  # custom 必填;模板任务可附补充要求
     schedule_type: Mapped[str] = mapped_column(Text, nullable=False, default="daily")  # daily / interval
     daily_at: Mapped[str | None] = mapped_column(Text, nullable=True)  # "HH:MM"(服务器时区)
+    weekly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)  # weekly 调度:1-7(周一到周日)
     interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # 空=平台通用助手
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # 空=运行时取可见库
@@ -68,6 +69,7 @@ class TaskRun(Base):
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="running")  # running/success/failed
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # 执行尝试次数(失败自动重试 1 次)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -317,3 +317,54 @@ def test_friendly_run_error_mapping():
     assert "超时" in _friendly_run_error("asyncio.TimeoutError: timed out")
     unknown = "RuntimeError: 某未知问题"
     assert _friendly_run_error(unknown) == unknown
+
+
+# ── M32:每周调度 + 失败自动重试 ──────────────────────────────
+
+
+async def test_weekly_schedule_next_run(session):
+    """weekly:周三 15:00,在周三 14:00 视角 → 今天;周三 16:00 视角 → 下周三。"""
+    from datetime import UTC, datetime, timedelta
+    from datetime import datetime as _dt
+
+    from agentplatform.core.scheduler.model import ScheduledTask
+    from agentplatform.core.scheduler.service import compute_next_run
+
+    task = ScheduledTask(
+        user_id="u", name="周报", kind="weekly_report", prompt="",
+        schedule_type="weekly", weekly_day=3, daily_at="15:00",  # 周三
+    )
+    # 本地时区构造(服务器本地)周三 14:00 与 16:00
+    local_tz = datetime.now(UTC).astimezone().tzinfo
+    wed_1400 = _dt(2026, 10, 7, 14, 0, tzinfo=local_tz)  # 2026-10-07 是周三
+    wed_1600 = _dt(2026, 10, 7, 16, 0, tzinfo=local_tz)
+    n1 = compute_next_run(task, wed_1400.astimezone(UTC))
+    n2 = compute_next_run(task, wed_1600.astimezone(UTC))
+    assert n1 is not None and n2 is not None
+    assert n1.astimezone(local_tz).date() == wed_1400.date()  # 今天(还没到点)
+    assert n2.astimezone(local_tz).date() == _dt(2026, 10, 14).date()  # 下周三
+
+
+async def test_weekly_task_crud_roundtrip(client, session):
+    user, _ = await _ctx(session, "weekly1@test.dev")
+    r = await client.post(
+        "/api/scheduler/tasks",
+        json={
+            "name": "E2E周报", "kind": "weekly_report", "prompt": "",
+            "schedule_type": "weekly", "weekly_day": 1, "daily_at": "09:00",
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    body = r.json()
+    assert body["weekly_day"] == 1
+    assert body["next_run_at"] is not None
+
+
+async def test_weekly_requires_day_and_time(client, session):
+    await _ctx(session, "weekly2@test.dev")
+    r = await client.post(
+        "/api/scheduler/tasks",
+        json={"name": "bad", "kind": "custom", "prompt": "x",
+              "schedule_type": "weekly", "daily_at": "09:00"},  # 缺 weekly_day
+    )
+    assert r.status_code == 400

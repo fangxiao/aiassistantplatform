@@ -81,6 +81,17 @@ export async function loginViaToken(page: Page) {
   await expect(page.getByRole("button", { name: "退出" })).toBeVisible({ timeout: 30_000 });
 }
 
+/** 新建每周任务(周报场景):选每周 + 周一 + 时刻 */
+export async function createWeeklyTask(page: Page, name: string) {
+  await clickStable(page, "＋ 新建任务");
+  await page.getByPlaceholder("例如: 每日晨报").fill(name);
+  await page.locator('select', { has: page.locator('option[value="weekly"]') }).selectOption("weekly");
+  await page.locator('select', { has: page.locator('option[value="1"]') }).selectOption("1");
+  await page.locator('input[type="time"]').fill("09:00");
+  await clickStable(page, "创建任务");
+  await expect(page.getByText(name).first()).toBeVisible({ timeout: 15_000 });
+}
+
 /** 按任务名精确定位 SchedulerCard 行(data-task-name 锚点) */
 export function taskRow(page: Page, name: string) {
   return page.locator(`[data-task-name="${name}"]`);
