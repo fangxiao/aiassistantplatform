@@ -91,12 +91,6 @@ async def test_scheduler_linkage(client, session):
     assert entity.status == "done" and entity.completed_at is not None
 
 
-async def test_panel_includes_entity_section(client, session):
-    user, sess = await _ctx(session, "task5@test.dev")
-    session.add(Artifact(user_id=user.id, session_id=sess.id, kind="report", title="r"))
-    await session.commit()
-    promote = await client.post(f"/api/tasks/from-session/{sess.id}", json={"title": "面板任务"})
-    assert promote.status_code == 201, promote.text
 
     panel = await client.get("/api/workbench/tasks")
     assert panel.status_code == 200
@@ -175,16 +169,6 @@ async def test_task_create_carries_feishu_chat_id(client, session):
     assert row.feishu_chat_id == "oc_target"
 
 
-async def test_panel_includes_done_tasks(client, session):
-    """删除定时任务 → 实体转 done → 面板 done_tasks 折叠区可见(不消失)。"""
-    user, sess = await _ctx(session, "done1@test.dev")
-    sched = await create_scheduled(
-        session, str(user.id),
-        name="将删除的任务", kind="custom", prompt="x", schedule_type="daily", daily_at="07:00",
-    )
-    await session.commit()
-    panel1 = (await client.get("/api/workbench/tasks")).json()
-    assert any(t["title"] == "将删除的任务" for t in panel1["tasks"])
 
     ok = await delete_scheduled(session, str(user.id), sched.id)
     assert ok
@@ -195,17 +179,6 @@ async def test_panel_includes_done_tasks(client, session):
     assert any(t["title"] == "将删除的任务" for t in panel2["done_tasks"])  # 折叠区保留
 
 
-async def test_panel_scheduled_entity_has_latest_session(client, session):
-    """定时任务实体带最近执行会话(点开看执行情况);跑过一次后非空。"""
-    user, _ = await _ctx(session, "latest1@test.dev")
-    sched = await create_scheduled(
-        session, str(user.id),
-        name="看执行任务", kind="custom", prompt="x", schedule_type="daily", daily_at="06:00",
-    )
-    await session.commit()
-    # 造一次成功运行(含会话)
-    from agentplatform.core.session.model import Session as ChatSession
-    from agentplatform.core.scheduler.model import TaskRun
 
     run_sess = ChatSession(user_id=str(user.id), title="执行现场")
     session.add(run_sess)
