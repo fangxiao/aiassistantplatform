@@ -79,6 +79,12 @@ function fmtTime(iso: string | null): string {
   }
 }
 
+function fmtDate(t: TaskEntityItem, sched?: ScheduledItem): string {
+  if (t.status !== "active" && t.completed_at) return fmtTime(t.completed_at);
+  if (t.kind === "scheduled" && sched?.next_run_at) return `下次 ${fmtTime(sched.next_run_at)}`;
+  return fmtTime(t.created_at);
+}
+
 const SPIN = (
   <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -169,9 +175,10 @@ export function TasksCard({
               <thead>
                 <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400">
                   <th className="px-2 py-1.5 font-semibold">任务名称</th>
-                  <th className="w-16 px-1 py-1.5 font-semibold">类型</th>
+                  <th className="w-14 px-1 py-1.5 font-semibold">类型</th>
                   <th className="w-20 px-1 py-1.5 font-semibold">状态</th>
-                  <th className="w-16 px-1 py-1.5 text-right font-semibold">交付物</th>
+                  <th className="w-24 px-1 py-1.5 font-semibold">日期</th>
+                  <th className="w-14 px-1 py-1.5 text-right font-semibold">交付物</th>
                 </tr>
               </thead>
               <tbody>
@@ -217,6 +224,7 @@ export function TasksCard({
                       <td className="px-1 py-1.5 text-[10px] text-slate-500">
                         {t.kind === "scheduled" ? "定时" : "常规"}
                       </td>
+                      <td className="px-1 py-1.5 text-[10px] text-slate-400">{fmtDate(t, sched)}</td>
                       <td className="px-1 py-1.5 text-[10px]">
                         {isDone ? (
                           <span className="text-slate-400">已完成</span>
