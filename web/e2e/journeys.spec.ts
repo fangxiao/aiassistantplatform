@@ -41,6 +41,12 @@ test("旅程 3:跑一次 → 运行徽标 → 完成 → 交付物 → 点开执
     page.locator("section", { hasText: "交付物" }).getByText(/E2E执行 · /).first(),
   ).toBeVisible({ timeout: 150_000 });
 
+  // 交付物「👁 查看」:markdown 预览弹窗直接读产出全文(20261010)
+  await page.getByRole("button", { name: "👁 查看" }).first().click();
+  await expect(page.getByText("📄").first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("执行完成").first()).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "✕" }).last().click();
+
   // 任务行(li)点开执行现场——交付物条目与任务同名,必须按行元素定位
   const row = page.locator("li").filter({ hasText: "E2E执行" }).first();
   await row.locator("button").first().click();

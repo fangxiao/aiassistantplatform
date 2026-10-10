@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPatch } from "../../lib/api/client";
 import { Card } from "./WorkbenchView";
+import MarkdownRenderer from "../renderers/MarkdownRenderer";
 
 /** 任务中心(M25 需求 014 + M28 需求 017):我的任务(实体)/ 最近活动 / 定时 / 交付物。
  *  数据源 GET /workbench/tasks;60s 轮询与简报卡同节奏。
@@ -90,6 +91,8 @@ export function TasksCard({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDone, setShowDone] = useState(false);
+  // 交付物 markdown 预览(20261010:report 产出直接可读,不必跳会话)
+  const [preview, setPreview] = useState<{ title: string; content: string } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -127,7 +130,8 @@ export function TasksCard({
   );
 
   return (
-    <Card title="📋 任务中心">
+    <div className="space-y-0">
+      <Card title="📋 任务中心">
       {loading && <p className="py-2 text-center text-xs text-slate-400">加载中…</p>}
       {error && <p className="py-2 text-center text-xs text-rose-500">{error}</p>}
       {panel && (
@@ -229,16 +233,35 @@ export function TasksCard({
                           {t.artifact_count > 0 ? ` · 📦 ${t.artifact_count}` : ""}
                         </span>
                       </button>
-                      {t.status === "done" && (
-                        <button
-                          type="button"
-                          onClick={() => void patchTask(t.id, { status: "active" })}
-                          className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
-                          title="重新打开"
-                        >
-                          重开
-                        </button>
-                      )}
+                      {(() => {
+                        const report = t.session_id
+                          ? panel.artifacts.find((a) => a.kind === "report" && a.session_id === t.session_id && a.content)
+                          : undefined;
+                        return (
+                          <>
+                            {report && (
+                              <button
+                                type="button"
+                                onClick={() => setPreview({ title: t.title, content: report.content! })}
+                                className="shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
+                                title="查看该任务的产出全文"
+                              >
+                                查看产出
+                              </button>
+                            )}
+                            {t.status === "done" && (
+                              <button
+                                type="button"
+                                onClick={() => void patchTask(t.id, { status: "active" })}
+                                className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+                                title="重新打开"
+                              >
+                                重开
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
                     </li>
                   ))}
                 </ul>
@@ -260,7 +283,16 @@ export function TasksCard({
                       onClick={() => r.session_id && onContinue(r.session_id)}
                       className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
                     >
-                      <span className="shrink-0 text-xs">{r.kind === "run" ? "⏳" : "💬"}</span>
+                      <span className="shrink-0">
+                        {r.kind === "run" ? (
+                          <svg className="h-3.5 w-3.5 animate-spin text-indigo-500" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                          </svg>
+                        ) : (
+                          <span className="text-xs">💬</span>
+                        )}
+                      </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-medium text-slate-800">{r.title}</span>
                         {r.detail && <span className="block truncate text-[10px] text-slate-400">{r.detail}</span>}
@@ -326,13 +358,23 @@ export function TasksCard({
                       </button>
                     )}
                     {a.kind === "report" && a.content && (
-                      <button
-                        type="button"
-                        onClick={() => onSaveToKb(a.content!)}
-                        className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700 hover:bg-indigo-100"
-                      >
-                        存 KB
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setPreview({ title: a.title, content: a.content! })}
+                          className="shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
+                          title="以 Markdown 查看产出全文"
+                        >
+                          👁 查看
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSaveToKb(a.content!)}
+                          className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700 hover:bg-indigo-100"
+                        >
+                          存 KB
+                        </button>
+                      </>
                     )}
                   </li>
                 ))}
@@ -341,6 +383,33 @@ export function TasksCard({
           </section>
         </div>
       )}
-    </Card>
+      </Card>
+
+      {/* 交付物 Markdown 预览(20261010) */}
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+              <h3 className="truncate text-sm font-bold text-slate-900">📄 {preview.title}</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSaveToKb(preview.content)}
+                  className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100"
+                >
+                  存 KB
+                </button>
+                <button type="button" onClick={() => setPreview(null)} className="text-slate-400 hover:text-slate-600">
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 text-sm">
+              <MarkdownRenderer block={{ type: "markdown", data: { text: preview.content } }} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
