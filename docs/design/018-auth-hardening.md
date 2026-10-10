@@ -46,7 +46,7 @@ GET  /api/auth/github/callback?code=      → 换 access_token → GET /user + /
 GitHub 不提供 OAuth App 的创建 API(仅网页),创建路径(60 秒):
 github.com → Settings → Developer settings → OAuth Apps → New
 - Application name: AgentPlatform
-- Homepage: https://ai-web.ailearning.top
+- Homepage: https://agent.ailearning.top(ai-web 为旧别名,仍有效)
 - Callback: https://ai-api.ailearning.top/api/auth/github/callback
 生成后 Client ID/Secret 交平台配置(.deploy.env: GITHUB_CLIENT_ID/SECRET)
 
@@ -80,7 +80,7 @@ github.com → Settings → Developer settings → OAuth Apps → New
 ### Cookie 属性
 
 `Set-Cookie: rf=<token>; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=30d; Secure(生产)`
-- web(ai-web)↔ api(ai-api)同父域 ailearning.top → same-site,`Lax` 下 fetch 正常携带;localhost:3000↔8000 同理
+- web(agent/ai-web)↔ api 同源经 Next /api 反代(20261010 起)→ cookie 同域直配;localhost:3000↔8000 同理
 - 不设 Domain(host-only,降低别的子域误读面);Path 收窄到 /api/auth,业务 API 永不带此 cookie
 - CORS 已是显式 origin 列表 + allow_credentials=True,无需改
 
@@ -142,7 +142,7 @@ GET /api/auth/feishu/callback  → 校验 state(cookie 对照)
   3. admin 用户列表验证状态以「未验证」徽标呈现(B3.5)
 - live 冒烟:登录双令牌(cookie 属性逐项核对)/ refresh 轮换 / 重放旧 cookie → 401 且新 cookie 全族失效 / logout 后 refresh 401 / 锁定语义(1-4 次不锁,第 5 次锁) / 飞书 302 passport + state cookie / 坏 state → error=oauth_state / 邮箱验证端点落库 / web /auth 200
 - 公网启用清单(缺省不启用,配 .deploy.env):
-  - OAuth:`PUBLIC_API_BASE=https://ai-api.ailearning.top`、`PUBLIC_WEB_BASE=https://ai-web.ailearning.top`、`GITHUB_CLIENT_ID/SECRET`(P1 §4 建 App)
+  - OAuth:`PUBLIC_API_BASE=https://ai-api.ailearning.top`、`PUBLIC_WEB_BASE=https://agent.ailearning.top`、`GITHUB_CLIENT_ID/SECRET`(P1 §4 建 App)
   - 飞书:开放平台「安全设置 → 重定向 URL 白名单」加 `https://ai-api.ailearning.top/api/auth/feishu/callback`(本地调试另加 `http://localhost:8000/...`);复用机器人 FEISHU_APP_ID/SECRET
   - 邮件:`NOTIFY_SMTP_HOST/PORT/USER/PASS`(+可选 NOTIFY_FROM)
 - P1 缺陷顺带修复:账号锁定误写为一次失败即锁(现 5 分钟计数窗内 5 次才锁),已补回归用例

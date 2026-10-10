@@ -37,7 +37,7 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api
 ```bash
 # OAuth 回调与邮件链接的公网基址(不配则 OAuth 回调指回 localhost)
 PUBLIC_API_BASE=https://ai-api.ailearning.top
-PUBLIC_WEB_BASE=https://ai-web.ailearning.top     # 邮箱验证链接目标(M24 P2)
+PUBLIC_WEB_BASE=https://agent.ailearning.top     # 邮箱验证链接目标(M24 P2)
 
 # GitHub 联登(P1):github.com → Settings → Developer settings → OAuth Apps 建 App 后填入
 GITHUB_CLIENT_ID=

@@ -12,6 +12,8 @@ COPY . .
 # NEXT_PUBLIC_* 在构建期烧入;局域网部署通过 --build-arg 注入(见 docker-compose web.args)
 ARG NEXT_PUBLIC_API_BASE=http://localhost:8000/api
 ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE
+ARG API_ORIGIN=http://api:8000
+ENV API_ORIGIN=$API_ORIGIN
 RUN npm run build
 
 FROM node:20-alpine AS runner

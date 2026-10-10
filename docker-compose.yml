@@ -75,6 +75,8 @@ services:
         # 前端在浏览器侧调用后端 API 的地址;局域网开发机需指向宿主机 LAN IP,
         # 默认 localhost 仅本机可用(见 web/lib/api/client.ts)。
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000/api}
+        # 同源 /api 反代目标(rewrites destination 构建时烙入 manifest,须为 build arg)
+        API_ORIGIN: ${API_ORIGIN:-http://api:8000}
     ports:
       - "3000:3000"
     depends_on:
