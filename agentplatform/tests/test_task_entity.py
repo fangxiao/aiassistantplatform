@@ -94,8 +94,8 @@ async def test_scheduler_linkage(client, session):
 
     panel = await client.get("/api/workbench/tasks")
     assert panel.status_code == 200
-    tasks = panel.json()["tasks"]
-    match = [t for t in tasks if t["title"] == "面板任务"]
+    tasks = panel.json()["sessions"]
+    match = [t for t in tasks if t["source"] == "manual"]
     assert len(match) == 1 and match[0]["artifact_count"] == 1
 
 
@@ -155,6 +155,12 @@ async def test_task_create_carries_feishu_chat_id(client, session):
     from sqlalchemy import select
 
     user, _ = await _ctx(session, "push3@test.dev")
+    sched = await create_scheduled(
+        session, str(user.id),
+        name="推送任务", kind="custom", prompt="x", schedule_type="daily", daily_at="09:00",
+    )
+    await session.commit()
+
     r = await client.post(
         "/api/scheduler/tasks",
         json={
@@ -175,7 +181,7 @@ async def test_task_create_carries_feishu_chat_id(client, session):
     await session.commit()
 
     panel2 = (await client.get("/api/workbench/tasks")).json()
-    assert not any(t["title"] == "将删除的任务" for t in panel2["tasks"])  # active 区移除
+    assert not any(t["title"] == "将删除的任务" for t in panel2.get("sessions", []))  # active 区移除
     assert any(t["title"] == "将删除的任务" for t in panel2["done_tasks"])  # 折叠区保留
 
 
@@ -187,7 +193,7 @@ async def test_task_create_carries_feishu_chat_id(client, session):
     await session.commit()
 
     panel = (await client.get("/api/workbench/tasks")).json()
-    item = next(t for t in panel["tasks"] if t["title"] == "看执行任务")
+    item = next(t for t in panel["sessions"] if t["title"] == "看执行任务")
     assert item["scheduled_task_id"] == str(sched.id)
     assert item["latest_session_id"] == str(run_sess.id)
 
