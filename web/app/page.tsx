@@ -600,14 +600,27 @@ function ChatHome() {
             setShowNewSessionModal(true);
           }}
           onContinue={async (sessionId) => {
-            // 定时任务新建的执行会话可能不在前端快照里(20261009 E2E 发现):
-            // 找不到时先拉最新列表再选,避免静默落回当前会话
+            // v4:会话中心点击直达;侧边栏已过滤定时会话,找不到时构造最小 SessionInfo
             let s = sessions.find((x) => x.id === sessionId);
             if (!s) {
               const list = await refreshSessions();
               s = list.find((x) => x.id === sessionId);
             }
-            if (s) void selectSession(s);
+            if (s) {
+              void selectSession(s);
+            } else {
+              // 定时会话不在侧边栏:直接按 ID 加载历史并切换
+              void (async () => {
+                try {
+                  const { getHistory } = await import("../lib/api/chat");
+                  const history = await getHistory(sessionId);
+                  setMessages(history);
+                  setCurrent({ id: sessionId } as never);
+                } catch {
+                  // 加载失败则仅切视图
+                }
+              })();
+            }
             switchView("chat");
           }}
           onOpenKb={() => router.push("/kb")}

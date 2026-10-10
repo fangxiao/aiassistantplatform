@@ -146,24 +146,20 @@ class ArtifactItem(BaseModel):
     content: str | None = None  # report 类带产出摘要(存 KB 用,截断)
 
 
-class TaskEntityItem(BaseModel):
-    """任务实体(M28/需求 017):列表优先区,聚合三栏为「未提升会话」视图。"""
+class SessionRowItem(BaseModel):
+    """会话中心行(20261010 v4):所有会话统一列表,定时/手动混排。"""
 
-    id: str
+    session_id: str
     title: str
-    status: str  # active/done/archived
-    kind: str  # manual/scheduled
-    session_id: str | None
-    scheduled_task_id: str | None = None  # kind=scheduled 时关联执行配置(运行状态徽标)
-    latest_session_id: str | None = None  # 定时任务最近一次执行的会话(点开看执行情况)
+    source: str  # manual / scheduled
+    last_active: datetime
     artifact_count: int = 0
-    created_at: datetime
-    completed_at: datetime | None
+    running: bool = False  # 该会话关联的任务正在运行
+    next_run_at: datetime | None = None  # scheduled:下次运行(仅展示)
 
 
 class TasksPanelOut(BaseModel):
-    tasks: list[TaskEntityItem] = []  # M28:实体区在前
-    done_tasks: list[TaskEntityItem] = []  # M30:已完成/已归档(折叠区)
+    sessions: list[SessionRowItem] = []  # 统一会话列表(20261010 v4)
     running: list[RunningItem]
     scheduled: list[ScheduledItem]
     artifacts: list[ArtifactItem]
@@ -208,80 +204,99 @@ async def tasks_panel(
 
     uid = user.id
 
-    # 任务实体区(M28):active 优先展示,置顶最近创建
-    entities = (
+    # 会话中心(20261010 v4):所有会话统一列表(定时+手动),按最后活跃倒序
+    all_sessions = (
         await db.scalars(
-            _sel(TaskEntity)
-            .where(TaskEntity.user_id == uid, TaskEntity.status == "active")
-            .order_by(TaskEntity.created_at.desc())
-            .limit(20)
+            _sel(ChatSession)
+            .where(ChatSession.user_id == str(uid))
+            .order_by(ChatSession.updated_at.desc())
+            .limit(50)
         )
     ).all()
-    done_entities = (
+
+    # 定时任务会话映射(session_id → task_name + running + next_run)
+    _sched_sess_map: dict[str, dict] = {}
+    _sched_tasks = (
         await db.scalars(
-            _sel(TaskEntity)
-            .where(TaskEntity.user_id == uid, TaskEntity.status != "active")
-            .order_by(TaskEntity.completed_at.desc().nulls_last())
-            .limit(15)
+            _sel(ScheduledTask).where(ScheduledTask.user_id == str(uid))
         )
     ).all()
-    all_entities = [*entities, *done_entities]
-    # 定时任务最近一次执行的会话(任务行点击直达执行现场,M30 用户反馈)
-    _sched_ids = [e.scheduled_task_id for e in all_entities if e.scheduled_task_id]
-    latest_run_session: dict[str, str | None] = {}
-    if _sched_ids:
-        _runs = (
-            await db.scalars(
-                _sel(TaskRun)
-                .where(TaskRun.task_id.in_(_sched_ids))
-                .order_by(TaskRun.started_at.desc())
-                .limit(120)
-            )
-        ).all()
-        for r in _runs:
-            latest_run_session.setdefault(str(r.task_id), str(r.session_id) if r.session_id else None)
-    # 交付物计数键:manual 用 e.session_id;scheduled 用最近执行会话(20261010 表格
-    # 第四列修复——此前 scheduled 实体 session 为空,计数恒 0,📦 永不渲染)
-    _count_keys: set[str] = set()
-    for e in all_entities:
-        if e.session_id:
-            _count_keys.add(str(e.session_id))
-        elif e.scheduled_task_id:
-            _sid = latest_run_session.get(str(e.scheduled_task_id))
-            if _sid:
-                _count_keys.add(_sid)
-    ent_counts = (
+    if _sched_tasks:
+        _sched_by_id = {s.id: s for s in _sched_tasks}
+        _sched_runs = list(
+            (
+                await db.scalars(
+                    _sel(TaskRun)
+                    .where(TaskRun.task_id.in_(_sched_by_id.keys()))
+                    .order_by(TaskRun.started_at.desc())
+                    .limit(120)
+                )
+            ).all()
+        )
+        _running_task_ids = {r.task_id for r in _sched_runs if r.status == "running"}
+        for r in _sched_runs:
+            if r.session_id:
+                st = _sched_by_id.get(r.task_id)
+                if st and str(r.session_id) not in _sched_sess_map:
+                    _sched_sess_map[str(r.session_id)] = {
+                        "task_name": st.name,
+                        "running": r.task_id in _running_task_ids,
+                        "scheduled_task_id": str(r.task_id),
+                        "next_run_at": st.next_run_at,
+                    }
+
+    # 交付物计数
+    _sess_ids = {s.id for s in all_sessions}
+    _art_counts = (
         dict(
             (await db.execute(
                 _sel(Artifact.session_id, _func.count())
-                .where(Artifact.session_id.in_([uuid.UUID(k) for k in _count_keys]))
+                .where(Artifact.session_id.in_(_sess_ids))
                 .group_by(Artifact.session_id)
             )).all()
         )
-        if _count_keys
+        if _sess_ids
         else {}
     )
 
-    def _entity_item(e: TaskEntity) -> TaskEntityItem:
-        count_sid = (
-            str(e.session_id) if e.session_id
-            else (latest_run_session.get(str(e.scheduled_task_id)) if e.scheduled_task_id else None)
-        )
-        return TaskEntityItem(
-            id=str(e.id), title=e.title, status=e.status, kind=e.kind,
-            session_id=str(e.session_id) if e.session_id else None,
-            scheduled_task_id=str(e.scheduled_task_id) if e.scheduled_task_id else None,
-            latest_session_id=(
-                latest_run_session.get(str(e.scheduled_task_id))
-                if e.scheduled_task_id
-                else None
-            ),
-            artifact_count=int(ent_counts.get(uuid.UUID(count_sid), 0)) if count_sid else 0,
-            created_at=e.created_at, completed_at=e.completed_at,
+    # 每个会话的首条用户消息(无 title 时做会话名)
+    _sess_titles: dict[str, str] = {}
+    if _sess_ids:
+        _no_title = [s for s in all_sessions if not s.title]
+        if _no_title:
+            _first_msgs = (
+                await db.scalars(
+                    _sel(Message)
+                    .where(
+                        Message.session_id.in_([s.id for s in _no_title]),
+                        Message.role == "user",
+                    )
+                    .order_by(Message.created_at.asc())
+                    .limit(len(_no_title) * 2)
+                )
+            ).all()
+            for m in _first_msgs:
+                _sess_titles.setdefault(str(m.session_id), _first_text(m.blocks)[:30] or "新会话")
+
+    sessions = []
+    for s in all_sessions:
+        _sid = str(s.id)
+        _meta = _sched_sess_map.get(_sid)
+        sessions.append(
+            SessionRowItem(
+                session_id=_sid,
+                title=(
+                    _meta["task_name"] if _meta
+                    else (s.title or _sess_titles.get(_sid, "新会话"))
+                ),
+                source="scheduled" if _meta else "manual",
+                last_active=s.updated_at or s.created_at,
+                artifact_count=int(_art_counts.get(s.id, 0)),
+                running=_meta["running"] if _meta else False,
+                next_run_at=_meta["next_run_at"] if _meta else None,
+            )
         )
 
-    tasks = [_entity_item(e) for e in entities]
-    done_tasks = [_entity_item(e) for e in done_entities]
     since = _dt.now(UTC) - _td(minutes=30)
 
     # 进行中:近 30 分钟有消息的会话(取 5)
@@ -392,4 +407,4 @@ async def tasks_panel(
         for a in arts
     ]
 
-    return TasksPanelOut(tasks=tasks, done_tasks=done_tasks, running=running, scheduled=scheduled, artifacts=artifacts)
+    return TasksPanelOut(sessions=sessions, running=running, scheduled=scheduled, artifacts=artifacts)

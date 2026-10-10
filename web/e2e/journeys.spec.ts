@@ -18,14 +18,14 @@ test.describe.configure({ mode: "serial" });
 
 test("旅程 1:邀请码注册 → 登录 → 工作台", async ({ page }) => {
   await registerAndLogin(page);
-  await expect(page.getByText("📋 任务中心")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("💬 会话中心")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("我的待办").or(page.getByText("⭐")).first()).toBeVisible();
 });
 
-test("旅程 2:新建定时任务 → 任务中心即时出现(20261009 反馈回归)", async ({ page }) => {
+test("旅程 2:新建定时任务 → 会话中心即时出现(20261009 反馈回归)", async ({ page }) => {
   await loginViaToken(page);
   await createScheduledTask(page, "E2E巡检", "回复「巡检完成」四个字即可");
-  // 任务中心「我的任务」应即时出现(M30 事件刷新)
+  // 会话中心「我的任务」应即时出现(M30 事件刷新)
   await expect(page.getByText("E2E巡检").first()).toBeVisible({ timeout: 10_000 });
 });
 
@@ -37,40 +37,30 @@ test("旅程 3:跑一次 → 运行徽标 → 完成 → 交付物 → 点开执
   // 运行中:任务行/运行区可见运行态(呼吸徽标或文案)
   await expect(page.getByText("运行中").first()).toBeVisible({ timeout: 20_000 });
 
-  // 等完成:表格第四列交付物出现(真实 LLM,最长 150s)
-  await expect(page.getByRole("button", { name: /📦/ }).first()).toBeVisible({ timeout: 150_000 });
+  // v4:等会话中心出现带交付物的会话行(真实 LLM,最长 150s)
+  await expect(page.getByText(/📦/).first()).toBeVisible({ timeout: 150_000 });
 
-  // 交付物(表格第四列):点 📦 → 单件 report 直接 md 预览产出全文(20261010 表格重构)
-  await page.getByRole("button", { name: /📦/ }).first().click();
-  await expect(page.getByText(/执行完成/).first()).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "✕" }).last().click();
-
-  // 任务名称列点开执行现场
-  await page.getByRole("button", { name: "E2E执行", exact: true }).click();
+  // 点击带 📦 的会话行进会话看产出
+  const artRow = page.locator("tr", { hasText: /E2E执行/ }).first();
+  await artRow.locator("button").first().click();
   await expect(page.getByText(/执行完成/).first()).toBeVisible({ timeout: 20_000 });
 });
 
-test("旅程 4:会话保存为任务 → 完成 → 已完成折叠区", async ({ page }) => {
+test("旅程 4:手动对话会话出现在会话中心 → 点击重开(20261010 v4)", async ({ page }) => {
   await loginViaToken(page);
-  // 切到对话视图(等首屏路由/预取安静后再点,避开导航竞争)
-  await page.waitForTimeout(1_500);
+  // 登录后默认工作台,先切到对话视图
   await page.getByRole("button", { name: "💬 对话", exact: true }).click();
-  await page.getByPlaceholder(/输入消息/).fill("你好");
+  await page.waitForTimeout(1_500);
+  await page.getByPlaceholder(/输入消息/).fill("你好这是测试消息");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(3_000);
 
-  // 保存为任务:window.prompt 命名 → 轻提示 → 任务中心出现手动任务
-  page.once("dialog", (d) => d.accept("E2E手动任务"));
-  await page.getByRole("button", { name: "⭐ 保存为任务" }).click();
-  await expect(page.getByText("已保存为任务").first()).toBeVisible({ timeout: 10_000 });
-
-  // 切回工作台视图(任务中心此前在隐藏容器中)
   await page.getByRole("button", { name: "🏠 工作台", exact: true }).click();
-  const doneBtn = page.getByTitle("标记完成").first();
-  await expect(doneBtn).toBeVisible({ timeout: 15_000 });
-  await doneBtn.click();
-  await page.getByRole("button", { name: /已完成\(/ }).click();
-  await expect(page.getByText("E2E手动任务").first()).toBeVisible({ timeout: 10_000 });
+  const manualRow = page.locator("tr", { hasText: "手动" }).first();
+  await expect(manualRow).toBeVisible({ timeout: 15_000 });
+
+  await manualRow.locator("button").first().click();
+  await expect(page.getByPlaceholder(/输入消息/)).toBeVisible({ timeout: 15_000 });
 });
 
 test("旅程 5:登出 → 回登录页", async ({ page }) => {
@@ -99,7 +89,7 @@ test("旅程 7:编辑任务改名 → 列表即时更新", async ({ page }) => {
   await expect(page.getByText("E2E晨报改名").first()).toBeVisible({ timeout: 10_000 });
 });
 
-test("旅程 8:启停切换 → 删除 → 任务中心转已完成折叠区", async ({ page }) => {
+test("旅程 8:启停切换 → 删除 → 会话中心转已完成折叠区", async ({ page }) => {
   await loginViaToken(page);
   // 启停:每行一个开关按钮(标题为 启用/停用 之一)——先展开确认按钮名
   const target = taskRow(page, "E2E晨报改名");
@@ -111,9 +101,8 @@ test("旅程 8:启停切换 → 删除 → 任务中心转已完成折叠区", a
   await target.getByRole("button", { name: "删除" }).click();
   await expect(page.getByText("E2E晨报改名").first()).toBeHidden({ timeout: 10_000 });
 
-  // 任务中心:折叠区出现该任务(定时删除 → 实体转已完成)
-  await page.getByRole("button", { name: /已完成\(/ }).click();
-  await expect(page.getByText("E2E晨报改名").first()).toBeVisible({ timeout: 10_000 });
+  // v4:删除后会话中心的该任务行消失(无"已完成折叠区"概念)
+  await expect(page.locator('[data-task-name="E2E晨报改名"]')).toBeHidden({ timeout: 10_000 });
 });
 
 test("旅程 9:运行记录展开 → 看到产出 → 进入会话(真实运行后)", async ({ page }) => {

@@ -165,7 +165,22 @@ async def chat_sessions(
         rows = await list_sessions(session, user_id=str(svc.id))
         return [SessionOut.model_validate(r, from_attributes=True) for r in rows]
     rows = await list_sessions(session, user_id=str(user.id))
-    return [SessionOut.model_validate(r, from_attributes=True) for r in rows]
+    # 20261010 用户反馈:会话列表不展示定时任务会话(它们属于任务中心,不属于对话)
+    from agentplatform.core.scheduler.model import TaskRun
+
+    _sched_sids = set(
+        r[0]
+        for r in (
+            await session.execute(
+                __import__("sqlalchemy").select(TaskRun.session_id).where(TaskRun.session_id.isnot(None))
+            )
+        ).all()
+    )
+    return [
+        SessionOut.model_validate(r, from_attributes=True)
+        for r in rows
+        if r.id not in _sched_sids
+    ]
 
 
 @router.delete("/sessions/{sid}")

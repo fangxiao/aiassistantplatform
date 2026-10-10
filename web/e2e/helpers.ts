@@ -64,7 +64,7 @@ export async function registerAndLogin(page: Page) {
   await expect(page.getByText("验证邮件已发送")).toBeVisible({ timeout: 15_000 });
   verifyEmailViaDb(s.email);
   await page.getByRole("button", { name: /我已验证/ }).click();
-  await expect(page.getByText("📋 任务中心")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("💬 会话中心")).toBeVisible({ timeout: 30_000 });
   // 注册成功后缓存当前 token,后续旅程注入复用(避开登录限频 5/min)
   const token = await page.evaluate(() => localStorage.getItem("agentplatform_token"));
   if (token) {

@@ -25,6 +25,7 @@ interface SchedTask {
   auto_save_kb: boolean;
   target_kb_id: string | null;
   feishu_chat_id?: string | null;
+  plugin_id?: string | null;
   notify?: Record<string, any>;
   enabled: boolean;
   last_run_at: string | null;
@@ -82,6 +83,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
 
   // 运行中轮询
   useEffect(() => {
@@ -332,6 +334,17 @@ function TaskFormModal({
   onSaved: () => void | Promise<void>;
 }) {
   const isEdit = !!task;
+  const [assistants, setAssistants] = useState<{ id: string; display_name?: string | null; name: string }[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setAssistants(await apiGet("/assistants"));
+      } catch {
+        setAssistants([]);
+      }
+    })();
+  }, []);
   const [channelOptions, setChannelOptions] = useState<
     { id: string; name: string; platform: boolean }[]
   >([]);
@@ -373,6 +386,7 @@ function TaskFormModal({
     name: task?.name ?? "",
     kind: task?.kind ?? "briefing",
     prompt: task?.prompt ?? "",
+    plugin_id: task?.plugin_id ?? "",
     schedule_type: task?.schedule_type ?? "daily",
     weekly_day: task?.weekly_day ?? 1,
     daily_at: task?.daily_at ?? "08:00",
@@ -400,6 +414,7 @@ function TaskFormModal({
         daily_at: form.schedule_type === "daily" || form.schedule_type === "weekly" ? form.daily_at : null,
         weekly_day: form.schedule_type === "weekly" ? form.weekly_day : null,
         interval_minutes: form.schedule_type === "interval" ? parseInt(form.interval_minutes, 10) || 60 : null,
+        plugin_id: form.plugin_id || null,
         auto_save_kb: form.auto_save_kb,
         target_kb_id: form.target_kb_id || null,
         notify: {
@@ -450,6 +465,19 @@ function TaskFormModal({
             />
           </label>
 
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-semibold text-slate-600">执行助手(默认通用)</span>
+            <select
+              value={form.plugin_id}
+              onChange={(e) => setForm((f) => ({ ...f, plugin_id: e.target.value }))}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+            >
+              <option value="">🤖 通用助手(平台默认)</option>
+              {(assistants ?? []).map((a) => (
+                <option key={a.id} value={a.id}>{a.display_name || a.name}</option>
+              ))}
+            </select>
+          </label>
           <label className="block">
             <span className="mb-1 block text-[11px] font-semibold text-slate-600">任务模板</span>
             <select

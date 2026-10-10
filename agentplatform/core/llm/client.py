@@ -52,7 +52,7 @@ class OpenAIClient:
     def __init__(
         self,
         endpoint: LlmEndpoint,
-        timeout: float = 300.0,
+        timeout: float = 120.0,  # 20261010:300s 太长,网关挂起时白等 5 分钟;正常生成 30-60s
         transport: httpx.AsyncBaseTransport | None = None,
         fallback_endpoints: list[LlmEndpoint] | None = None,
     ) -> None:

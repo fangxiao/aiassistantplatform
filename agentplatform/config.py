@@ -132,7 +132,7 @@ class Settings(BaseSettings):
     scheduler_tick_seconds: int = 60  # 任务调度扫描间隔
     scheduler_max_tasks_per_user: int = 10  # 每用户任务数上限
     scheduler_max_concurrent: int = 3  # 全局并发运行上限,超出顺延下个 tick
-    scheduler_run_timeout_s: int = 600  # 单次运行超时(判失败)
+    scheduler_run_timeout_s: int = 300  # 单次运行超时(20261010:600s 太长,LLM 单请求 300s 上限)
     # 安全收敛(2026-09-17)
     file_serve_roots: list[str] = []  # /api/files 允许访问的额外根目录(绝对路径);默认仅 cwd 与 ~/.agentplatform
     allow_self_promote_developer: bool = False  # 注册接口是否允许自选 developer 角色(仅本地开发开)
