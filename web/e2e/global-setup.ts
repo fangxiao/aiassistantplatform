@@ -16,7 +16,7 @@ export default async function globalSetup() {
   );
   const state = {
     invite,
-    email: `e2e-${Date.now().toString(36)}@test.dev`,
+    email: `e2e-${Date.now().toString(36)}@qq.com`,
     password: "e2e-password-123",
   };
   fs.writeFileSync(`${__dirname}/.state.json`, JSON.stringify(state));

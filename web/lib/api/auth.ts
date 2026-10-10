@@ -71,6 +71,10 @@ export function isAuthed(): boolean {
   return getToken() !== null;
 }
 
+function currentOrigin(): string {
+  return typeof window !== "undefined" ? window.location.origin : "";
+}
+
 export async function register(
   email: string,
   password: string,
@@ -82,11 +86,16 @@ export async function register(
     password,
     role,
     ...(inviteCode ? { invite_code: inviteCode } : {}),
+    web_base: currentOrigin(),
   });
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {
-  const result = await apiPost<LoginResult>("/auth/login", { email, password });
+  const result = await apiPost<LoginResult>("/auth/login", {
+    email,
+    password,
+    web_base: currentOrigin(),
+  });
   setToken(result.token);
   setUser(result.user);
   broadcastAuthSync(result.token, result.user);

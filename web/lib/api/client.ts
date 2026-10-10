@@ -7,6 +7,30 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
 
+/** 结构化 API 错误:携带 status/code,供 UI 按 code 分流(如 email_unverified) */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(status: number, code: string | undefined, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function toApiError(status: number, text: string): ApiError {
+  try {
+    const body = JSON.parse(text) as { error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } };
+    const err = body.error ?? body.detail;
+    if (err?.message) return new ApiError(status, err.code, err.message);
+  } catch {
+    /* 非 JSON 原文兜底 */
+  }
+  return new ApiError(status, undefined, `HTTP ${status}: ${text.slice(0, 180)}`);
+}
+
 export interface SseEvent {
   event: string;
   data: unknown;
@@ -85,8 +109,8 @@ function jsonHeaders(): Record<string, string> {
   return { "Content-Type": "application/json" };
 }
 
-function errText(status: number, resp: Response): Promise<Error> {
-  return resp.text().then((t) => new Error(`HTTP ${status}: ${t}`));
+async function errText(status: number, resp: Response): Promise<ApiError> {
+  return toApiError(status, await resp.text());
 }
 
 export async function apiFetch<T>(

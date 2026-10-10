@@ -78,7 +78,7 @@ async def test_login_blocked_until_verified(client, session, monkeypatch):
     sent = []
     from agentplatform.api import auth as auth_api
 
-    monkeypatch.setattr(auth_api, "_send_verification_email_bg", lambda uid, em: sent.append(em))
+    monkeypatch.setattr(auth_api, "_send_verification_email_bg", lambda uid, em, web_base="": sent.append(em))
 
     r = await client.post("/api/auth/login", json={"email": "unverified@test.dev", "password": "password123"})
     assert r.status_code == 403

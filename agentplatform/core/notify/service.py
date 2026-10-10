@@ -23,16 +23,23 @@ async def send_webhook(url: str, payload: dict) -> bool:
         return False
 
 
-def send_email(to: str, subject: str, body: str) -> bool:
-    """SMTP 纯文本邮件(同步 smtplib;量小无碍)。未配置 SMTP 返回 False。"""
+def send_email(to: str, subject: str, body: str, html: str | None = None) -> bool:
+    """SMTP 邮件(同步 smtplib;量小无碍)。html 非空时发 multipart(按钮可点)。
+    未配置 SMTP 返回 False。"""
     if not settings.notify_smtp_host:
         return False
     import smtplib
     from email.header import Header
+    from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
     try:
-        msg = MIMEText(body, "plain", "utf-8")
+        if html:
+            msg = MIMEMultipart("alternative")
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+            msg.attach(MIMEText(html, "html", "utf-8"))
+        else:
+            msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = Header(subject, "utf-8")
         msg["From"] = settings.notify_from or settings.notify_smtp_user
         msg["To"] = to

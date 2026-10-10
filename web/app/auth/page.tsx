@@ -6,6 +6,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { setToken, login, me, register, verifyEmail } from "../../lib/api/auth";
+import { ApiError } from "../../lib/api/client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
 
@@ -19,6 +20,9 @@ export default function AuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 邮箱待验证引导(M33):登录被 email_unverified 拦截时切换到此视图
+  const [pendingVerify, setPendingVerify] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
   // 第三方登录可用性探测(未配置不再裸露 503 JSON,渲染禁用态)
   const [providers, setProviders] = useState<{ github: boolean; feishu: boolean } | null>(null);
   useEffect(() => {
@@ -72,6 +76,35 @@ export default function AuthPage() {
       }
       router.push("/");
     } catch (err) {
+      if (err instanceof ApiError && err.code === "email_unverified") {
+        setPendingVerify(email);
+        return;
+      }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 待验证视图:重发(再触发一次登录即自动补发,自带限频)/ 验证完重登
+  const reloginAfterVerify = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await login(email, password);
+      router.push("/");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "email_unverified") {
+        setNotice("验证邮件已重新发送,请再查收一下(含垃圾箱)");
+        setResendCooldown(60);
+        const timer = setInterval(() => {
+          setResendCooldown((s) => {
+            if (s <= 1) clearInterval(timer);
+            return s - 1;
+          });
+        }, 1000);
+        return;
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
@@ -80,6 +113,41 @@ export default function AuthPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50">
+      {pendingVerify ? (
+        <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-50 text-2xl">
+            📧
+          </div>
+          <h2 className="text-base font-bold text-slate-900">验证邮件已发送</h2>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            我们向 <span className="font-medium text-slate-800">{pendingVerify}</span> 发送了一封验证邮件。
+            <br />
+            请查收(含<span className="font-medium">垃圾箱</span>)并点击邮件中的链接,
+            完成后回到这里登录。
+          </p>
+          {notice && <p className="mt-3 rounded bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
+          {error && <p className="mt-3 rounded bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
+          <button
+            type="button"
+            disabled={busy || resendCooldown > 0}
+            onClick={() => void reloginAfterVerify()}
+            className="mt-4 w-full rounded bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {busy
+              ? "检查中…"
+              : resendCooldown > 0
+                ? `重新发送(${resendCooldown}s)`
+                : "我已验证,重新登录 / 重发邮件"}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPendingVerify(null); setNotice(null); setError(null); }}
+            className="mt-2 w-full rounded border border-slate-200 py-2 text-xs text-slate-500 hover:bg-slate-50"
+          >
+            使用其他账号
+          </button>
+        </div>
+      ) : (
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
@@ -205,6 +273,7 @@ export default function AuthPage() {
             : "GitHub / 飞书登录免邀请码;同邮箱账号自动绑定"}
         </p>
       </form>
+      )}
     </main>
   );
 }

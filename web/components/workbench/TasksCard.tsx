@@ -5,9 +5,8 @@ import { apiGet, apiPatch } from "../../lib/api/client";
 import { Card } from "./WorkbenchView";
 import MarkdownRenderer from "../renderers/MarkdownRenderer";
 
-/** 任务中心(M25 需求 014 + M28 需求 017):我的任务(实体)/ 最近活动 / 定时 / 交付物。
- *  数据源 GET /workbench/tasks;60s 轮询与简报卡同节奏。
- *  实体区:完成/归档操作;交付物:点击打开(现签 URL)、跳会话续问、存知识库。 */
+/** 任务中心(M25/028 + 20261010 重构):单表格四列——任务名称/类型/状态/交付物。
+ *  交付物点击可查看(md 预览或打开文件);定时任务的完整管理在「⏰ 定时任务」卡。 */
 
 interface RunningItem {
   kind: "session" | "run";
@@ -51,8 +50,8 @@ interface TaskEntityItem {
 }
 
 interface TasksPanel {
-  tasks: TaskEntityItem[]; // M28:实体区优先
-  done_tasks?: TaskEntityItem[]; // M30:已完成/已归档(折叠区)
+  tasks: TaskEntityItem[];
+  done_tasks?: TaskEntityItem[];
   running: RunningItem[];
   scheduled: ScheduledItem[];
   artifacts: ArtifactItem[];
@@ -80,6 +79,13 @@ function fmtTime(iso: string | null): string {
   }
 }
 
+const SPIN = (
+  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+  </svg>
+);
+
 export function TasksCard({
   onContinue,
   onSaveToKb,
@@ -91,8 +97,10 @@ export function TasksCard({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDone, setShowDone] = useState(false);
-  // 交付物 markdown 预览(20261010:report 产出直接可读,不必跳会话)
+  // 交付物 markdown 预览(20261010:任务表第四列点击直达)
   const [preview, setPreview] = useState<{ title: string; content: string } | null>(null);
+  // 某任务的交付物列表弹层(多交付物时)
+  const [listFor, setListFor] = useState<{ task: TaskEntityItem; items: ArtifactItem[] } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -129,263 +137,173 @@ export function TasksCard({
     [refresh],
   );
 
+  const artifactsOf = (t: TaskEntityItem): ArtifactItem[] => {
+    const sid = t.kind === "scheduled" ? (t.latest_session_id ?? t.session_id) : t.session_id;
+    if (!sid) return [];
+    return panel?.artifacts.filter((a) => a.session_id === sid) ?? [];
+  };
+
+  const openArtifacts = (t: TaskEntityItem) => {
+    const items = artifactsOf(t);
+    if (items.length === 0) return;
+    if (items.length === 1) {
+      const a = items[0];
+      if (a.kind === "report" && a.content) setPreview({ title: a.title, content: a.content });
+      else if (a.signed_url) window.open(a.signed_url, "_blank", "noopener");
+      return;
+    }
+    setListFor({ task: t, items });
+  };
+
+  const doneTasks = panel?.done_tasks ?? [];
+  const rows = panel ? [...panel.tasks, ...(showDone ? doneTasks : [])] : [];
+
   return (
     <div className="space-y-0">
       <Card title="📋 任务中心">
-      {loading && <p className="py-2 text-center text-xs text-slate-400">加载中…</p>}
-      {error && <p className="py-2 text-center text-xs text-rose-500">{error}</p>}
-      {panel && (
-        <div className="space-y-3">
-          {/* 我的任务(M28 实体区):命名任务,可完成/归档 */}
-          <section>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">我的任务</p>
-            {panel.tasks.length === 0 ? (
-              <p className="text-xs text-slate-400">
-                暂无任务——在会话页点「⭐ 保存为任务」,或创建定时任务
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {panel.tasks.map((t) => {
-                  // 定时任务关联的执行状态(运行中/成功/失败 + 下次运行)
+        {loading && <p className="py-2 text-center text-xs text-slate-400">加载中…</p>}
+        {error && <p className="py-2 text-center text-xs text-rose-500">{error}</p>}
+        {panel && (
+          <div>
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400">
+                  <th className="px-2 py-1.5 font-semibold">任务名称</th>
+                  <th className="w-16 px-1 py-1.5 font-semibold">类型</th>
+                  <th className="w-20 px-1 py-1.5 font-semibold">状态</th>
+                  <th className="w-16 px-1 py-1.5 text-right font-semibold">交付物</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((t) => {
                   const sched = t.scheduled_task_id
                     ? panel.scheduled.find((s) => s.id === t.scheduled_task_id)
                     : undefined;
+                  const isDone = t.status !== "active";
+                  const target = t.kind === "scheduled" ? (t.latest_session_id ?? t.session_id) : t.session_id;
                   return (
-                    <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
-                      <span className="shrink-0 text-xs">{t.kind === "scheduled" ? "⏰" : "⭐"}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const target = t.kind === "scheduled" ? (t.latest_session_id ?? t.session_id) : t.session_id;
-                          if (target) onContinue(target);
-                        }}
-                        disabled={t.kind === "scheduled" ? !(t.latest_session_id ?? t.session_id) : !t.session_id}
-                        className="min-w-0 flex-1 text-left disabled:cursor-default"
-                        title={t.kind === "scheduled" ? "打开最近一次执行的会话(查看执行过程与产出)" : undefined}
-                      >
-                        <span className="block truncate text-xs font-medium text-slate-800">{t.title}</span>
-                        <span className="block text-[10px] text-slate-400">
-                          {t.kind === "scheduled" && sched
-                            ? `${STATUS_BADGE[sched.last_status]?.label ?? sched.last_status} · 下次 ${fmtTime(sched.next_run_at)}`
-                            : `${t.artifact_count > 0 ? `📦 ${t.artifact_count} 个交付物 · ` : ""}${fmtTime(t.created_at)}`}
-                        </span>
-                      </button>
-                      {t.kind === "scheduled" && sched && STATUS_BADGE[sched.last_status] && (
-                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${STATUS_BADGE[sched.last_status]!.cls}`}>
-                          {sched.last_status === "running" && <span className="mr-0.5 inline-block animate-pulse">●</span>}
-                          {STATUS_BADGE[sched.last_status]!.label}
-                        </span>
-                      )}
-                      {t.kind === "manual" && (
-                        <>
+                    <tr key={t.id} className={`group border-b border-slate-50 last:border-0 hover:bg-slate-50 ${isDone ? "opacity-60" : ""}`}>
+                      <td className="px-2 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => target && onContinue(target)}
+                          disabled={!target}
+                          className="max-w-[220px] truncate text-left text-xs font-medium text-slate-800 disabled:cursor-default"
+                          title={t.kind === "scheduled" ? "打开最近一次执行的会话" : "打开任务会话"}
+                        >
+                          {t.title}
+                        </button>
+                        {t.kind === "manual" && t.status === "active" && (
+                          <span className="ml-1.5 inline-flex gap-1 opacity-0 transition group-hover:opacity-100">
+                            <button
+                              type="button"
+                              onClick={() => void patchTask(t.id, { status: "done" })}
+                              className="rounded border border-emerald-200 px-1 py-0.5 text-[9px] text-emerald-700 hover:bg-emerald-50"
+                              title="标记完成"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void patchTask(t.id, { status: "archived" })}
+                              className="rounded border border-slate-200 px-1 py-0.5 text-[9px] text-slate-500 hover:bg-slate-100"
+                              title="归档"
+                            >
+                              归档
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1.5 text-[10px] text-slate-500">
+                        {t.kind === "scheduled" ? "定时" : "常规"}
+                      </td>
+                      <td className="px-1 py-1.5 text-[10px]">
+                        {isDone ? (
+                          <span className="text-slate-400">已完成</span>
+                        ) : t.kind === "scheduled" && sched?.last_status === "running" ? (
+                          <span className="inline-flex items-center gap-1 font-medium text-indigo-600">
+                            {SPIN}运行中
+                          </span>
+                        ) : t.kind === "scheduled" && sched?.last_status === "failed" ? (
+                          <span className="font-medium text-rose-600" title={sched ? `下次 ${fmtTime(sched.next_run_at)}` : undefined}>失败</span>
+                        ) : (
+                          <span className="text-slate-500" title={sched ? `下次 ${fmtTime(sched.next_run_at)}` : undefined}>
+                            {t.kind === "scheduled" ? "待运行" : "进行中"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1.5 text-right">
+                        {t.artifact_count > 0 ? (
                           <button
                             type="button"
-                            onClick={() => void patchTask(t.id, { status: "done" })}
-                            className="shrink-0 rounded border border-emerald-200 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50"
-                            title="标记完成(手动任务用;定时任务随删除自动完结)"
+                            onClick={() => openArtifacts(t)}
+                            className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                            title="查看该任务的交付物"
                           >
-                            ✓ 完成
+                            📦 {t.artifact_count}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => void patchTask(t.id, { status: "archived" })}
-                            className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
-                            title="归档(不出现在默认列表)"
-                          >
-                            归档
-                          </button>
-                        </>
-                      )}
-                    </li>
+                        ) : (
+                          <span className="text-[10px] text-slate-300">—</span>
+                        )}
+                      </td>
+                    </tr>
                   );
                 })}
-              </ul>
+              </tbody>
+            </table>
+            {panel.tasks.length === 0 && doneTasks.length === 0 && (
+              <p className="py-3 text-center text-xs text-slate-400">
+                暂无任务——在会话页点「⭐ 保存为任务」,或创建定时任务
+              </p>
             )}
-          </section>
-
-          {(panel.done_tasks?.length ?? 0) > 0 && (
-            <section>
+            {doneTasks.length > 0 && (
               <button
                 type="button"
                 onClick={() => setShowDone((v) => !v)}
-                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 hover:text-slate-600"
+                className="mt-1.5 flex w-full items-center gap-1 text-[10px] font-semibold text-slate-400 hover:text-slate-600"
               >
                 <span className={`transition ${showDone ? "rotate-90" : ""}`}>▶</span>
-                已完成({panel.done_tasks!.length})
+                已完成({doneTasks.length})
               </button>
-              {showDone && (
-                <ul className="mt-1 space-y-1">
-                  {panel.done_tasks!.map((t) => (
-                    <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1 opacity-75 hover:bg-slate-50">
-                      <span className="shrink-0 text-xs">{t.kind === "scheduled" ? "⏰" : "⭐"}</span>
-                      <button
-                        type="button"
-                        onClick={() => t.session_id && onContinue(t.session_id)}
-                        disabled={!t.session_id}
-                        className="min-w-0 flex-1 text-left disabled:cursor-default"
-                      >
-                        <span className="block truncate text-xs text-slate-600">
-                          {t.status === "archived" ? "📦 " : ""}
-                          {t.title}
-                        </span>
-                        <span className="block text-[10px] text-slate-400">
-                          {t.completed_at ? `完成于 ${fmtTime(t.completed_at)}` : fmtTime(t.created_at)}
-                          {t.artifact_count > 0 ? ` · 📦 ${t.artifact_count}` : ""}
-                        </span>
-                      </button>
-                      {(() => {
-                        const report = t.session_id
-                          ? panel.artifacts.find((a) => a.kind === "report" && a.session_id === t.session_id && a.content)
-                          : undefined;
-                        return (
-                          <>
-                            {report && (
-                              <button
-                                type="button"
-                                onClick={() => setPreview({ title: t.title, content: report.content! })}
-                                className="shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
-                                title="查看该任务的产出全文"
-                              >
-                                查看产出
-                              </button>
-                            )}
-                            {t.status === "done" && (
-                              <button
-                                type="button"
-                                onClick={() => void patchTask(t.id, { status: "active" })}
-                                className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
-                                title="重新打开"
-                              >
-                                重开
-                              </button>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-
-          {/* 最近活动(M25 聚合:未提升为任务的会话与运行) */}
-          <section>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">进行中</p>
-            {panel.running.length === 0 ? (
-              <p className="text-xs text-slate-400">暂无进行中的任务</p>
-            ) : (
-              <ul className="space-y-1">
-                {panel.running.map((r) => (
-                  <li key={`${r.kind}-${r.id}`}>
-                    <button
-                      type="button"
-                      onClick={() => r.session_id && onContinue(r.session_id)}
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
-                    >
-                      <span className="shrink-0">
-                        {r.kind === "run" ? (
-                          <svg className="h-3.5 w-3.5 animate-spin text-indigo-500" viewBox="0 0 24 24" fill="none" aria-hidden>
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                          </svg>
-                        ) : (
-                          <span className="text-xs">💬</span>
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium text-slate-800">{r.title}</span>
-                        {r.detail && <span className="block truncate text-[10px] text-slate-400">{r.detail}</span>}
-                      </span>
-                      <span className="shrink-0 text-[10px] text-slate-400">
-                        {fmtTime(r.updated_at ?? r.started_at)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
             )}
-          </section>
-
-          {/* 定时任务 */}
-          <section>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">定时任务</p>
-            {panel.scheduled.length === 0 ? (
-              <p className="text-xs text-slate-400">暂无定时任务</p>
-            ) : (
-              <ul className="space-y-1">
-                {panel.scheduled.map((t) => {
-                  const badge = STATUS_BADGE[t.last_status] ?? STATUS_BADGE.never;
-                  return (
-                    <li key={t.id} className="flex items-center gap-2 px-2 py-1">
-                      <span className="min-w-0 flex-1 truncate text-xs text-slate-700">{t.name}</span>
-                      <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${badge.cls}`}>{badge.label}</span>
-                      <span className="shrink-0 text-[10px] text-slate-400">下次 {fmtTime(t.next_run_at)}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          {/* 交付物 */}
-          <section>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">交付物</p>
-            {panel.artifacts.length === 0 ? (
-              <p className="text-xs text-slate-400">暂无产出——让助手生成图片/报告后自动登记在这里</p>
-            ) : (
-              <ul className="space-y-1">
-                {panel.artifacts.slice(0, 8).map((a) => (
-                  <li key={a.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
-                    <span className="shrink-0 text-xs">{KIND_ICON[a.kind] ?? "📦"}</span>
-                    <button
-                      type="button"
-                      onClick={() => a.signed_url && window.open(a.signed_url, "_blank", "noopener")}
-                      disabled={!a.signed_url}
-                      className="min-w-0 flex-1 text-left disabled:cursor-default"
-                      title={a.signed_url ? "点击打开" : "在会话中查看"}
-                    >
-                      <span className="block truncate text-xs font-medium text-slate-800">{a.title}</span>
-                      <span className="block text-[10px] text-slate-400">{fmtTime(a.created_at)}</span>
-                    </button>
-                    {a.session_id && (
-                      <button
-                        type="button"
-                        onClick={() => onContinue(a.session_id!)}
-                        className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100"
-                      >
-                        继续
-                      </button>
-                    )}
-                    {a.kind === "report" && a.content && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setPreview({ title: a.title, content: a.content! })}
-                          className="shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
-                          title="以 Markdown 查看产出全文"
-                        >
-                          👁 查看
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onSaveToKb(a.content!)}
-                          className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700 hover:bg-indigo-100"
-                        >
-                          存 KB
-                        </button>
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
-      )}
+          </div>
+        )}
       </Card>
 
-      {/* 交付物 Markdown 预览(20261010) */}
+      {/* 某任务的交付物列表(多件时) */}
+      {listFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs" onClick={() => setListFor(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">📦 {listFor.task.title} · 交付物</h3>
+              <button type="button" onClick={() => setListFor(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="max-h-72 space-y-1 overflow-y-auto">
+              {listFor.items.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => {
+                    setListFor(null);
+                    if (a.kind === "report" && a.content) setPreview({ title: a.title, content: a.content });
+                    else if (a.signed_url) window.open(a.signed_url, "_blank", "noopener");
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                >
+                  <span>{KIND_ICON[a.kind] ?? "📦"}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs text-slate-800">{a.title}</span>
+                    <span className="block text-[10px] text-slate-400">{fmtTime(a.created_at)}</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-500">{a.kind === "report" ? "查看" : "打开"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 交付物 Markdown 预览 */}
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
           <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">

@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { Page, expect } from "@playwright/test";
 
@@ -28,6 +29,19 @@ interface State {
 
 const STATE_PATH = `${__dirname}/.state.json`;
 
+/** DB 直标已验证(E2E 环境模拟"用户点了邮件链接"——邮件通道不可自动化) */
+function verifyEmailViaDb(email: string): void {
+  try {
+    execSync(
+      `docker exec agentplatform-pg-1 psql -U agentplatform -d agentplatform -c ` +
+        `"UPDATE users SET email_verified_at=now() WHERE email='${email}'"`,
+      { stdio: "pipe" },
+    );
+  } catch {
+    /* 标记失败时后续登录被拦,测试会显式暴露 */
+  }
+}
+
 export function state(): State {
   return JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
 }
@@ -45,6 +59,11 @@ export async function registerAndLogin(page: Page) {
   await page.locator('input[type="password"]').first().fill(s.password);
   await page.getByPlaceholder("向管理员索取(inv-xxxxxxxxxx)").fill(s.invite);
   await page.getByRole("button", { name: "注册并登录" }).click();
+  // M33 邮箱闸门:注册后自动登录被拦 → 进入待验证引导视图(新 UI 一并验收);
+  // DB 标记模拟"用户点了邮件链接" → 点「我已验证,重新登录」走完闭环
+  await expect(page.getByText("验证邮件已发送")).toBeVisible({ timeout: 15_000 });
+  verifyEmailViaDb(s.email);
+  await page.getByRole("button", { name: /我已验证/ }).click();
   await expect(page.getByText("📋 任务中心")).toBeVisible({ timeout: 30_000 });
   // 注册成功后缓存当前 token,后续旅程注入复用(避开登录限频 5/min)
   const token = await page.evaluate(() => localStorage.getItem("agentplatform_token"));
@@ -61,6 +80,7 @@ export async function loginViaToken(page: Page) {
     await page.request.post("http://localhost:8000/api/auth/register", {
       data: { email: s.email, password: s.password, invite_code: s.invite },
     });
+    verifyEmailViaDb(s.email);
     const resp = await page.request.post("http://localhost:8000/api/auth/login", {
       data: { email: s.email, password: s.password },
     });

@@ -240,21 +240,33 @@ async def tasks_panel(
         ).all()
         for r in _runs:
             latest_run_session.setdefault(str(r.task_id), str(r.session_id) if r.session_id else None)
+    # 交付物计数键:manual 用 e.session_id;scheduled 用最近执行会话(20261010 表格
+    # 第四列修复——此前 scheduled 实体 session 为空,计数恒 0,📦 永不渲染)
+    _count_keys: set[str] = set()
+    for e in all_entities:
+        if e.session_id:
+            _count_keys.add(str(e.session_id))
+        elif e.scheduled_task_id:
+            _sid = latest_run_session.get(str(e.scheduled_task_id))
+            if _sid:
+                _count_keys.add(_sid)
     ent_counts = (
         dict(
             (await db.execute(
                 _sel(Artifact.session_id, _func.count())
-                .where(
-                    Artifact.session_id.in_([e.session_id for e in all_entities if e.session_id])
-                )
+                .where(Artifact.session_id.in_([uuid.UUID(k) for k in _count_keys]))
                 .group_by(Artifact.session_id)
             )).all()
         )
-        if all_entities
+        if _count_keys
         else {}
     )
 
     def _entity_item(e: TaskEntity) -> TaskEntityItem:
+        count_sid = (
+            str(e.session_id) if e.session_id
+            else (latest_run_session.get(str(e.scheduled_task_id)) if e.scheduled_task_id else None)
+        )
         return TaskEntityItem(
             id=str(e.id), title=e.title, status=e.status, kind=e.kind,
             session_id=str(e.session_id) if e.session_id else None,
@@ -264,7 +276,7 @@ async def tasks_panel(
                 if e.scheduled_task_id
                 else None
             ),
-            artifact_count=int(ent_counts.get(e.session_id, 0)) if e.session_id else 0,
+            artifact_count=int(ent_counts.get(uuid.UUID(count_sid), 0)) if count_sid else 0,
             created_at=e.created_at, completed_at=e.completed_at,
         )
 

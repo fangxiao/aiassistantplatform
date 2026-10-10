@@ -61,13 +61,13 @@ def _check_email_domain(email: str) -> None:
         )
 
 
-def _try_resend_verification(user_id: str, email: str) -> None:
+def _try_resend_verification(user_id: str, email: str, web_base: str = "") -> None:
     """登录被验证闸门拦截时自动补发(轻限频:1 次/分钟/账号,静默失败)。"""
     from agentplatform.core.auth.ratelimit import allow_resend
 
     if not allow_resend(user_id):
         return
-    _send_verification_email_bg(user_id, email)
+    _send_verification_email_bg(user_id, email, web_base=web_base)
 
 
 def _auth_error_to_http(exc: AuthError) -> HTTPException:
@@ -113,7 +113,10 @@ async def register(
             raise HTTPException(
                 status_code=403, detail={"code": "invite_required", "message": "注册需邀请码(向管理员索取)"}
             )
-        await consume_invite(session, payload.invite_code)
+        try:
+            await consume_invite(session, payload.invite_code)
+        except AuthError as exc:
+            raise _auth_error_to_http(exc) from exc
     role = payload.role
     if role == UserRole.developer and not settings.allow_self_promote_developer:
         role = UserRole.user
@@ -126,8 +129,8 @@ async def register(
 
     await seed_onboarding(session, str(user.id))
     await session.commit()
-    # 验证邮件线程投递(SMTP 未配置/失败不阻断注册;M24 P2)
-    _send_verification_email_bg(str(user.id), user.email)
+    # 验证邮件线程投递(SMTP 未配置/失败不阻断注册;M24 P2;M33 链接随 origin)
+    _send_verification_email_bg(str(user.id), user.email, web_base=payload.web_base)
     return user
 
 
@@ -166,7 +169,7 @@ async def login(
         )
     clear_login_fail(payload.email)
     if settings.email_verification_required and user.email_verified_at is None:
-        _try_resend_verification(str(user.id), user.email)
+        _try_resend_verification(str(user.id), user.email, web_base=payload.web_base)
         raise HTTPException(
             status_code=403,
             detail={
@@ -230,8 +233,19 @@ class VerifyEmailIn(BaseModel):
     token: str
 
 
-def _send_verification_email_bg(user_id: str, email: str) -> None:
-    """线程投递验证邮件;SMTP 未配置跳过,失败仅日志。"""
+class WebBaseIn(BaseModel):
+    """前端 origin(验证邮件链接跟随访问环境;M33)"""
+
+    web_base: str = ""
+
+
+def _send_verification_email_bg(user_id: str, email: str, web_base: str = "") -> None:
+    """线程投递验证邮件;SMTP 未配置跳过,失败仅日志。
+
+    web_base(20261010 交互修复):前端传入 location.origin——localhost 注册收
+    localhost 链接、公网注册收公网链接,点开即回当前环境。HTML 模板带大按钮,
+    邮件客户端/手机直接点按,不再让用户复制。
+    """
     import logging
     import threading
 
@@ -241,17 +255,36 @@ def _send_verification_email_bg(user_id: str, email: str) -> None:
     if not settings.notify_smtp_host:
         return
     token = create_email_verify_token(user_id)
-    link = f"{settings.public_web_base.rstrip('/')}/auth?verify_token={token}"
+    base = (web_base or settings.public_web_base or "http://localhost:3000").rstrip("/")
+    link = f"{base}/auth?verify_token={token}"
     body = (
         "欢迎使用 AgentPlatform!\n\n"
         "请点击以下链接完成邮箱验证(24 小时内有效):\n"
         f"{link}\n\n"
         "如果这不是你的操作,请忽略本邮件。"
     )
+    html = (
+        '<div style="max-width:480px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'
+        "'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif\">"
+        '<div style="padding:36px 28px;text-align:center;background:#ffffff">'
+        '<div style="font-size:28px;margin-bottom:8px">🤖</div>'
+        '<h1 style="font-size:20px;color:#0f172a;margin:0 0 12px">验证你的邮箱</h1>'
+        '<p style="font-size:14px;color:#475569;line-height:1.7;margin:0 0 24px">'
+        "欢迎使用 AgentPlatform!<br/>点击下方按钮完成邮箱验证,完成后即可登录。</p>"
+        f'<a href="{link}" style="display:inline-block;background:#4f46e5;color:#ffffff;'
+        "padding:13px 40px;border-radius:8px;text-decoration:none;font-size:15px;"
+        'font-weight:600;margin:0 auto 20px">确认验证</a>'
+        '<p style="font-size:12px;color:#94a3b8;line-height:1.6;margin:24px 0 0;'
+        'border-top:1px solid #e2e8f0;padding-top:16px">'
+        "按钮无法点击?将此链接复制到浏览器打开:<br/>"
+        f'<span style="color:#64748b;word-break:break-all">{link}</span><br/><br/>'
+        "链接 24 小时内有效 · 如果这不是你的操作,请忽略本邮件</p>"
+        "</div></div>"
+    )
 
     def _deliver() -> None:
         try:
-            send_email(email, "AgentPlatform 邮箱验证", body)
+            send_email(email, "AgentPlatform 邮箱验证", body, html=html)
         except Exception:
             logging.getLogger(__name__).warning("验证邮件投递失败 to=%s", email, exc_info=True)
 
@@ -281,7 +314,7 @@ async def verify_email(
 
 @router.post("/resend-verification")
 async def resend_verification(
-    request: Request,
+    payload: WebBaseIn | None = None,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict:
@@ -294,7 +327,9 @@ async def resend_verification(
         raise HTTPException(
             status_code=429, detail={"code": "rate_limited", "message": "发送过于频繁,请稍后再试"}
         )
-    _send_verification_email_bg(str(user.id), user.email)
+    _send_verification_email_bg(
+        str(user.id), user.email, web_base=(payload.web_base if payload else "")
+    )
     return {"ok": True}
 
 

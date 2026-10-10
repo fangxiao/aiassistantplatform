@@ -18,11 +18,13 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=6)
     role: UserRole = UserRole.user
     invite_code: str = ""  # M24 邀请码制(必填)
+    web_base: str = ""  # M33:前端 origin(验证邮件链接跟随访问环境)
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+    web_base: str = ""  # M33:被拦补发时链接跟随访问环境
 
 
 class UserOut(BaseModel):
