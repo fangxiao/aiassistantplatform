@@ -169,6 +169,10 @@ class Settings(BaseSettings):
     notify_from: str = ""
     # E2E 测试旁路(20261009):本地/测试环境关闭注册登录限频;生产保持 False
     e2e_no_ratelimit: bool = False
+    # 邮箱强制验证(20261010 家庭场景):登录须已验证;SMTP 未配时注册 fail-fast
+    email_verification_required: bool = True
+    # 注册邮箱域名白名单(逗号分隔可覆盖):保证验证邮件可靠送达
+    supported_email_domains: str = "163.com,126.com,qq.com,foxmail.com,gmail.com,outlook.com,hotmail.com,icloud.com,ailearning.top,139.com,189.cn,sina.com,sohu.com,aliyun.com"
     kb_shared_workspace_slug: str = "shared_workspace"  # 跨项目默认共享库(ADR 0006 前的共用约定,008 §11.3);置空禁用自动挂载
 
 

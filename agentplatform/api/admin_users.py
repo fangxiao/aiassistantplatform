@@ -24,6 +24,7 @@ class UserPatch(BaseModel):
 
     role: UserRole | None = None
     disabled: bool | None = None
+    email_verified: bool | None = None  # 救急:邮箱收不到验证邮件时 admin 手动标记
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -70,13 +71,18 @@ async def patch_user(
     admin: User = Depends(require_admin),
 ) -> UserAdminOut:
     """改角色/禁用(仅 admin);不可操作自己(防自锁)。"""
-    if payload.role is None and payload.disabled is None:
+    if payload.role is None and payload.disabled is None and payload.email_verified is None:
         raise HTTPException(
-            status_code=422, detail={"code": "validation_error", "message": "role 与 disabled 至少提供一项"}
+            status_code=422, detail={"code": "validation_error", "message": "role/disabled/email_verified 至少提供一项"}
         )
     user = await session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "用户不存在"})
+    if payload.email_verified is not None:
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        user.email_verified_at = _dt.now(_UTC) if payload.email_verified else None
     if user.id == admin.id:
         raise HTTPException(
             status_code=422, detail={"code": "validation_error", "message": "不能修改自己的角色或禁用状态"}

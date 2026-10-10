@@ -62,6 +62,8 @@ def _isolate_dev_settings() -> "object":
     settings.browser_dev_route_any = False
     # M24:默认旁路邀请码与限频(专项测试 test_auth_hardening 自行恢复)
     settings.invite_required = False
+    # M33(20261010):默认关邮箱强制验证(专项测试 test_email_gate 自行打开)
+    settings.email_verification_required = False
     import agentplatform.api.auth_ext as _ax
     import agentplatform.core.auth.ratelimit as _rl
 

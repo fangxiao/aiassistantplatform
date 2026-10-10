@@ -44,6 +44,32 @@ from agentplatform.core.db.session import get_session
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _check_email_domain(email: str) -> None:
+    """注册域名白名单:不在支持列表的服务商拒绝(保证验证邮件可达)。"""
+    from agentplatform.config import settings
+
+    domain = email.rsplit("@", 1)[-1].lower().strip()
+    allowed = {d.strip().lower() for d in settings.supported_email_domains.split(",") if d.strip()}
+    if domain not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "email_domain_unsupported",
+                "message": f"暂不支持 {domain} 邮箱注册(验证邮件可能无法送达)。"
+                f"请使用:{'、'.join(sorted(allowed)[:6])} 等主流邮箱",
+            },
+        )
+
+
+def _try_resend_verification(user_id: str, email: str) -> None:
+    """登录被验证闸门拦截时自动补发(轻限频:1 次/分钟/账号,静默失败)。"""
+    from agentplatform.core.auth.ratelimit import allow_resend
+
+    if not allow_resend(user_id):
+        return
+    _send_verification_email_bg(user_id, email)
+
+
 def _auth_error_to_http(exc: AuthError) -> HTTPException:
     return HTTPException(
         status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}
@@ -74,6 +100,14 @@ async def register(
         raise HTTPException(
             status_code=429, detail={"code": "rate_limited", "message": "操作过于频繁,请稍后再试"}
         )
+    if settings.email_verification_required:
+        # 域名白名单与 SMTP fail-fast 仅在强制验证模式下生效(不开验证则无送达性诉求)
+        _check_email_domain(payload.email)
+        if not settings.notify_smtp_host:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "smtp_not_configured", "message": "平台要求邮箱验证但未配置邮件服务,请联系管理员(SMTP)"},
+            )
     if settings.invite_required:
         if not getattr(payload, "invite_code", ""):
             raise HTTPException(
@@ -131,6 +165,15 @@ async def login(
             detail={"code": "unauthorized", "message": "邮箱或密码错误"},
         )
     clear_login_fail(payload.email)
+    if settings.email_verification_required and user.email_verified_at is None:
+        _try_resend_verification(str(user.id), user.email)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "email_unverified",
+                "message": "邮箱尚未验证——我们刚给你发了一封验证邮件,请查收(含垃圾箱)后点击链接,再回来登录",
+            },
+        )
     return await issue_session(session, user, request, response)
 
 
