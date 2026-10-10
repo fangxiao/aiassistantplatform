@@ -196,8 +196,16 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
                         <span>下次 {new Date(t.next_run_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                       )}
                       <span className={`inline-flex items-center gap-1 ${st.label === "失败" ? "text-rose-600" : st.label === "正常" ? "text-emerald-600" : "text-slate-500"}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                        {st.label}
+                        {t.last_status === "running" ? (
+                          <>
+                            <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg><span className="font-medium">正在运行…</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                            {st.label}
+                          </>
+                        )}
                       </span>
                       {t.last_error && (
                         <span className="truncate max-w-xs text-rose-500" title={t.last_error}>{t.last_error}</span>
@@ -216,9 +224,13 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
                       type="button"
                       disabled={t.last_status === "running" || running.has(t.id)}
                       onClick={() => void runNow(t)}
-                      className="rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                      className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
                     >
-                      跑一次
+                      {t.last_status === "running" || running.has(t.id) ? (
+                        <><svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg><small>运行中</small></>
+                      ) : (
+                        "跑一次"
+                      )}
                     </button>
                     <button
                       type="button"

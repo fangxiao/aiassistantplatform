@@ -128,6 +128,23 @@ async def delete_task(db: AsyncSession, user_id: str, task_id: uuid.UUID) -> boo
     return True
 
 
+# 上游错误 → 用户可读提示(20261010:SensitiveContentDetected 原文怼脸,用户无法理解)
+_UPSTREAM_ERROR_HINTS: list[tuple[str, str]] = [
+    ("SensitiveContentDetected", "上游模型安全审核拦截了本次请求(常见于误判)——请调整任务指令的措辞后重试,或在会话里换模型执行"),
+    ("RateLimit", "上游模型限流——稍等片刻重试即可"),
+    ("ConnectError", "上游模型网关连接失败(网络波动或服务不可用)——稍后重试"),
+    ("timed out", "上游响应超时——可重试;若持续出现请缩小任务指令范围"),
+]
+
+
+def _friendly_run_error(raw: str) -> str:
+    """已知上游错误翻译为人话 + 保留原文摘要;未知错误原样返回(截断)。"""
+    for key, hint in _UPSTREAM_ERROR_HINTS:
+        if key in raw:
+            return f"{hint}(原始错误: {raw[:180]})"
+    return raw[:500]
+
+
 async def reap_zombie_runs(db: AsyncSession) -> int:
     """僵尸 run 清道夫(20261009 事故):running 但已结束(finished_at 非空)或
     超时 2 倍仍无终态的 run 一律判失败;同步任务 last_status。返回修复数。
@@ -343,10 +360,11 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run = await db.get(TaskRun, run_id)
             task = await db.get(ScheduledTask, task_id)
             assert run is not None and task is not None
+            friendly = _friendly_run_error(str(exc))
             run.status = "failed"
-            run.error = str(exc)[:500]
+            run.error = friendly
             task.last_status = "failed"
-            task.last_error = str(exc)[:500]
+            task.last_error = friendly
         finally:
             task = await db.get(ScheduledTask, task_id)
             run = await db.get(TaskRun, run_id)

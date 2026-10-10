@@ -304,3 +304,16 @@ async def test_rename_task_syncs_entity(client, session):
     entity = (await session.scalars(_sel3(TaskEntity).where(TaskEntity.scheduled_task_id == sched.id))).first()
     await session.refresh(entity)
     assert entity.title == "新名字"
+
+
+def test_friendly_run_error_mapping():
+    """上游错误翻译(20261010:审核拦截原文怼脸)。"""
+    from agentplatform.core.scheduler.service import _friendly_run_error
+
+    sensitive = _friendly_run_error("{'code': 'SensitiveContentDetected', 'message': '...'}")
+    assert "安全审核" in sensitive and "措辞" in sensitive and "SensitiveContentDetected" in sensitive
+    assert "限流" in _friendly_run_error("upstream RateLimit reached")
+    assert "连接失败" in _friendly_run_error("httpx.ConnectError: cannot connect")
+    assert "超时" in _friendly_run_error("asyncio.TimeoutError: timed out")
+    unknown = "RuntimeError: 某未知问题"
+    assert _friendly_run_error(unknown) == unknown
