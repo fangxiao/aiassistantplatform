@@ -37,6 +37,19 @@ RESOURCE: dict = {
 }
 
 
+def is_configured() -> bool:
+    """搜索后端当前是否可用(tavily 需 key,searxng 需实例地址)。
+
+    调度器据此决定是否向无人值守任务下发本工具:后端没配时下发,模型一调
+    必失败,只会空转烧迭代直至本轮无正文收场(20261011 文言文任务实证)。
+    交互会话不受影响——失败也会以明确提示回填,LLM 能告知用户。
+    """
+    provider = settings.web_search_provider.lower()
+    if provider == "searxng":
+        return bool(settings.searxng_base_url)
+    return bool(settings.web_search_api_key)
+
+
 async def run(args: dict) -> str:
     """执行联网搜索;返回 JSON 字符串回填 agent loop。"""
     query = (args.get("query") or "").strip()

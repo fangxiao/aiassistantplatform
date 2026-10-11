@@ -23,6 +23,7 @@ from agentplatform.core.agent.dispatch import (  # noqa: F401  P2.4 迁出,兼�
 )
 from agentplatform.core.agent.errors import AgentLoopError
 from agentplatform.core.agent.executor import execute_skill, execute_tool
+from agentplatform.sdk.base import Context
 from agentplatform.core.agent.html_render import HTML_RENDER_TOOL_ID
 from agentplatform.core.agent.html_render import run as html_render_run
 from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
@@ -94,11 +95,14 @@ class ToolTrace:
 class AgentEvent:
     """流式 agent 事件(供 M6/M7 SSE)。"""
 
-    type: str  # delta | tool_call | block_meta | await_external | done
+    type: str  # delta | tool_call | block_meta | await_external | round_end | done
     text: str | None = None
     tool_trace: ToolTrace | None = None
     block: dict | None = None
     usage: dict | None = None  # 打磨:LLM token 用量(done 事件携带)
+    # M34:round_end 事件携带——该轮是否调用了工具。工具轮的 delta 是模型过渡语
+    # ("我来调用X工具"),聚合交付物(run_agent)不把它混入最终文本
+    had_tool_calls: bool = False
 
 
 
@@ -124,9 +128,17 @@ async def run_agent(
     memories: list[str] | None = None,
     display_name: str | None = None,
     chat_session_id: str | None = None,
+    system_prompt: str | None = None,
+    include_output_block: bool = True,
+    allow_reasoning_fallback: bool = True,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
+    # M34:工具轮的 delta 是模型过渡语("我来调用X工具"),不混入交付物——
+    # 此前它永远挂在答案开头(模型不遵守输出规范是常态,20261011 三插件冒烟实证)。
+    # skill 产出走独立 skill_delta 事件,不受影响。
+    transition_parts: list[str] = []
+    round_buf: list[str] = []
     traces: list[ToolTrace] = []
     usage_total = 0
     async for ev in stream_agent(
@@ -141,16 +153,27 @@ async def run_agent(
         memories=memories,
         display_name=display_name,
         chat_session_id=chat_session_id,
+        system_prompt=system_prompt,
+        include_output_block=include_output_block,
+        allow_reasoning_fallback=allow_reasoning_fallback,
     ):
         if ev.type == "delta" and ev.text:
-            text_parts.append(ev.text)
+            round_buf.append(ev.text)
+        elif ev.type == "round_end":
+            target = transition_parts if ev.had_tool_calls else text_parts
+            target.append("".join(round_buf))
+            round_buf.clear()
         elif ev.type == "tool_call" and ev.tool_trace is not None:
             if ev.tool_trace.result != "":
                 traces.append(ev.tool_trace)
         elif ev.type == "done" and ev.usage:
             usage_total += int((ev.usage or {}).get("total_tokens") or 0)
+    text_parts.append("".join(round_buf))  # 末轮经 break 退出,无 round_end 事件
+    text = "".join(text_parts)
+    if not text.strip() and transition_parts:
+        text = "".join(transition_parts)  # 极端:全部轮次都调了工具,退化为全量拼接
     return AgentResult(
-        text="".join(text_parts), tool_traces=traces, usage_tokens=usage_total or None
+        text=text, tool_traces=traces, usage_tokens=usage_total or None
     )
 
 
@@ -199,6 +222,9 @@ async def stream_agent(
     images: list[str] | None = None,
     display_name: str | None = None,
     chat_session_id: str | None = None,
+    system_prompt: str | None = None,
+    include_output_block: bool = True,
+    allow_reasoning_fallback: bool = True,
 ) -> AsyncIterator[AgentEvent]:
     """流式调度循环:显式调用编排 + 执行回填(002 §5)。
 
@@ -206,8 +232,14 @@ async def stream_agent(
     为 None 或浏览器未连接时,端侧工具降级为 await_external SSE + 暂停。
     allowed_kb_ids 为知识库检索允许范围(M12,chat 侧组装,设计 008 §3.3)。
     chat_session_id 为所属聊天会话(M25 交付物登记用;不传则不登记)。
+
+    system_prompt 传入则整体替换默认 system prompt(定时任务用,见
+    scheduler/context.py,须与 include_output_block=False 成对)。
+    include_output_block=False 不向模型下发 output_block 控件工具。
+    allow_reasoning_fallback=False 时"仅思考无正文"直接报错(触发 M32 重试),
+    而非把推理流当正文交付。
     """
-    tools = await build_tools(session, resource_ids)
+    tools = await build_tools(session, resource_ids, include_output_block=include_output_block)
     resources: dict[str, SkillTool] = {}
     for rid in resource_ids:
         row = await resolve(session, rid)
@@ -231,10 +263,13 @@ async def stream_agent(
     # 携带空闲事务进入长流式阶段会被 PG 终止连接,导致最终结果无法落库。
     await session.commit()
 
-    system = build_system_prompt(
-        list(resources.values()), plugin_desc=plugin_desc, memories=memories,
-        display_name=display_name,
-    )
+    if system_prompt is not None:
+        system = system_prompt
+    else:
+        system = build_system_prompt(
+            list(resources.values()), plugin_desc=plugin_desc, memories=memories,
+            display_name=display_name,
+        )
     messages = build_messages(system, history, user_message, images=images)
 
     import asyncio
@@ -401,7 +436,13 @@ async def stream_agent(
                     pass
                 return result
             if resource.kind == SkillToolKind.tool:
-                return await execute_tool(resource, args)
+                # M34:注入执行者身份(会话用户/会话 id)——插件工具经 ctx 做按用户的数据隔离
+                tool_ctx = Context(
+                    session_id=chat_session_id,
+                    user_id=owner_id,
+                    plugin_name=getattr(resource, "plugin_name", None),
+                )
+                return await execute_tool(resource, args, ctx=tool_ctx)
             return await execute_skill(resource, args, skill_call)
         except Exception as exc:  # noqa: BLE001  执行失败回填给 LLM
             return f"执行错误: {exc}"
@@ -431,6 +472,12 @@ async def stream_agent(
 
         # 思考模型兜底：如果模型把文章或输出写在推理/思考流中导致正文 delta 为空，自动提取实质内容作为回复
         if not accumulated_text.strip() and accumulated_reasoning:
+            if not allow_reasoning_fallback:
+                # 无人值守场景(定时任务)不兜底:把整段推理当交付物,用户收到的
+                # 是几千字英文内心戏(20261011 词汇任务事故);宁可报错走 M32 重试
+                raise AgentLoopError(
+                    "模型未产出正文(仅返回思考过程),不将思考过程作为定时任务交付物"
+                )
             import re
             content_match = re.search(
                 r"(?:^|\n)(#+\s+[^\n]+|【标题】[^\n]+|<(?:section|div|p|h\d)[\s\S]*)\Z",
@@ -673,6 +720,8 @@ async def stream_agent(
         # 工具执行会开启事务(如 kb_search 的检索查询);在下一轮长流式前提交释放,
         # 避免 idle-in-transaction 超时被 PG 断连,导致流结束后的消息落库失败。
         await session.commit()
+        # M34:轮次边界——聚合方(run_agent)据此把工具轮的过渡语与终答分离
+        yield AgentEvent(type="round_end", had_tool_calls=bool(calls))
 
     # 4. 自动落盘兜底:如果模型直接生成了 HTML 但未显式调用 preview 工具
     preview_res = next((res for rid, res in resources.items() if "preview" in rid), None)

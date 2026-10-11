@@ -15,6 +15,7 @@ from pathlib import Path
 
 from agentplatform.core.agent.errors import AgentExecError
 from agentplatform.core.registry.model import SkillTool
+from agentplatform.sdk.base import Context
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,13 @@ def resolve_impl(resource: SkillTool) -> object:
         raise AgentExecError(f"资源 {resource.id} 的实现无法加载: {path}") from exc
 
 
-async def execute_tool(resource: SkillTool, args: dict) -> str:
-    """执行确定性 tool,返回可回填的字符串结果。"""
+async def execute_tool(resource: SkillTool, args: dict, ctx: Context | None = None) -> str:
+    """执行确定性 tool,返回可回填的字符串结果。
+
+    ctx(M34):执行者身份(会话用户/会话 id),签名含 ctx 参数的插件工具可接收——
+    平台通用能力,插件据此做按用户的数据隔离(如插件存储原语)。
+    """
+    import inspect
     # 沙箱分流检查 (阶段一预埋：默认 settings.sandbox_enabled 为 False 旁路放行)
     from agentplatform.config import settings
     from agentplatform.core.sandbox.runner import execute_command_in_sandbox, is_high_risk_tool
@@ -120,7 +126,10 @@ async def execute_tool(resource: SkillTool, args: dict) -> str:
         raise AgentExecError(f"资源 {resource.id} 缺少 run 实现")
 
     try:
-        result = run_fn(**args)
+        if ctx is not None and "ctx" in inspect.signature(run_fn).parameters:
+            result = run_fn(**args, ctx=ctx)
+        else:
+            result = run_fn(**args)
     except TypeError:
         result = run_fn(args) if callable(run_fn) else str(run_fn)
 
