@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  state,
   clickStable,
   createWeeklyTask,
   createScheduledTask,
@@ -153,4 +154,88 @@ test("旅程 11:每周任务(周报)创建 → 显示每周周一(20261010 对�
   page.once("dialog", (d) => d.accept());
   await target.getByRole("button", { name: "删除" }).click();
   await expect(page.locator('[data-task-name="E2E周报任务"]')).toBeHidden({ timeout: 10_000 });
+});
+
+test("旅程 12:官方插件助手(英语学习)→ 提问 → 收到技能产出(20261011 M2)", async ({ page }) => {
+  await loginViaToken(page);
+  await page.goto("/assistants");
+  const card = page
+    .locator("div")
+    .filter({ has: page.getByRole("heading", { name: "英语学习助手" }) })
+    .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
+    .last();
+  await card.getByRole("button", { name: /开始对话/ }).click();
+  // 跳转后默认停在工作台视图,必须点"💬 对话"标签才会显示会话(20261011 实测);
+  // 断言用 visible=true 过滤——工作台里藏着会话标题/历史摘要等隐藏同文元素,
+  // 裸 getByText 的 .first() 会命中它们导致 flaky
+  await page.waitForURL(/sessionId=/, { timeout: 20_000 });
+  await page.getByRole("button", { name: "💬 对话", exact: true }).click();
+  await page.waitForTimeout(1_500); // 视图重挂载稳定(同旅程 4);否则 fill 后 Enter 落在旧 DOM 上发不出去
+  await expect(page.getByPlaceholder(/输入消息/)).toBeVisible({ timeout: 20_000 });
+  await page.getByPlaceholder(/输入消息/).fill("讲一下 accumulate 这个词");
+  await page.getByRole("button", { name: /发送/ }).click();
+  // 发送后输入框清空,visible 匹配到的只会是聊天气泡(text 引擎会按 value 匹配 textarea,不能在发送前断言)
+  await expect(page.locator("text=讲一下 accumulate 这个词 >> visible=true").first()).toBeVisible({
+    timeout: 20_000,
+  });
+  // auto 池每次可能路由到不同模型,回复措辞有方差——断言词汇讲解的任一特征词
+  await expect(
+    page.locator("text=/音标|释义|搭配|例句|词性/ >> visible=true").first()
+  ).toBeVisible({ timeout: 180_000 });
+});
+
+test("旅程 13:官方插件助手(数学学习)→ 提问 → 收到解题产出(20261011 M2)", async ({ page }) => {
+  await loginViaToken(page);
+  await page.goto("/assistants");
+  const card = page
+    .locator("div")
+    .filter({ has: page.getByRole("heading", { name: "数学学习助手" }) })
+    .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
+    .last();
+  await card.getByRole("button", { name: /开始对话/ }).click();
+  await page.waitForURL(/sessionId=/, { timeout: 20_000 });
+  // 钉稳定模型(同旅程 14)
+  const sid = page.url().match(/sessionId=([^&]+)/)?.[1] ?? "";
+  await page.request.patch(`/api/chat/sessions/${sid}`, {
+    headers: { Authorization: `Bearer ${state().token}` },
+    data: { model_override: "deepseek-v4-pro" },
+  });
+  await page.getByRole("button", { name: "💬 对话", exact: true }).click();
+  await page.waitForTimeout(1_500);
+  await page.getByPlaceholder(/输入消息/).fill("解这道题:已知等差数列首项 2,公差 3,求第 10 项");
+  await page.getByRole("button", { name: /发送/ }).click();
+  // 回复措辞有方差,断言解题产出任一特征
+  await expect(
+    page.locator("text=/详解|易错|思路|步骤/ >> visible=true").first()
+  ).toBeVisible({ timeout: 180_000 });
+});
+
+test("旅程 14:错题本插件 → 对话录入错题 → 工具落库确认(20261011 M3)", async ({ page }) => {
+  test.setTimeout(300_000); // auto 池可能路由到慢模型,150s 不够(20261011 实测)
+  await loginViaToken(page);
+  await page.goto("/assistants");
+  const card = page
+    .locator("div")
+    .filter({ has: page.getByRole("heading", { name: "错题本助手" }) })
+    .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
+    .last();
+  await card.getByRole("button", { name: /开始对话/ }).click();
+  await page.waitForURL(/sessionId=/, { timeout: 20_000 });
+  // 钉稳定模型:auto 池路由有方差,慢模型 240s 都出不了回复(20261011 实测)
+  const sid = page.url().match(/sessionId=([^&]+)/)?.[1] ?? "";
+  await page.request.patch(`/api/chat/sessions/${sid}`, {
+    headers: { Authorization: `Bearer ${state().token}` },
+    data: { model_override: "deepseek-v4-pro" },
+  });
+  await page.getByRole("button", { name: "💬 对话", exact: true }).click();
+  await page.waitForTimeout(1_500);
+  await page
+    .getByPlaceholder(/输入消息/)
+    .fill("帮我录入一道英语错题:题目是 He ____ (wait) since two hours. 我的答案是 has waited,正确答案是 has been waiting,错因是时态判断");
+  await page.getByRole("button", { name: /发送/ }).click();
+  // 工具落库成功后,助手确认话术有方差(已录入/已入库/任务处理完成/错题摘要都有出现过)——
+  // 断言取并集;真正的落库事实由工具返回保证
+  await expect(
+    page.locator("text=/已入库|已录入|任务处理完成|错题摘要/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
 });

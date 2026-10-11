@@ -29,16 +29,23 @@ interface State {
 
 const STATE_PATH = `${__dirname}/.state.json`;
 
-/** DB 直标已验证(E2E 环境模拟"用户点了邮件链接"——邮件通道不可自动化) */
+/** DB 直标已验证(E2E 环境模拟"用户点了邮件链接"——邮件通道不可自动化);
+ *  无 docker 时回退本机 psql(原生 PG 开发环境) */
 function verifyEmailViaDb(email: string): void {
+  const sql = `UPDATE users SET email_verified_at=now() WHERE email='${email}'`;
   try {
     execSync(
-      `docker exec agentplatform-pg-1 psql -U agentplatform -d agentplatform -c ` +
-        `"UPDATE users SET email_verified_at=now() WHERE email='${email}'"`,
+      `docker exec agentplatform-pg-1 psql -U agentplatform -d agentplatform -c "${sql}"`,
       { stdio: "pipe" },
     );
   } catch {
-    /* 标记失败时后续登录被拦,测试会显式暴露 */
+    try {
+      execSync(`psql -h localhost -U agentplatform -d agentplatform -c "${sql}"`, {
+        stdio: "pipe",
+      });
+    } catch {
+      /* 标记失败时后续登录被拦,测试会显式暴露 */
+    }
   }
 }
 

@@ -132,7 +132,7 @@ export default function MarkdownRenderer({
       }
       out.push(
         <div key={key++} className="my-2 overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
+          <table className="w-full min-w-[480px] md:min-w-0 border-collapse text-sm">
             <thead>
               <tr className="bg-slate-50">
                 {header.map((h, hi) => (

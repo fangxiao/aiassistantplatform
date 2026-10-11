@@ -51,18 +51,20 @@ function ChatHome() {
   const [current, setCurrent] = useState<SessionInfo | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  // 移动端(<768px)默认折叠抽屉,桌面默认展开
-  const [drawerCollapsed, setDrawerCollapsed] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 768
-  );
+  // 移动端(<768px)默认折叠抽屉:首帧用服务端安全默认值,挂载后按视口同步
+  // (初始值读 window 会造成 SSR/客户端 hydration mismatch,20261011 M4)
+  const [drawerCollapsed, setDrawerCollapsed] = useState(false);
   const [showAsstModal, setShowAsstModal] = useState(false);
   // M14:"新会话"是选择意图而非制造记录——无明确助手时弹选择器,取消不留垃圾会话
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
-  // M14 双视图:工作台 | 对话;两视图常驻挂载(hidden 切换),对话流式不因切换中断
-  const [view, setView] = useState<"workbench" | "chat">(() => {
-    if (typeof window === "undefined") return "workbench";
-    return (localStorage.getItem("workbench_view") as "workbench" | "chat") || "workbench";
-  });
+  // M14 双视图:工作台 | 对话;两视图常驻挂载(hidden 切换),对话流式不因切换中断。
+  // 初始值同样走服务端安全默认,挂载后读 localStorage 同步(避免 hydration mismatch)
+  const [view, setView] = useState<"workbench" | "chat">("workbench");
+  useEffect(() => {
+    setDrawerCollapsed(window.innerWidth < 768);
+    const saved = localStorage.getItem("workbench_view") as "workbench" | "chat" | null;
+    if (saved === "chat") setView("chat");
+  }, []);
   const switchView = (v: "workbench" | "chat") => {
     setView(v);
     localStorage.setItem("workbench_view", v);

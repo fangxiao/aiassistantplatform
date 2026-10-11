@@ -22,6 +22,8 @@ interface SchedTask {
   daily_at: string | null;
   weekly_day: number | null;
   interval_minutes: number | null;
+  cron_expr?: string | null;
+  model_override?: string | null;
   auto_save_kb: boolean;
   target_kb_id: string | null;
   feishu_chat_id?: string | null;
@@ -42,6 +44,7 @@ interface SchedRun {
   output: string | null;
   session_id: string | null;
   error: string | null;
+  tokens?: number | null;
 }
 
 const KIND_META: Record<string, { icon: string; label: string }> = {
@@ -150,7 +153,9 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
       ? `每天 ${t.daily_at ?? "--:--"}`
       : t.schedule_type === "weekly"
         ? `每${WEEK_NAMES[(t.weekly_day ?? 1) - 1]} ${t.daily_at ?? "--:--"}`
-        : `每 ${t.interval_minutes} 分钟`;
+        : t.schedule_type === "cron"
+          ? `cron ${t.cron_expr ?? "-"}`
+          : `每 ${t.interval_minutes} 分钟`;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-xs">
@@ -280,6 +285,8 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
                             <span className={r.status === "success" ? "font-medium text-emerald-600" : "font-medium text-rose-600"}>
                               {r.status === "success" ? "成功" : r.status === "failed" ? "失败" : "运行中"}
                               {(r as any).attempt === 2 ? <span className="ml-1 text-amber-600" title="首次失败后自动重试">↻</span> : null}
+                            {r.tokens ? <span className="text-slate-400">{r.tokens.toLocaleString("zh-CN")} tokens</span> : null}
+                            {(r as any).attempt > 2 ? <span className="ml-1 text-amber-600" title={`重试 ${((r as any).attempt - 1)} 次`}>↻{(r as any).attempt - 1}</span> : null}
                             </span>
                             {r.session_id && (
                               <button
@@ -335,6 +342,8 @@ function TaskFormModal({
 }) {
   const isEdit = !!task;
   const [assistants, setAssistants] = useState<{ id: string; display_name?: string | null; name: string }[]>([]);
+  // M33:任务级模型选型(空=平台默认;auto 池抽签方差大,内容型任务可钉住具体模型)
+  const [models, setModels] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -342,6 +351,12 @@ function TaskFormModal({
         setAssistants(await apiGet("/assistants"));
       } catch {
         setAssistants([]);
+      }
+      try {
+        const resp = await apiGet<{ models: { model: string }[] }>("/llm/models");
+        setModels((resp.models ?? []).map((m) => m.model));
+      } catch {
+        setModels([]);
       }
     })();
   }, []);
@@ -391,6 +406,8 @@ function TaskFormModal({
     weekly_day: task?.weekly_day ?? 1,
     daily_at: task?.daily_at ?? "08:00",
     interval_minutes: String(task?.interval_minutes ?? 60),
+    cron_expr: task?.cron_expr ?? "",
+    model_override: task?.model_override ?? "",
     auto_save_kb: task?.auto_save_kb ?? false,
     target_kb_id: task?.target_kb_id ?? "",
     channel_ids: ((task?.notify?.channel_ids as string[]) ?? []),
@@ -414,6 +431,8 @@ function TaskFormModal({
         daily_at: form.schedule_type === "daily" || form.schedule_type === "weekly" ? form.daily_at : null,
         weekly_day: form.schedule_type === "weekly" ? form.weekly_day : null,
         interval_minutes: form.schedule_type === "interval" ? parseInt(form.interval_minutes, 10) || 60 : null,
+        cron_expr: form.schedule_type === "cron" ? form.cron_expr.trim() || null : null,
+        model_override: form.model_override.trim() || null,
         plugin_id: form.plugin_id || null,
         auto_save_kb: form.auto_save_kb,
         target_kb_id: form.target_kb_id || null,
@@ -441,7 +460,9 @@ function TaskFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl">
+      {/* max-h+overflow:M33 加了模型下拉与轮换提示后表单变高,小视口下提交按钮
+          会被推出视口(e2e 旅程 2 实测),面板必须可滚动 */}
+      <div className="max-h-[92vh] w-full max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900">{isEdit ? "编辑定时任务" : "新建定时任务"}</h3>
@@ -500,9 +521,14 @@ function TaskFormModal({
                 value={form.prompt}
                 onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
                 rows={4}
+                maxLength={8000}
                 placeholder="到点让助手做什么,例如: 总结我知识库里最近一周新增的内容"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
               />
+              <span className="mt-1 block text-[10px] leading-4 text-slate-400">
+                运行时会自动附上当天日期与上一期产出的开头,并要求不与上期重复——
+                可以写「从以下篇目中选一篇今天还没讲过的」这类按期轮换的指令;这是无人值守任务,请写清输出格式,助手不会向你提问。
+              </span>
             </label>
           ) : (
             <label className="block">
@@ -527,6 +553,7 @@ function TaskFormModal({
                 <option value="daily">每天固定时刻</option>
                 <option value="weekly">每周固定星期</option>
                 <option value="interval">固定间隔</option>
+                <option value="cron">Cron 表达式</option>
               </select>
             </label>
             {form.schedule_type === "weekly" && (
@@ -553,6 +580,16 @@ function TaskFormModal({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
                 />
               </label>
+            ) : form.schedule_type === "cron" ? (
+              <label className="block flex-1">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-600">Cron 表达式(本地时区)</span>
+                <input
+                  value={form.cron_expr}
+                  onChange={(e) => setForm((f) => ({ ...f, cron_expr: e.target.value }))}
+                  placeholder="0 8 * * *(每天 08:00)"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                />
+              </label>
             ) : (
               <label className="block flex-1">
                 <span className="mb-1 block text-[11px] font-semibold text-slate-600">间隔(分钟)</span>
@@ -566,6 +603,25 @@ function TaskFormModal({
               </label>
             )}
           </div>
+
+          {models.length > 0 && (
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-slate-600">模型(可选)</span>
+              <select
+                value={form.model_override}
+                onChange={(e) => setForm((f) => ({ ...f, model_override: e.target.value }))}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+              >
+                <option value="">平台默认(默认端点 / auto 池)</option>
+                {models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[10px] leading-4 text-slate-400">
+                默认走网关 auto 池(每次可能路由到不同模型);对产出风格稳定性有要求时钉住具体模型。
+              </span>
+            </label>
+          )}
 
           <label className="flex items-center gap-2">
             <input
@@ -651,11 +707,11 @@ function TaskFormModal({
               {testMsg && <span className="mt-1 block text-[10px] text-slate-500">{testMsg}</span>}
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] text-slate-500">Webhook(飞书自定义机器人直接粘贴地址)</span>
+              <span className="mb-1 block text-[10px] text-slate-500">Webhook 地址(按下方格式粘贴对应服务的推送地址)</span>
               <input
                 value={form.notify_webhook}
                 onChange={(e) => setForm((f) => ({ ...f, notify_webhook: e.target.value }))}
-                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+                placeholder="Server酱: https://sctapi.ftqq.com/xxx.send"
                 className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-indigo-400"
               />
             </label>
@@ -667,6 +723,8 @@ function TaskFormModal({
                   onChange={(e) => setForm((f) => ({ ...f, notify_webhook_payload: e.target.value }))}
                   className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-indigo-400"
                 >
+                  <option value="serverchan">Server酱 · 推到微信(推荐,学生用)</option>
+                  <option value="pushplus">pushplus · 推到微信(token 放地址 ?token=)</option>
                   <option value="feishu">飞书机器人格式(text)</option>
                   <option value="raw">原始 JSON({`{task, output}`})</option>
                 </select>
