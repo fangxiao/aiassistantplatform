@@ -52,6 +52,9 @@ class Context:
 
     session_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # M34:执行者身份(平台注入;插件工具经 ctx 拿到"是谁在问",用于按用户隔离数据)
+    user_id: str | None = None
+    plugin_name: str | None = None
 
     @property
     def data_dir(self) -> Path:
