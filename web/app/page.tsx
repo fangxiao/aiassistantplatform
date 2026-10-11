@@ -235,7 +235,13 @@ function ChatHome() {
             patch((m) => ({ ...m, blocks: [...(m.blocks ?? []), block] }));
           } else if (ev.event === "tool_call") {
             const d = ev.data as ToolCallInfo;
-            patch((m) => ({ ...m, toolCalls: [...(m.toolCalls ?? []), d] }));
+            // M34:工具轮的正文是过渡语,转入淡色渲染区,正文只留终答
+            patch((m) => ({
+              ...m,
+              transition: (m.transition ?? "") + (m.text || ""),
+              text: "",
+              toolCalls: [...(m.toolCalls ?? []), d],
+            }));
           } else if (ev.event === "done") {
             terminated = true;
           }
@@ -324,7 +330,13 @@ function ChatHome() {
                 copy[matchIndex] = d;
                 return { ...m, toolCalls: copy };
               }
-              return { ...m, toolCalls: [...currentList, d] };
+              // M34:新工具调用出现,本轮已流入文本是过渡语,转入淡色区
+              return {
+                ...m,
+                transition: (m.transition ?? "") + (m.text || ""),
+                text: "",
+                toolCalls: [...currentList, d],
+              };
             });
           } else if (ev.event === "done") {
             const d = ev.data as { message_id?: string };
@@ -388,7 +400,13 @@ function ChatHome() {
             patch((m) => ({ ...m, blocks: [...(m.blocks ?? []), block] }));
           } else if (ev.event === "tool_call") {
             const d = ev.data as ToolCallInfo;
-            patch((m) => ({ ...m, toolCalls: [...(m.toolCalls ?? []), d] }));
+            // M34:工具轮的正文是过渡语,转入淡色渲染区,正文只留终答
+            patch((m) => ({
+              ...m,
+              transition: (m.transition ?? "") + (m.text || ""),
+              text: "",
+              toolCalls: [...(m.toolCalls ?? []), d],
+            }));
           } else if (ev.event === "done") {
             patch((m) => ({ ...m, resumable: null }));
           } else if (ev.event === "error") {
@@ -485,7 +503,13 @@ function ChatHome() {
                   copy[matchIndex] = d;
                   return { ...m, toolCalls: copy };
                 }
-                return { ...m, toolCalls: [...currentList, d] };
+                // M34:新工具调用出现,本轮已流入文本是过渡语,转入淡色区
+                return {
+                  ...m,
+                  transition: (m.transition ?? "") + (m.text || ""),
+                  text: "",
+                  toolCalls: [...currentList, d],
+                };
               });
             } else if (ev.event === "done") {
               const d = ev.data as { message_id?: string };

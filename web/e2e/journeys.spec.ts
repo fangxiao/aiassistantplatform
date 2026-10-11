@@ -161,7 +161,7 @@ test("旅程 12:官方插件助手(英语学习)→ 提问 → 收到技能产�
   await page.goto("/assistants");
   const card = page
     .locator("div")
-    .filter({ has: page.getByRole("heading", { name: "英语学习助手" }) })
+    .filter({ has: page.getByRole("heading", { name: "上海高中英语助手" }) })
     .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
     .last();
   await card.getByRole("button", { name: /开始对话/ }).click();
@@ -189,7 +189,7 @@ test("旅程 13:官方插件助手(数学学习)→ 提问 → 收到解题产�
   await page.goto("/assistants");
   const card = page
     .locator("div")
-    .filter({ has: page.getByRole("heading", { name: "数学学习助手" }) })
+    .filter({ has: page.getByRole("heading", { name: "上海高中数学助手" }) })
     .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
     .last();
   await card.getByRole("button", { name: /开始对话/ }).click();
@@ -216,7 +216,7 @@ test("旅程 14:错题本插件 → 对话录入错题 → 工具落库确认(20
   await page.goto("/assistants");
   const card = page
     .locator("div")
-    .filter({ has: page.getByRole("heading", { name: "错题本助手" }) })
+    .filter({ has: page.getByRole("heading", { name: "上海高中错题本助手" }) })
     .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
     .last();
   await card.getByRole("button", { name: /开始对话/ }).click();
@@ -236,6 +236,6 @@ test("旅程 14:错题本插件 → 对话录入错题 → 工具落库确认(20
   // 工具落库成功后,助手确认话术有方差(已录入/已入库/任务处理完成/错题摘要都有出现过)——
   // 断言取并集;真正的落库事实由工具返回保证
   await expect(
-    page.locator("text=/已入库|已录入|任务处理完成|错题摘要/ >> visible=true").first()
+    page.locator("text=/已入库|已录入|录入成功|任务处理完成|错题摘要/ >> visible=true").first()
   ).toBeVisible({ timeout: 240_000 });
 });

@@ -1,5 +1,5 @@
 name: study-chinese
-display_name: "语文学习助手"
+display_name: "上海高中语文助手"
 version: 0.2.0
 description: "上海高中语文(沪教版)全科学习助手,覆盖上海高考语文卷面:积累运用(默写/语言运用)、现代文阅读(论述类/文学类)、诗歌鉴赏、文言文、70分写作;含每日讲义生成,配合定时任务日更。"
 author: AgentPlatform Official

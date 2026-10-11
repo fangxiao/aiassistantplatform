@@ -70,6 +70,8 @@ export default function MessageItem({
   const hasToolCalls = Boolean(message.toolCalls && message.toolCalls.length > 0);
   const isThinking = isStreaming && isLast && Boolean(effectiveReasoning) && !hasText && !hasBlocks;
   const isActivelyWaiting = isStreaming && isLast && !hasText && !hasBlocks && !effectiveReasoning;
+  // M34:工具轮过渡语("我来调用X精讲…")淡色呈现——它是过程说明,不是回答正文
+  const hasTransition = Boolean(message.transition && message.transition.trim());
 
   const blocks: ContentBlock[] = hasBlocks
     ? (message.blocks as ContentBlock[])
@@ -84,7 +86,7 @@ export default function MessageItem({
   /** 将技术名称映射为对用户友好的中文描述 */
   function friendlyLabel(rawName: string): { icon: string; name: string } {
     const n = (rawName || "").toLowerCase();
-    if (n.includes("output_block")) return { icon: "🧩", name: "下发交互控件" };
+    if (n.includes("output_block")) return { icon: "🧩", name: "给出了填写表单" };
     if (n.includes("writewx_write") || n.includes("wechat_write")) return { icon: "✍️", name: "文章撰写" };
     if (n.includes("wechat_official") || n.includes("layout") || n.includes("排版")) return { icon: "🎨", name: "排版规范获取" };
     if (n.includes("writewx_preview") || n.includes("preview")) return { icon: "👁️", name: "文章预览生成" };
@@ -196,6 +198,12 @@ export default function MessageItem({
                   {effectiveReasoning}
                 </div>
               </details>
+            )}
+            {/* M34:工具轮过渡语淡色呈现(过程说明,非回答正文) */}
+            {hasTransition && (
+              <div className="whitespace-pre-wrap text-[11px] leading-5 text-slate-400">
+                {message.transition}
+              </div>
             )}
             {blocks.map((block, i) => (
               <BlockRenderer key={i} block={block} onInteract={onInteract} />

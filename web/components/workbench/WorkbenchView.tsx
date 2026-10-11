@@ -121,30 +121,7 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
             )}
           </Card>
 
-          {/* 最近会话 */}
-          <Card title="🕘 最近会话">
-            {sessions.length === 0 ? (
-              <Placeholder text="暂无会话,从「新会话」开始" />
-            ) : (
-              <div className="space-y-1">
-                {sessions.slice(0, 8).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => onContinue(s.id)}
-                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left transition hover:bg-slate-100"
-                  >
-                    <span className="truncate text-xs text-slate-700">
-                      {s.title || "未命名会话"}
-                    </span>
-                    <span className="ml-2 shrink-0 text-[10px] text-slate-400">
-                      {s.updated_at ? new Date(s.updated_at).toLocaleDateString("zh-CN") : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </Card>
+          {/* 会话统一入口见上方「💬 会话中心」(v4);旧「最近会话」卡已移除(重复展示,20261011) */}
         </div>
 
         {/* 定时任务(M15) + 知识库动态 */}

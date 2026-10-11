@@ -18,6 +18,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "tool" | "system";
   text: string;
+  // M34:工具轮过渡语("我来调用X…")——收到 tool_call 时正文转入此字段,淡色渲染
+  transition?: string;
   blocks?: ContentBlock[];
   toolCalls?: ToolCallInfo[];
   reasoning?: string;   // 模型深度思考内容（流式，展示为思考进度指示器）

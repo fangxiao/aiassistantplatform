@@ -493,7 +493,7 @@ function normalizeFormField(f: any, i: number): ContentBlock {
       id: fieldKey,
       // 嵌套态字段值上报键:唯一,容器据此按字段收集(避免全部撞在 "input.text" 上)
       action: fieldKey,
-      label: f?.label ?? f?.name ?? `字段${i + 1}`,
+      label: f?.label ?? f?.name ?? f?.key ?? f?.placeholder ?? `字段${i + 1}`,
       placeholder: f?.placeholder,
       required: Boolean(f?.required),
       options: Array.isArray(f?.options) ? f.options : undefined,
