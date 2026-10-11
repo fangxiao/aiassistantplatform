@@ -4,11 +4,36 @@
 服务端聚合供定时运行使用(前端聚合无法在后端定时上下文中复用)。
 """
 
+from datetime import date
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.core.kb import service as kb_service
 from agentplatform.core.kb.model import KnowledgeBase
 from agentplatform.core.workbench import service as todo_service
+
+# 定时任务专用 system prompt(20261011 词汇任务事故)。
+#
+# 不能复用对话链路的 build_system_prompt:那段【交互规范】教模型"收集信息必须弹
+# output_block 控件",对交互会话是对的,对无人值守的定时任务是反向激励——实测
+# (auto 池,各 5-10 次)模型会改成向用户"确认细节",弹表单没人填,本轮作废,
+# 再被 loop.py 的思考兜底把整段推理倒进产出。5 组对照实验结论:
+#   现有链路                 0/5
+#   仅换本 prompt            4/5   (残留失败全是去调 tool:memory)
+#   本 prompt + 摘除
+#   output_block/memory/todo 10/10
+# 故本 prompt 必须与 service.py 的工具裁剪成对出现,单独换 prompt 不够。
+SCHEDULED_TASK_SYSTEM_PROMPT = (
+    "你是由 AgentPlatform 驱动的智能助手，正在执行一个**无人值守的定时任务**。\n"
+    "执行期间没有用户在线：你提出的任何问题都不会得到回答，任何表单/确认框都不会被填写。\n"
+    "因此你必须自行完成全部判断，并在本轮直接输出最终结果正文。\n\n"
+    "【输出规范】\n"
+    "1. 直接输出任务要求的成品内容；不要开场白、不要收尾寒暄、不要「我来帮你…」「请确认…」这类过渡语。\n"
+    "2. 严禁输出任何交互控件（input.form / input.confirm / input.select 等），严禁向用户提问。\n"
+    "3. 严禁把内部思考过程（如 The user.../I should.../Let me...）写进正文。\n\n"
+    "【工具】仅当任务确实需要外部信息或动作时才调用工具；纯内容生成任务不要调用任何工具。\n\n"
+    "【任务】\n"
+)
 
 
 async def _kb_activity(db: AsyncSession, user_id: str, limit: int = 8) -> list[dict]:
@@ -109,8 +134,15 @@ async def _doc_freshness(db: AsyncSession, user_id: str, limit: int = 8) -> list
     return out
 
 
-def build_prompt(task_kind: str, extra_prompt: str, context: dict) -> str:
-    """内置模板 + 用户补充要求;custom 原样。"""
+def build_prompt(
+    task_kind: str,
+    extra_prompt: str,
+    context: dict,
+    *,
+    today: date | None = None,
+    last_output: str | None = None,
+) -> str:
+    """内置模板 + 用户补充要求;custom 原样 + 运行环境注入(日期/上期产出)。"""
     import json
 
     if task_kind == "briefing":
@@ -140,7 +172,23 @@ def build_prompt(task_kind: str, extra_prompt: str, context: dict) -> str:
             "的具体建议;一切新鲜时如实说明。直接输出正文,不要开场白。数据:\n"
         )
     else:
-        return extra_prompt.strip()
+        # custom:用户 prompt 原样保留,但补两样定时运行无法自获的环境信息。
+        # 定时运行无状态(history=[]、custom 不聚合上下文),不给日期,"每天一篇/
+        # 按期轮换"类诉求无从下手;不给上期产出,模型会每期输出同一份总览
+        # (20261011 文言文任务实证)。仅 custom 注入:内置模板由数据驱动天然
+        # 不重复,且 inspection 首行 [OK]/[ALERT] 契约不宜引入额外变量。
+        lines: list[str] = []
+        if today is not None:
+            wd = "一二三四五六日"[today.weekday()]
+            lines.append(f"今天是 {today.year}年{today.month}月{today.day}日 星期{wd}。")
+        if last_output and last_output.strip():
+            head = " ".join(last_output.strip().split())[:200]
+            lines.append(
+                f"上一期(上次运行)的产出开头是:「{head}」。"
+                "本期必须输出与上一期不同的新内容,严禁重复上一期已输出的内容。"
+            )
+        prefix = ("\n".join(lines) + "\n\n") if lines else ""
+        return prefix + extra_prompt.strip()
     if extra_prompt.strip():
         base += f"\n用户补充要求:{extra_prompt.strip()}\n"
     return base + json.dumps(context, ensure_ascii=False, default=str)

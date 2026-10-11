@@ -13,7 +13,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.config import settings
-from agentplatform.core.scheduler.context import build_context, build_prompt
+from agentplatform.core.scheduler.context import (
+    SCHEDULED_TASK_SYSTEM_PROMPT,
+    build_context,
+    build_prompt,
+)
 from agentplatform.core.scheduler.model import ScheduledTask, TaskRun
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,17 @@ def compute_next_run(task: ScheduledTask, now: datetime) -> datetime | None:
         if candidate <= local:
             candidate += timedelta(days=7)
         return candidate.astimezone(UTC)
+    if task.schedule_type == "cron":
+        # M33:cron 表达式(5 段标准;与 daily_at 同用服务器本地时区,用户视角一致)
+        if not (task.cron_expr or "").strip():
+            return None
+        try:
+            from croniter import croniter
+
+            nxt = croniter(task.cron_expr.strip(), now.astimezone()).get_next(datetime)
+            return nxt.astimezone(UTC)
+        except Exception:  # noqa: BLE001  非法表达式由创建/编辑校验拦截,此处稳态兜底
+            return None
     return None
 
 
@@ -96,6 +111,17 @@ async def create_task(db: AsyncSession, user_id: str, **kwargs) -> ScheduledTask
         raise SchedulerError("每周调度必须指定星期(weekly_day)与执行时刻(daily_at)")
     if task.schedule_type == "interval" and not (task.interval_minutes and task.interval_minutes > 0):
         raise SchedulerError("间隔调度必须指定正整数分钟数")
+    if task.schedule_type == "cron":
+        expr = (task.cron_expr or "").strip()
+        if not expr:
+            raise SchedulerError("cron 调度必须填写 cron 表达式(5 段标准格式)")
+        try:
+            from croniter import croniter
+
+            croniter(expr)  # 仅校验合法性,不取值
+        except Exception as exc:
+            raise SchedulerError(f"cron 表达式不合法: {exc}") from exc
+        task.cron_expr = expr
     task.next_run_at = compute_next_run(task, datetime.now(UTC))
     db.add(task)
     await db.flush()
@@ -204,6 +230,44 @@ async def reap_zombie_runs(db: AsyncSession) -> int:
     return len(zombies)
 
 
+async def reap_expired_runs(db: AsyncSession) -> int:
+    """M33:运行历史保留策略——清理超过保留期的 run 及其关联数据。
+
+    每次运行自动建一个会话,多用户长期不清理会无限增长;交付物凭
+    task_run_id/session_id 跳转(纯 UUID 引用无 FK),run 删了即死链,
+    一并清理。删除顺序:交付物 → messages → interact_events → sessions
+    → task_runs(FK 依赖序)。retention_days=0 表示永久保留。
+    """
+    from sqlalchemy import delete as _delete
+
+    from agentplatform.core.artifacts.model import Artifact
+    from agentplatform.core.interact.model import InteractEvent
+    from agentplatform.core.message.model import Message
+    from agentplatform.core.session.model import Session as ChatSession
+
+    days = settings.scheduler_run_retention_days
+    if days <= 0:
+        return 0
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    old_runs = (
+        await db.scalars(select(TaskRun).where(TaskRun.started_at < cutoff))
+    ).all()
+    if not old_runs:
+        return 0
+    run_ids = [r.id for r in old_runs]
+    session_ids = [r.session_id for r in old_runs if r.session_id]
+    if run_ids:
+        await db.execute(_delete(Artifact).where(Artifact.task_run_id.in_(run_ids)))
+    if session_ids:
+        await db.execute(_delete(Message).where(Message.session_id.in_(session_ids)))
+        await db.execute(_delete(InteractEvent).where(InteractEvent.session_id.in_(session_ids)))
+        await db.execute(_delete(ChatSession).where(ChatSession.id.in_(session_ids)))
+    await db.execute(_delete(TaskRun).where(TaskRun.id.in_(run_ids)))
+    await db.commit()
+    logger.info("scheduler: 已清理 %d 条超过 %d 天的运行历史", len(old_runs), days)
+    return len(old_runs)
+
+
 async def list_runs(db: AsyncSession, user_id: str, task_id: uuid.UUID, limit: int = 10) -> list[TaskRun]:
     task = await get_task(db, user_id, task_id)
     if task is None:
@@ -261,7 +325,6 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
     from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, resolve_allowed_kb_ids
     from agentplatform.core.message.service import save_user_message
     from agentplatform.core.plugin.loader import get_plugin
-    from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
 
     async with SessionLocal() as db:
         task = await db.get(ScheduledTask, task_id)
@@ -297,34 +360,52 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             )
             if allowed_kb_ids and KB_SEARCH_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
-            if WORKBENCH_TODO_TOOL_ID not in resource_ids:
-                resource_ids = [*resource_ids, WORKBENCH_TODO_TOOL_ID]
+            # 无人值守任务只注入"取外部信息/动作"类工具。workbench_todo 与 memory
+            # 不再注入(20261011 词汇任务事故):任务 prompt 常是"每天生成X"这类持续性
+            # 表述,模型看到 memory/todo 工具会改成"先记住偏好/建待办"或向用户确认,
+            # 实测是把失败率从 0/5 拉到 4/5 与 3/5;插件 manifest 显式声明的不拦。
             from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
             from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
-            from agentplatform.core.memory.tool import MEMORY_TOOL_ID
+            from agentplatform.core.agent.web_search import is_configured as _search_ready
 
-            if MEMORY_TOOL_ID not in resource_ids:
-                resource_ids = [*resource_ids, MEMORY_TOOL_ID]
-            if WEB_SEARCH_TOOL_ID not in resource_ids:
+            if _search_ready() and WEB_SEARCH_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, WEB_SEARCH_TOOL_ID]
             if HTTP_ACTION_TOOL_ID not in resource_ids:
                 resource_ids = [*resource_ids, HTTP_ACTION_TOOL_ID]
 
             # 3. prompt:kind 模板 + 服务端聚合上下文
             context = await build_context(db, str(task.user_id), task.kind)
-            prompt = build_prompt(task.kind, task.prompt, context)
+            # custom 注入运行环境:本地日期 + 上一次成功产出开头(供"每天一篇"
+            # 类任务按期轮换、避免重复输出同一份内容)。当前 run 状态是 running,
+            # 不会被 status='success' 过滤命中;首期无历史则为 None。
+            prev_run = (
+                await db.scalars(
+                    select(TaskRun)
+                    .where(TaskRun.task_id == task_id, TaskRun.status == "success")
+                    .order_by(TaskRun.started_at.desc())
+                    .limit(1)
+                )
+            ).first()
+            prompt = build_prompt(
+                task.kind,
+                task.prompt,
+                context,
+                today=datetime.now(UTC).astimezone().date(),
+                last_output=prev_run.output if prev_run else None,
+            )
 
             # 4. 运行 agent(非流式聚合;定时上下文无 SSE 消费者)
-            client = await make_llm_client(db, (manifest or {}).get("model") if manifest else None)
+            # 模型优先级(M33):任务级 model_override > 插件 manifest.model > 平台默认;
+            # user_id 传入使用户自定义端点可被解析(与交互会话同规则)
+            task_model = task.model_override or ((manifest or {}).get("model") if manifest else None)
+            client = await make_llm_client(db, task_model, user_id=str(task.user_id))
             await save_user_message(db, chat_sess.id, prompt)
             from agentplatform.core.agent.loop import run_agent
-            from agentplatform.core.memory import service as memory_service
 
-            memories = await memory_service.memories_for_prompt(db, str(task.user_id))
-
-            # M32(20261010 对标):失败自动重试一次——上游审核误杀/限流/网络抖动
-            # 等瞬时错误占失败大头,重试一次成功率显著(WorkBuddy/千问同款行为);
-            # attempt 落 run 行,UI 可见"重试过"
+            # M32(20261010 对标):失败自动重试——上游审核误杀/限流/网络抖动
+            # 等瞬时错误占失败大头,重试成功率显著(WorkBuddy/千问同款行为);
+            # attempt 落 run 行,UI 可见"重试过"。M33:次数与首退避可配,退避线性
+            # (delay×attempt)——对网关长时间挂起类故障拉长间隔,不再固定 20s
             async def _run_once():
                 return await asyncio.wait_for(
                     run_agent(
@@ -335,27 +416,31 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
                         history=[],
                         owner_id=str(task.user_id),
                         allowed_kb_ids=allowed_kb_ids,
-                        memories=memories,
                         chat_session_id=str(chat_sess.id),
+                        system_prompt=SCHEDULED_TASK_SYSTEM_PROMPT,
+                        include_output_block=False,
+                        allow_reasoning_fallback=False,
                     ),
                     timeout=settings.scheduler_run_timeout_s,
                 )
 
+            total_attempts = 1 + max(0, settings.scheduler_retry_attempts)
             result = None
             last_exc: Exception | None = None
-            for attempt in (1, 2):
+            for attempt in range(1, total_attempts + 1):
                 run.attempt = attempt
                 try:
                     result = await _run_once()
                     break
                 except Exception as exc:  # noqa: BLE001
                     last_exc = exc
-                    if attempt == 1:
+                    if attempt < total_attempts:
+                        delay = max(1, settings.scheduler_retry_delay_s) * attempt
                         logger.warning(
-                            "定时任务第 1 次执行失败,20s 后自动重试 task=%s: %s",
-                            task.id, str(exc)[:200],
+                            "定时任务第 %d 次执行失败,%ds 后自动重试 task=%s: %s",
+                            attempt, delay, task.id, str(exc)[:200],
                         )
-                        await asyncio.sleep(20)
+                        await asyncio.sleep(delay)
             if result is None:
                 assert last_exc is not None
                 raise last_exc
@@ -372,6 +457,8 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run.output = output
             run.session_id = chat_sess.id
             run.status = "success"
+            # M33:token 用量落库(列一直在,此前从未写入,成本可观测是断的)
+            run.tokens = result.usage_tokens
             # 成熟度④:通知出口推送(失败不影响任务)
             await _notify(db, task, output)
             # M22 P2-3:飞书推送(失败不影响任务)
@@ -495,14 +582,11 @@ async def _notify(db, task: ScheduledTask, output: str) -> None:
         channels = list(rows)
     for ch in channels:
         await notify_service.deliver(ch, text)
-    # inline 兼容
+    # inline 兼容(M34:分派进 notify 服务,新增微信 Server酱/pushplus 格式)
     if cfg.get("webhook"):
-        payload = (
-            notify_service.feishu_bot_payload(text)
-            if cfg.get("webhook_payload") == "feishu"
-            else {"task": task.name, "output": output[:4000]}
+        await notify_service.send_task_webhook(
+            str(cfg["webhook"]), str(cfg.get("webhook_payload") or ""), text, task.name
         )
-        await notify_service.send_webhook(str(cfg["webhook"]), payload)
     if cfg.get("email"):
         notify_service.send_email(str(cfg["email"]), f"AgentPlatform · {task.name}", text)
 

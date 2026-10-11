@@ -5,14 +5,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.config import settings
-from agentplatform.core.scheduler import service as scheduler_service
-from agentplatform.core.scheduler.model import ScheduledTask
-from agentplatform.core.scheduler.scheduler import is_due
 from agentplatform.core.auth.model import UserRole
 from agentplatform.core.auth.service import create_user
+from agentplatform.core.scheduler import service as scheduler_service
+from agentplatform.core.scheduler.model import ScheduledTask, TaskRun
+from agentplatform.core.scheduler.scheduler import is_due
 
 
 @pytest.fixture
@@ -180,3 +181,107 @@ class TestDailyTimezone:
         now2 = datetime(2026, 9, 20, 9, 0, tzinfo=UTC)  # 北京 17:00
         nxt2 = scheduler_service.compute_next_run(_task(daily_at="16:20"), now2)
         assert nxt2 == datetime(2026, 9, 21, 8, 20, tzinfo=UTC), f"got {nxt2}"
+
+
+class TestComputeNextRunCron:
+    """M33:cron 调度(5 段标准表达式,本地时区)。"""
+
+    def test_cron_daily(self) -> None:
+        now = datetime(2026, 10, 11, 1, 0, tzinfo=UTC)  # 本地(UTC+8)09:00
+        nxt = scheduler_service.compute_next_run(
+            _task(schedule_type="cron", cron_expr="0 8 * * *", daily_at=None), now
+        )
+        # 本地今天 08:00 已过(09:00) → 明天本地 08:00
+        assert nxt is not None
+        assert nxt.astimezone().hour == 8 and nxt.astimezone().day == now.astimezone().day + 1
+
+    def test_cron_invalid_returns_none(self) -> None:
+        now = datetime.now(UTC)
+        assert scheduler_service.compute_next_run(
+            _task(schedule_type="cron", cron_expr="not a cron"), now
+        ) is None
+        assert scheduler_service.compute_next_run(_task(schedule_type="cron", cron_expr=""), now) is None
+        assert scheduler_service.compute_next_run(_task(schedule_type="cron"), now) is None
+
+
+class TestBuildPromptRunEnv:
+    """M33:custom 任务 prompt 注入运行环境(日期/上期产出);内置 kind 不受影响。"""
+
+    def test_custom_with_date_and_last_output(self) -> None:
+        from agentplatform.core.scheduler.context import build_prompt
+
+        p = build_prompt(
+            "custom", "每天生成10个单词", {},
+            today=datetime(2026, 10, 11, tzinfo=UTC).date(),
+            last_output="上一期的产出内容",
+        )
+        assert "2026年10月11日" in p
+        assert "上一期的产出内容" in p
+        assert "严禁重复" in p
+        assert p.endswith("每天生成10个单词")
+
+    def test_custom_without_env_unchanged(self) -> None:
+        from agentplatform.core.scheduler.context import build_prompt
+
+        assert build_prompt("custom", "原文", {}) == "原文"
+
+    def test_builtin_kind_untouched(self) -> None:
+        from agentplatform.core.scheduler.context import build_prompt
+
+        p = build_prompt("inspection", "补充", {"a": 1}, today=datetime(2026, 10, 11, tzinfo=UTC).date())
+        assert "今天是" not in p
+        assert "[ALERT]" in p
+
+
+class TestRunRetention:
+    """M33:运行历史保留策略——超期 run 连带会话/消息/交付物清理,近期保留。"""
+
+    async def test_reap_expired_runs(self, session, monkeypatch) -> None:
+        from agentplatform.core.artifacts.model import Artifact
+        from agentplatform.core.message.model import Message
+        from agentplatform.core.scheduler.service import reap_expired_runs
+        from agentplatform.core.session.model import Session as ChatSession
+
+        monkeypatch.setattr(settings, "scheduler_run_retention_days", 90)
+        now = datetime.now(UTC)
+        uid = str(uuid.uuid4())
+        old_sess = ChatSession(user_id=uid)
+        new_sess = ChatSession(user_id=uid)
+        session.add_all([old_sess, new_sess])
+        await session.flush()
+        old_run = ScheduledTask(
+            id=uuid.uuid4(), user_id="u1", name="old", kind="custom", prompt="p",
+            schedule_type="daily", daily_at="08:00",
+        )
+        session.add(old_run)
+        await session.flush()
+        session.add_all([
+            ScheduledTask(
+                id=uuid.uuid4(), user_id="u1", name="keep", kind="custom", prompt="p",
+                schedule_type="daily", daily_at="08:00",
+            ),
+            TaskRun(
+                task_id=old_run.id, status="success", output="旧产出",
+                started_at=now - timedelta(days=100), session_id=old_sess.id,
+            ),
+            TaskRun(
+                task_id=old_run.id, status="success", output="新产出",
+                started_at=now - timedelta(days=1), session_id=new_sess.id,
+            ),
+        ])
+        await session.flush()
+        session.add_all([
+            Message(session_id=old_sess.id, role="user", blocks=[{"type": "markdown", "data": {"text": "q"}}]),
+            Message(session_id=old_sess.id, role="assistant", blocks=[{"type": "markdown", "data": {"text": "a"}}]),
+            Artifact(user_id=uid, session_id=old_sess.id, kind="report", title="旧交付物"),
+        ])
+        await session.flush()
+        old_ids = {old_sess.id, new_sess.id}
+
+        cleaned = await reap_expired_runs(session)
+        assert cleaned == 1
+        remains = (await session.scalars(
+            select(ChatSession.id)
+        )).all()
+        assert old_sess.id not in remains and new_sess.id in remains
+        assert len(old_ids) == 2

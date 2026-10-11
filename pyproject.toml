@@ -25,6 +25,7 @@ dependencies = [
     "pgvector>=0.3",
     # 知识库 PDF 解析(与 tool:pdf_parse 同源)
     "pypdf>=5.0",
+    "croniter>=6.2.4",
 ]
 
 [project.scripts]

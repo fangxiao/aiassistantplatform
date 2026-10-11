@@ -20,15 +20,19 @@ router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
 
 class TaskIn(BaseModel):
-    """创建/编辑定时任务;kind=custom 必填 prompt,daily 必填 daily_at。"""
+    """创建/编辑定时任务;kind=custom 必填 prompt,daily 必填 daily_at,cron 必填 cron_expr。"""
 
     name: str = Field(min_length=1, max_length=100)
     kind: str = "briefing"
-    prompt: str = Field(default="", max_length=2000)  # custom 必填;模板任务可填补充要求
+    # M33:上限 2000→8000——"每天一篇"类任务要贴篇目轮换清单(平台侧还会附
+    # 日期与上期产出,模型上下文足够)
+    prompt: str = Field(default="", max_length=8000)  # custom 必填;模板任务可填补充要求
     schedule_type: str = "daily"
     daily_at: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     weekly_day: int | None = Field(default=None, ge=1, le=7)  # weekly 调度:1-7(周一到周日)
     interval_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 30)
+    cron_expr: str | None = Field(default=None, max_length=100)  # M33:5 段标准表达式(本地时区)
+    model_override: str | None = Field(default=None, max_length=120)  # M33:任务级模型(空=默认)
     plugin_id: uuid.UUID | None = None
     mounted_kb_ids: list[uuid.UUID] = []
     auto_save_kb: bool = False
@@ -47,6 +51,8 @@ class TaskOut(BaseModel):
     daily_at: str | None
     weekly_day: int | None = None
     interval_minutes: int | None
+    cron_expr: str | None = None
+    model_override: str | None = None
     plugin_id: uuid.UUID | None
     mounted_kb_ids: list[uuid.UUID]
     auto_save_kb: bool
@@ -71,6 +77,7 @@ class RunOut(BaseModel):
     output: str | None
     session_id: uuid.UUID | None
     error: str | None
+    tokens: int | None = None  # M33:全部轮次 token 合计(成本可观测)
 
 
 def _task_out(t: ScheduledTask) -> TaskOut:
@@ -80,7 +87,8 @@ def _task_out(t: ScheduledTask) -> TaskOut:
         interval_minutes=t.interval_minutes, plugin_id=t.plugin_id,
         mounted_kb_ids=[uuid.UUID(k) for k in (t.mounted_kb_ids or [])],
         auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id,
-        weekly_day=t.weekly_day, notify=t.notify or {},
+        weekly_day=t.weekly_day, cron_expr=t.cron_expr, model_override=t.model_override,
+        notify=t.notify or {},
         feishu_chat_id=t.feishu_chat_id, enabled=t.enabled,
         last_run_at=t.last_run_at, next_run_at=t.next_run_at,
         last_status=t.last_status, last_error=t.last_error, created_at=t.created_at,
@@ -92,6 +100,7 @@ def _run_out(r) -> RunOut:
         id=r.id, task_id=r.task_id, started_at=r.started_at, finished_at=r.finished_at,
         status=r.status, output=r.output, session_id=r.session_id, error=r.error,
         attempt=getattr(r, "attempt", 1) or 1,
+        tokens=getattr(r, "tokens", None),
     )
 
 
@@ -130,6 +139,8 @@ async def create_task(
             daily_at=payload.daily_at,
             weekly_day=payload.weekly_day,
             interval_minutes=payload.interval_minutes,
+            cron_expr=payload.cron_expr,
+            model_override=(payload.model_override or "").strip() or None,
             plugin_id=payload.plugin_id,
             mounted_kb_ids=[str(k) for k in payload.mounted_kb_ids],
             auto_save_kb=payload.auto_save_kb,
@@ -160,6 +171,8 @@ async def update_task(
     task.daily_at = payload.daily_at
     task.weekly_day = payload.weekly_day
     task.interval_minutes = payload.interval_minutes
+    task.cron_expr = (payload.cron_expr or "").strip() or None
+    task.model_override = (payload.model_override or "").strip() or None
     task.plugin_id = payload.plugin_id
     task.mounted_kb_ids = [str(k) for k in payload.mounted_kb_ids]
     task.auto_save_kb = payload.auto_save_kb

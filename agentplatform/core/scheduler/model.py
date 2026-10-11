@@ -30,6 +30,11 @@ class ScheduledTask(Base):
     daily_at: Mapped[str | None] = mapped_column(Text, nullable=True)  # "HH:MM"(服务器时区)
     weekly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)  # weekly 调度:1-7(周一到周日)
     interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # M33:cron 调度(schedule_type='cron' 时必填,5 段标准表达式,服务器本地时区)
+    cron_expr: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # M33:任务级模型选型(空=插件 manifest.model,再空=平台默认端点;
+    # sessions.model_override 同款机制——auto 池抽签方差大,内容型任务可钉住具体模型)
+    model_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # 空=平台通用助手
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # 空=运行时取可见库
     auto_save_kb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -67,9 +67,19 @@ async def _tick() -> int:
 
 
 async def _loop() -> None:
+    last_retention = 0.0  # M33:保留策略清理每小时跑一次即可,不必每 tick
     while True:
         try:
             await _tick()
+            import time as _time
+
+            if _time.monotonic() - last_retention >= 3600:
+                last_retention = _time.monotonic()
+                from agentplatform.core.db.engine import SessionLocal
+                from agentplatform.core.scheduler.service import reap_expired_runs
+
+                async with SessionLocal() as db:
+                    await reap_expired_runs(db)
         except asyncio.CancelledError:
             raise
         except Exception:
