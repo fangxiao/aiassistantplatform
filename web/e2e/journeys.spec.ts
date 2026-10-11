@@ -216,7 +216,7 @@ test("旅程 14:错题本插件 → 对话录入错题 → 工具落库确认(20
   await page.goto("/assistants");
   const card = page
     .locator("div")
-    .filter({ has: page.getByRole("heading", { name: "上海高中错题本助手" }) })
+    .filter({ has: page.getByRole("heading", { name: "错题本助手" }) })
     .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
     .last();
   await card.getByRole("button", { name: /开始对话/ }).click();
