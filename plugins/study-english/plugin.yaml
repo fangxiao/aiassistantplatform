@@ -1,0 +1,15 @@
+name: study-english
+display_name: "英语学习助手"
+version: 0.1.0
+description: "上海高中英语(上教版)学习助手:词汇精讲、语法答疑与纠错、每日词汇清单生成,面向高考英语。"
+author: AgentPlatform Official
+model: auto
+depends_on: []
+skills:
+  - id: skill:study_english_vocab_explain
+    file: ./skills/vocab_explain.py
+  - id: skill:study_english_grammar_coach
+    file: ./skills/grammar_coach.py
+  - id: skill:study_english_daily_vocab_set
+    file: ./skills/daily_vocab_set.py
+tools: []

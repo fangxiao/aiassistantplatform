@@ -1,0 +1,6 @@
+name: 现代文阅读方法验证
+input: "现代文阅读的作用题怎么答?"
+expect:
+  output_contains:
+    - "答题"
+    - "文本"

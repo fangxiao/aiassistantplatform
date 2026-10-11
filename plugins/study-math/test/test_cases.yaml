@@ -1,0 +1,6 @@
+name: 基础功能验证
+input: "讲解函数的单调性"
+expect:
+  output_contains:
+    - "例题"
+    - "易错"

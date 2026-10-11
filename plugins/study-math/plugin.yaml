@@ -1,0 +1,15 @@
+name: study-math
+display_name: "数学学习助手"
+version: 0.1.0
+description: "上海高中数学(沪教版)学习助手:知识点精讲、规范化解题、每日一题生成,面向上海高考数学。"
+author: AgentPlatform Official
+model: auto
+depends_on: []
+skills:
+  - id: skill:study_math_concept_explain
+    file: ./skills/concept_explain.py
+  - id: skill:study_math_problem_solver
+    file: ./skills/problem_solver.py
+  - id: skill:study_math_daily_problem
+    file: ./skills/daily_problem.py
+tools: []

@@ -1,0 +1,23 @@
+name: study-chinese
+display_name: "语文学习助手"
+version: 0.2.0
+description: "上海高中语文(沪教版)全科学习助手,覆盖上海高考语文卷面:积累运用(默写/语言运用)、现代文阅读(论述类/文学类)、诗歌鉴赏、文言文、70分写作;含每日讲义生成,配合定时任务日更。"
+author: AgentPlatform Official
+model: auto
+depends_on: []
+skills:
+  - id: skill:study_chinese_classical_explain
+    file: ./skills/classical_explain.py
+  - id: skill:study_chinese_classical_lecture
+    file: ./skills/classical_lecture.py
+  - id: skill:study_chinese_essay_coach
+    file: ./skills/essay_coach.py
+  - id: skill:study_chinese_modern_reading
+    file: ./skills/modern_reading.py
+  - id: skill:study_chinese_poetry_appreciation
+    file: ./skills/poetry_appreciation.py
+  - id: skill:study_chinese_recitation_drill
+    file: ./skills/recitation_drill.py
+  - id: skill:study_chinese_language_usage
+    file: ./skills/language_usage.py
+tools: []

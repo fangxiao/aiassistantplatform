@@ -1,0 +1,6 @@
+name: 基础功能验证
+input: "讲一下 ambiguous 这个词"
+expect:
+  output_contains:
+    - "音标"
+    - "搭配"

@@ -1,0 +1,6 @@
+name: 基础功能验证
+input: "精讲《劝学》第一段"
+expect:
+  output_contains:
+    - "翻译"
+    - "实词"
