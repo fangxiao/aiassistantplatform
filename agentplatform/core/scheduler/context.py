@@ -165,6 +165,26 @@ def build_prompt(
             "包含:①知识库资产概览(库数/文档量);②数据源健康度汇总;③未完成待办清单;"
             "④下周建议关注的 1-2 件事。直接输出正文,不要开场白。数据:\n"
         )
+    elif task_kind == "parent_report":
+        from agentplatform.core.study import daily_summary as _ds
+        # 家长日报由 service 直接生成(不走 LLM,零成本即时);此处仅作为兜底模板
+        base = (
+            "请根据学习活动数据生成家长日报。数据:\n"
+            + json.dumps(context, ensure_ascii=False, default=str)
+            + "\n格式:今日完成情况/本周累计/连续打卡天数/建议(如有)。语气简洁。"
+        )
+    elif task_kind == "exam_prep":
+        import json as _json
+
+        days_left = context.get("exam_days_left", "?")
+        subjects = context.get("exam_subjects", "")
+        base = (
+            f"距离考试还有 {days_left} 天,科目:{subjects}。"
+            "请根据以下错题数据,选出最可能在考试中再错的题目(优先高频错题和最近未复习的),"
+            "生成一份考前冲刺练习(5-10 题)。格式:每题含题干、4 个选项(A/B/C/D)、"
+            "正确答案(附在最后)、解析要点。语气鼓励。\n错题数据:\n"
+            + _json.dumps(context.get("mistakes", []), ensure_ascii=False, default=str)
+        )
     elif task_kind == "freshness":
         base = (
             "你是知识库维护助手。请根据以下文档新鲜度数据,生成一份维护建议(150 字以内):"

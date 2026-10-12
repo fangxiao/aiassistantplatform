@@ -27,6 +27,8 @@ interface SchedTask {
   auto_save_kb: boolean;
   target_kb_id: string | null;
   feishu_chat_id?: string | null;
+  exam_date?: string | null;
+  exam_subjects?: string | null;
   plugin_id?: string | null;
   notify?: Record<string, any>;
   enabled: boolean;
@@ -415,6 +417,8 @@ function TaskFormModal({
     notify_webhook_payload: (task?.notify?.webhook_payload as string) ?? "feishu",
     notify_email: (task?.notify?.email as string) ?? "",
     feishu_chat_id: task?.feishu_chat_id ?? "",
+    exam_date: task?.exam_date?.split("T")[0] ?? "",
+    exam_subjects: task?.exam_subjects ?? "",
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -442,6 +446,8 @@ function TaskFormModal({
           ...(form.notify_email ? { email: form.notify_email } : {}),
         },
         feishu_chat_id: form.feishu_chat_id || null,
+        exam_date: form.kind === "exam_prep" && form.exam_date ? form.exam_date : null,
+        exam_subjects: form.kind === "exam_prep" && form.exam_subjects ? form.exam_subjects : null,
         enabled: task?.enabled ?? true,
       };
       if (isEdit && task) {
@@ -510,6 +516,8 @@ function TaskFormModal({
               <option value="inspection">🔍 巡检(异常才通知,[OK]/[ALERT] 分级)</option>
               <option value="weekly_report">📅 周报(资产概览 + 下周建议)</option>
               <option value="freshness">🕰️ 文档新鲜度检查(最久未更新提醒)</option>
+              <option value="parent_report">👨‍👩‍👧 家长日报(学习情况汇总推送)</option>
+              <option value="exam_prep">📝 考前冲刺(错题集中复习)</option>
               <option value="custom">🧩 自定义指令</option>
             </select>
           </label>
@@ -556,6 +564,29 @@ function TaskFormModal({
                 <option value="cron">Cron 表达式</option>
               </select>
             </label>
+            {form.kind === "exam_prep" && (
+              <>
+                <label className="block flex-1">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-600">考试日期</span>
+                  <input
+                    type="date"
+                    value={form.exam_date || ""}
+                    onChange={(e) => setForm((f) => ({ ...f, exam_date: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                  />
+                </label>
+                <label className="block flex-1">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-600">考试科目(逗号分隔)</span>
+                  <input
+                    type="text"
+                    value={form.exam_subjects || ""}
+                    onChange={(e) => setForm((f) => ({ ...f, exam_subjects: e.target.value }))}
+                    placeholder="语文,数学,英语"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                  />
+                </label>
+              </>
+            )}
             {form.schedule_type === "weekly" && (
               <label className="block flex-1">
                 <span className="mb-1 block text-[11px] font-semibold text-slate-600">星期</span>

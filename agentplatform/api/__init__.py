@@ -30,6 +30,7 @@ from agentplatform.api import (
     registry,
     scheduler,
     specs,
+    study,
     tasks,
     workbench,
 )
@@ -57,6 +58,7 @@ api_router.include_router(insights.router)
 api_router.include_router(notify.router)
 api_router.include_router(diagnostics.router)
 api_router.include_router(llm_user.router)
+api_router.include_router(study.router)
 api_router.include_router(tasks.router)
 api_router.include_router(workbench.router)
 api_router.include_router(scheduler.router)

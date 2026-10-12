@@ -39,6 +39,8 @@ class TaskIn(BaseModel):
     target_kb_id: uuid.UUID | None = None  # P1:自动存库目标(空=回退首个可写库)
     notify: dict = {}  # 成熟度④:{webhook?, webhook_payload?: feishu|raw, email?}
     feishu_chat_id: str | None = Field(default=None, max_length=120)  # M22 P2-3 应用内机器人推送目标
+    exam_date: str | None = Field(default=None, max_length=30)  # M36:考试日期(ISO date)
+    exam_subjects: str | None = Field(default=None, max_length=200)  # M36:考试科目(逗号分隔)
     enabled: bool = True
 
 
@@ -59,6 +61,8 @@ class TaskOut(BaseModel):
     target_kb_id: uuid.UUID | None
     notify: dict
     feishu_chat_id: str | None = None
+    exam_date: str | None = None
+    exam_subjects: str | None = None
     enabled: bool
     last_run_at: datetime | None
     next_run_at: datetime | None
@@ -89,7 +93,8 @@ def _task_out(t: ScheduledTask) -> TaskOut:
         auto_save_kb=t.auto_save_kb, target_kb_id=t.target_kb_id,
         weekly_day=t.weekly_day, cron_expr=t.cron_expr, model_override=t.model_override,
         notify=t.notify or {},
-        feishu_chat_id=t.feishu_chat_id, enabled=t.enabled,
+        feishu_chat_id=t.feishu_chat_id,
+        exam_date=t.exam_date, exam_subjects=t.exam_subjects, enabled=t.enabled,
         last_run_at=t.last_run_at, next_run_at=t.next_run_at,
         last_status=t.last_status, last_error=t.last_error, created_at=t.created_at,
     )
@@ -147,6 +152,8 @@ async def create_task(
             target_kb_id=payload.target_kb_id,
             notify=payload.notify,
             feishu_chat_id=payload.feishu_chat_id,
+            exam_date=payload.exam_date,
+            exam_subjects=payload.exam_subjects,
             enabled=payload.enabled,
         )
     except scheduler_service.SchedulerError as exc:
@@ -179,6 +186,8 @@ async def update_task(
     task.target_kb_id = payload.target_kb_id
     task.notify = payload.notify
     task.feishu_chat_id = payload.feishu_chat_id
+    task.exam_date = payload.exam_date
+    task.exam_subjects = payload.exam_subjects
     task.enabled = payload.enabled
     # M31(20261009 E2E 发现):改名同步任务实体——任务中心此前一直显示旧名
     from sqlalchemy import update as _upd

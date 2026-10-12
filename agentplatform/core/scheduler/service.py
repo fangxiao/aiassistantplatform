@@ -22,7 +22,7 @@ from agentplatform.core.scheduler.model import ScheduledTask, TaskRun
 
 logger = logging.getLogger(__name__)
 
-TASK_KINDS = ("briefing", "inspection", "custom", "weekly_report", "freshness")
+TASK_KINDS = ("briefing", "inspection", "custom", "weekly_report", "freshness", "parent_report", "exam_prep")
 
 
 class SchedulerError(Exception):
@@ -478,6 +478,20 @@ async def _execute_run(task_id: uuid.UUID, run_id: uuid.UUID) -> None:
             # P1 通知分级:产出首行 [ALERT] 标记 → alert=True 进通知;正常静默落卡
             run.alert = output.splitlines()[0].strip().startswith("[ALERT]") if output else False
             task.last_status = "success"
+            # M36:学习活动记录(定时任务产出即视为一次学习行为)
+            from agentplatform.core.study import service as study_service
+
+            _subject_map = {"english": "english", "chinese": "chinese", "math": "math"}
+            _subject = _subject_map.get(task.name.lower()[:8], "") or next(
+                (s for s in _subject_map if s in task.name.lower()), "other"
+            )
+            await study_service.record(
+                db, user_id=str(task.user_id),
+                activity_type="scheduled_task", subject=_subject,
+                count=1, source="scheduled_task",
+                session_id=str(chat_sess.id),
+            )
+
             # M25:成功产出登记交付物(kind=report,双引用跳会话;设计 019 §3.2)
             from datetime import datetime as _dt
 

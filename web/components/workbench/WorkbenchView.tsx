@@ -9,6 +9,7 @@ import { BriefingCard } from "./BriefingCard";
 import { SchedulerCard } from "./SchedulerCard";
 import { ChannelsCard } from "./ChannelsCard";
 import { TasksCard } from "./TasksCard";
+import { StudyProgressCard } from "./StudyProgressCard";
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
 
 /** 个人工作台视图(M14 · 设计 010):今日概览 dashboard。
@@ -66,8 +67,11 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
         {assistants.length === 0 && sessions.length <= 1 && <OnboardingCard onOpenKb={onOpenKb} />}
 
         <div className="grid gap-5 lg:grid-cols-2">
-          {/* 任务中心(M25):进行中/定时/交付物三栏聚合 */}
-          <TasksCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
+          {/* 会话中心(v4) + 学习进度(M36) */}
+          <div className="space-y-4">
+            <TasksCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
+            <StudyProgressCard />
+          </div>
           {/* 我的待办(P1) + 助手记忆(打磨①) */}
           <TodoCard />
           <MemoryCard />
