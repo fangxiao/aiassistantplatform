@@ -44,11 +44,18 @@ async def deploy_plugin(
     # settings.plugin_review_required=True 恢复 ADR 0008 审批制
     from agentplatform.config import settings as _settings
 
-    trial_status = (
-        PluginReviewStatus.pending_review
-        if _settings.plugin_review_required
-        else PluginReviewStatus.approved
-    )
+    # M35:官方插件(author 含 AgentPlatform/Official)免审批
+    _is_official = "official" if any(
+        kw in (manifest.author or "") for kw in ("AgentPlatform", "Official", "官方")
+    ) else "community"
+    if _is_official == "official":
+        trial_status = PluginReviewStatus.approved
+    else:
+        trial_status = (
+            PluginReviewStatus.pending_review
+            if _settings.plugin_review_required
+            else PluginReviewStatus.approved
+        )
     existing = await session.scalar(
         select(Plugin).where(Plugin.name == manifest.name)
     )
@@ -70,6 +77,7 @@ async def deploy_plugin(
         await session.flush()
     else:
         plugin = Plugin(
+            source=_is_official,
             name=manifest.name,
             version=manifest.version,
             manifest=manifest.model_dump(),

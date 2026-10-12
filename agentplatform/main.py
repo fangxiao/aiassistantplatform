@@ -48,6 +48,17 @@ async def lifespan(app: FastAPI):
             await seed_builtin(db)
     except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
         logger.warning("内置资源补种跳过: %s", exc)
+    # M35:官方插件自动部署(plugins/ 目录,author 含 AgentPlatform/Official/官方)
+    from agentplatform.core.plugin.official import deploy_official_plugins
+
+    try:
+        async with _DbSession() as db:
+            n = await deploy_official_plugins(db)
+            await db.commit()
+            if n:
+                logger.info("官方插件部署完成: %d 个", n)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("官方插件部署跳过: %s", exc)
     # T20.2 用户体系 bootstrap:首个 admin 幂等引导(未配置 INITIAL_ADMIN_EMAIL 跳过)
     from agentplatform.core.auth.service import ensure_initial_admin
 

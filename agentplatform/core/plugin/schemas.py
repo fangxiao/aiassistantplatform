@@ -19,6 +19,7 @@ class PluginOut(BaseModel):
     version: str
     status: PluginStatus
     review_status: PluginReviewStatus
+    source: str = "community"  # M35:official=平台维护✓
     last_review_reason: str | None = None
     owner_id: str | None = None
     description: str | None = None
@@ -38,6 +39,7 @@ def to_out(plugin: Plugin) -> PluginOut:
         version=plugin.version,
         status=plugin.status,
         review_status=plugin.review_status,
+        source=getattr(plugin, 'source', 'community') or 'community',
         last_review_reason=plugin.last_review_reason,
         owner_id=plugin.owner_id,
         description=m.get("description"),

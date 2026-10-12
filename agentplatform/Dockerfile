@@ -21,6 +21,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY agentplatform ./agentplatform
 COPY migrations ./migrations
+# M35:官方插件目录(启动时自动部署)
+COPY plugins ./plugins
 COPY alembic.ini ./
 # wheels/(可选,本地构建提速):预下载的 linux aarch64 轮子,存在则离线装配,
 # 构建容器零网络依赖(20260930 colima VM 大文件传输极慢的绕行方案)。

@@ -56,6 +56,8 @@ class Plugin(Base):
         default=PluginStatus.active,
     )
     owner_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # M35:插件来源(official=平台维护免审批✓ / community=开发者,默认)
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="community")
     # 助手运行时挂载的已发布知识库(uuid 字符串;设计 008 §4.3);重部署覆盖时保留
     mounted_kb_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     # 独立访问令牌(T18.20):/a/{token} 白牌入口;空=未发布

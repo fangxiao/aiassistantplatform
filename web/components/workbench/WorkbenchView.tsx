@@ -92,7 +92,7 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-xs font-bold text-slate-900">
-                          {a.display_name || a.name}
+                          {a.display_name || a.name}{a.source === "official" && <span className="ml-1 rounded bg-indigo-100 px-1 py-0.5 text-[8px] font-bold text-indigo-600">✓</span>}
                         </span>
                         {(a.mounted_kb_ids?.length ?? 0) > 0 && (
                           <span
