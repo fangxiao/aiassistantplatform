@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Text, Uuid
+from sqlalchemy import JSON, DateTime, Text, Uuid
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +53,8 @@ class User(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # M37:角色画像(多选,控制工作台卡片显隐;student/parent/developer)
+    personas: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     @property
     def email_verified(self) -> bool:

@@ -37,6 +37,7 @@ class UserOut(BaseModel):
     role: UserRole
     created_at: datetime
     email_verified: bool = False  # M24 P2:User.email_verified 属性派生
+    personas: list[str] = []  # M37:角色画像(多选)  # M24 P2:User.email_verified 属性派生
 
 
 class TokenOut(BaseModel):

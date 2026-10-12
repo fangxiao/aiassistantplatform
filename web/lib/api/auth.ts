@@ -11,6 +11,7 @@ export interface AuthUser {
   role: "user" | "developer" | "admin";
   created_at: string;
   email_verified?: boolean; // M24 P2:未验证账号顶栏横幅提醒
+  personas?: string[]; // M37:角色画像(多选,控制工作台卡片)
 }
 
 export interface LoginResult {

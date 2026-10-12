@@ -10,6 +10,26 @@ import { SchedulerCard } from "./SchedulerCard";
 import { ChannelsCard } from "./ChannelsCard";
 import { TasksCard } from "./TasksCard";
 import { StudyProgressCard } from "./StudyProgressCard";
+import { getUser } from "../../lib/api/auth";
+
+/** M37:角色画像 → 工作台卡片显隐(多选并集) */
+const PERSONA_CARDS: Record<string, string[]> = {
+  student: ["sessions", "study", "scheduler", "assistants", "onboarding"],
+  parent: ["sessions", "scheduler", "todos", "assistants"],
+  developer: ["sessions", "todos", "memory", "briefing", "scheduler", "assistants", "kb", "channels"],
+};
+const GENERAL_CARDS = ["sessions", "todos", "assistants"];
+
+function visibleCards(): Set<string> {
+  const user = typeof window !== "undefined" ? getUser() : null;
+  const personas = user?.personas ?? [];
+  if (!personas.length) return new Set(GENERAL_CARDS);
+  const cards = new Set<string>();
+  for (const p of personas) {
+    for (const c of PERSONA_CARDS[p] ?? []) cards.add(c);
+  }
+  return cards.size ? cards : new Set(GENERAL_CARDS);
+}
 import type { AssistantInfo, KbInfo, SessionInfo } from "../../lib/types";
 
 /** 个人工作台视图(M14 · 设计 010):今日概览 dashboard。
@@ -56,6 +76,11 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
           </p>
         </div>
 
+        {/* M37:按角色画像过滤卡片(多选并集) */}
+        {(() => {
+          const cards = visibleCards();
+          return (
+            <>
         {/* 快捷操作 */}
         <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <QuickAction icon="💬" title="新会话" desc="选一个助手开始" onClick={() => onNewSession()} />
@@ -64,21 +89,24 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
         </div>
 
         {/* 空状态三步引导(T14.8):新用户首次进入时替代"空卡片"观感 */}
-        {assistants.length === 0 && sessions.length <= 1 && <OnboardingCard onOpenKb={onOpenKb} />}
+        {cards.has("onboarding") && assistants.length === 0 && sessions.length <= 1 && <OnboardingCard onOpenKb={onOpenKb} />}
 
         <div className="grid gap-5 lg:grid-cols-2">
-          {/* 会话中心(v4) + 学习进度(M36) */}
-          <div className="space-y-4">
-            <TasksCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
-            <StudyProgressCard />
-          </div>
+          {/* 会话中心(v4) */}
+          {cards.has("sessions") && (
+            <div className="space-y-4">
+              <TasksCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
+              {cards.has("study") && <StudyProgressCard />}
+            </div>
+          )}
           {/* 我的待办(P1) + 助手记忆(打磨①) */}
-          <TodoCard />
-          <MemoryCard />
+          {cards.has("todos") && <TodoCard />}
+          {cards.has("memory") && <MemoryCard />}
           {/* 每日简报(P1) */}
-          <BriefingCard onContinue={onContinue} onSaveToKb={onSaveToKb} />
+          {cards.has("briefing") && <BriefingCard onContinue={onContinue} onSaveToKb={onSaveToKb} />}
 
           {/* 我的助手 */}
+          {cards.has("assistants") && (
           <Card title="🤖 我的助手" action={{ label: "新会话", onClick: () => onNewSession() }}>
             {assistants.length === 0 ? (
               <Placeholder text="暂无助手;开发者部署插件后出现在这里" />
@@ -124,18 +152,22 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
               </div>
             )}
           </Card>
+          )}
 
           {/* 会话统一入口见上方「💬 会话中心」(v4);旧「最近会话」卡已移除(重复展示,20261011) */}
         </div>
 
         {/* 定时任务(M15) + 知识库动态 */}
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
-          <SchedulerCard onContinue={onContinue} />
+          {cards.has("scheduler") && <SchedulerCard onContinue={onContinue} />}
           <div className="space-y-5">
-            <ChannelsCard isDeveloper={false} />
-            <KbActivityCard onOpenKb={onOpenKb} />
+            {cards.has("channels") && <ChannelsCard isDeveloper={false} />}
+            {cards.has("kb") && <KbActivityCard onOpenKb={onOpenKb} />}
           </div>
         </div>
+            </>
+          );
+        })()}
       </div>
     </div>
   );

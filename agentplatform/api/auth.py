@@ -12,7 +12,7 @@ GET  /auth/me        当前用户(受保护)
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentplatform.api.auth_session import (
@@ -365,3 +365,33 @@ async def kick_login(
     if not ok:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "登录不存在"})
     return {"ok": True}
+
+
+# ── 角色画像(M37:工作台卡片显隐,多选并集)──────────────────
+
+
+class PersonasIn(BaseModel):
+    """角色画像更新(多选;空数组 = general)。"""
+
+    personas: list[str] = Field(default_factory=list, max_length=5)
+
+
+VALID_PERSONAS = {"student", "parent", "developer", "general"}
+
+
+@router.patch("/me/personas")
+async def update_personas(
+    payload: PersonasIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """自助修改角色画像(控制工作台卡片;不影响权限 role)。"""
+    invalid = [p for p in payload.personas if p not in VALID_PERSONAS]
+    if invalid:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": f"不支持的角色: {invalid}(可选: {sorted(VALID_PERSONAS)})"},
+        )
+    user.personas = [p for p in payload.personas if p != "general"]  # general = 空数组
+    await session.commit()
+    return {"ok": True, "personas": user.personas}

@@ -4,6 +4,7 @@ import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Composer from "../components/chat/Composer";
 import { ProviderModal } from "../components/chat/ProviderModal";
+import { PersonaSelect } from "../components/auth/PersonaSelect";
 import MessageList from "../components/chat/MessageList";
 import { Navbar } from "../components/layout/Navbar";
 import { WorkbenchView } from "../components/workbench/WorkbenchView";
@@ -72,6 +73,14 @@ function ChatHome() {
   const [showKbModal, setShowKbModal] = useState(false);
   // 上下文摘要(设计 016 §4 P3.3 尾项):会话级滚动摘要查看入口
   const [summary, setSummary] = useState<{ text: string | null } | null>(null);
+  // M37:首次登录角色画像选择(personas 为空且非 admin 时弹)
+  const [showPersonaSelect, setShowPersonaSelect] = useState(false);
+  useEffect(() => {
+    const u = getUser();
+    if (u && (!u.personas || u.personas.length === 0) && u.role === "user") {
+      setShowPersonaSelect(true);
+    }
+  }, []);
   // 任务实体(M28/需求 017):会话提升状态与轻提示
   const [promotedTaskIds, setPromotedTaskIds] = useState<Set<string>>(new Set());
   const [taskToast, setTaskToast] = useState<string | null>(null);
@@ -900,6 +909,11 @@ function ChatHome() {
       )}
 
       {/* 上下文摘要弹窗(设计 016 §4;无摘要时说明触发条件) */}
+      {/* M37:角色画像选择(首次登录) */}
+      {showPersonaSelect && (
+        <PersonaSelect onDone={() => setShowPersonaSelect(false)} />
+      )}
+
       {/* M29:添加自定义模型供应商(会话选择器直达) */}
       {showProviderModal && (
         <ProviderModal
