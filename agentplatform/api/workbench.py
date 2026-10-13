@@ -233,14 +233,16 @@ async def tasks_panel(
                 )
             ).all()
         )
-        _running_task_ids = {r.task_id for r in _sched_runs if r.status == "running"}
+        _running_session_ids = {r.session_id for r in _sched_runs if r.status == "running" and r.session_id}
         for r in _sched_runs:
             if r.session_id:
                 st = _sched_by_id.get(r.task_id)
                 if st and str(r.session_id) not in _sched_sess_map:
                     _sched_sess_map[str(r.session_id)] = {
                         "task_name": st.name,
-                        "running": r.task_id in _running_task_ids,
+                        # 20261013 修复:只对正在运行的那条 run 的 session 转圈,
+                        # 不再按 task_id 扩散到所有历史会话
+                        "running": r.session_id in _running_session_ids,
                         "scheduled_task_id": str(r.task_id),
                         "next_run_at": st.next_run_at,
                     }
