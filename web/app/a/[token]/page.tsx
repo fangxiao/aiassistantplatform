@@ -2,13 +2,13 @@
 
 /**
  * 助手独立访问页(T18.20):/a/{access_token} —— 开发者运营自有用户的白牌入口。
- * 纯聊天体验:无导航/抽屉/工作台,用户不感知平台;轻注册(昵称即用)。
+ * 纯聊天体验:无导航/工作台,轻注册(昵称即用);支持多会话(新建/切换)。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Composer from "../../../components/chat/Composer";
 import MessageList from "../../../components/chat/MessageList";
 import { API_BASE, getAuthHeader } from "../../../lib/api/client";
-import type { AssistantInfo, ChatMessage, ContentBlock, ToolCallInfo } from "../../../lib/types";
+import type { ChatMessage, ContentBlock, ToolCallInfo } from "../../../lib/types";
 
 interface AccessInfo {
   plugin_id: string;
@@ -17,9 +17,16 @@ interface AccessInfo {
   description: string;
 }
 
+interface SessionMeta {
+  id: string;
+  title: string;
+  updatedAt: number;
+}
+
 interface Entry {
   token: string;
   sessionId: string;
+  sessions: SessionMeta[];
 }
 
 const ENTRY_KEY = "agentplatform_assist_entry";
@@ -32,7 +39,54 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
   const [nickname, setNickname] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
+  const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const readEntry = (): Entry | null => {
+    try {
+      return JSON.parse(localStorage.getItem(ENTRY_KEY) || "null");
+    } catch {
+      return null;
+    }
+  };
+
+  const writeEntry = (e: Entry) => localStorage.setItem(ENTRY_KEY, JSON.stringify(e));
+
+  const loadSessionHistory = useCallback(async (sid: string) => {
+    const hist = await fetch(`${API_BASE}/chat/sessions/${sid}/messages`, {
+      headers: getAuthHeader(),
+    });
+    if (!hist.ok) return false;
+    setMessages(await hist.json());
+    setCurrentSessionId(sid);
+    return true;
+  }, []);
+
+  const createNewSession = useCallback(
+    async (pluginId: string) => {
+      const created = await fetch(`${API_BASE}/chat/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ plugin_id: pluginId }),
+      });
+      if (!created.ok) throw new Error("会话创建失败");
+      const s = await created.json();
+      const entry = readEntry();
+      const meta: SessionMeta = { id: s.id, title: "新对话", updatedAt: Date.now() };
+      const newEntry: Entry = {
+        token,
+        sessionId: s.id,
+        sessions: [meta, ...(entry?.sessions ?? []).filter((x) => x.id !== s.id)].slice(0, 20),
+      };
+      writeEntry(newEntry);
+      setSessionList(newEntry.sessions);
+      setMessages([]);
+      setCurrentSessionId(s.id);
+    },
+    [token],
+  );
 
   // 1. 解析令牌 → 助手信息
   useEffect(() => {
@@ -41,43 +95,30 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
       .catch(() => setError("无法连接服务"));
   }, [token]);
 
-  // 2. 本地凭据 → 恢复/创建会话
-  const openSession = useCallback(
+  // 2. 本地凭据 → 恢复最近会话或创建新会话
+  const initSession = useCallback(
     async (pluginId: string) => {
-      let entry: Entry | null = null;
-      try {
-        entry = JSON.parse(localStorage.getItem(ENTRY_KEY) || "null");
-      } catch { entry = null; }
+      const entry = readEntry();
       if (entry?.token === token && entry.sessionId) {
-        const hist = await fetch(`${API_BASE}/chat/sessions/${entry.sessionId}/messages`, {
-          headers: getAuthHeader(),
-        });
-        if (hist.ok) {
-          setMessages(await hist.json());
+        if (await loadSessionHistory(entry.sessionId)) {
+          setSessionList(entry.sessions ?? []);
           return;
         }
       }
-      const created = await fetch(`${API_BASE}/chat/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeader() },
-        body: JSON.stringify({ plugin_id: pluginId }),
-      });
-      if (!created.ok) throw new Error("会话创建失败");
-      const s = await created.json();
-      localStorage.setItem(ENTRY_KEY, JSON.stringify({ token, sessionId: s.id }));
+      await createNewSession(pluginId);
     },
-    [token],
+    [token, loadSessionHistory, createNewSession],
   );
 
   useEffect(() => {
     if (!info) return;
     const platformToken = localStorage.getItem("agentplatform_token");
     if (platformToken) {
-      openSession(info.plugin_id).catch(() => setNeedJoin(true));
+      initSession(info.plugin_id).catch(() => setNeedJoin(true));
     } else {
       setNeedJoin(true);
     }
-  }, [info, openSession]);
+  }, [info, initSession]);
 
   // 3. 轻注册
   const join = async () => {
@@ -95,14 +136,13 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
     localStorage.setItem("agentplatform_token", d.token);
     localStorage.setItem("agentplatform_user", JSON.stringify(d.user));
     setNeedJoin(false);
-    openSession(info.plugin_id).catch(() => setError("会话创建失败"));
+    createNewSession(info.plugin_id).catch(() => setError("会话创建失败"));
   };
 
-  // 4. 发送(SSE 流式;逻辑与主站一致但独立轻量实现)
+  // 4. 发送(SSE 流式)
   const send = async (text: string) => {
-    let entry: Entry | null = null;
-    try { entry = JSON.parse(localStorage.getItem(ENTRY_KEY) || "null"); } catch { entry = null; }
-    if (!entry?.sessionId || streaming) return;
+    const sid = currentSessionId;
+    if (!sid || streaming) return;
     setStreaming(true);
     const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", text, blocks: [{ type: "markdown", data: { text } }] };
     const asstId = `a-${Date.now()}`;
@@ -112,7 +152,7 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const resp = await fetch(`${API_BASE}/chat/sessions/${entry.sessionId}/messages`, {
+      const resp = await fetch(`${API_BASE}/chat/sessions/${sid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
         body: JSON.stringify({ content: text }),
@@ -122,6 +162,7 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
+      let lastDelta = "";
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -138,9 +179,14 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
           }
           if (!data) continue;
           let d: unknown = data;
-          try { d = JSON.parse(data); } catch { /* 保留原文 */ }
+          try {
+            d = JSON.parse(data);
+          } catch {
+            /* 保留原文 */
+          }
           if (ev === "delta") {
             const t = (d as { text?: string }).text ?? "";
+            lastDelta += t;
             patch((m) => ({ ...m, reasoning: undefined, text: m.text + t }));
           } else if (ev === "reasoning") {
             const t = (d as { text?: string }).text ?? "";
@@ -154,11 +200,47 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
           }
         }
       }
+      // 流结束:更新会话标题(首条消息摘要)并持久化
+      if (lastDelta.trim()) {
+        const entry = readEntry();
+        if (entry) {
+          const title = text.slice(0, 20) || "新对话";
+          const updated = {
+            ...entry,
+            sessions: (entry.sessions ?? []).map((s) =>
+              s.id === sid ? { ...s, title, updatedAt: Date.now() } : s,
+            ),
+          };
+          writeEntry(updated);
+          setSessionList(updated.sessions);
+        }
+      }
     } catch {
       patch((m) => ({ ...m, text: m.text || "[已中断]" }));
     } finally {
       setStreaming(false);
       abortRef.current = null;
+    }
+  };
+
+  const switchSession = async (sid: string) => {
+    setShowSessions(false);
+    if (sid === currentSessionId) return;
+    if (await loadSessionHistory(sid)) {
+      const entry = readEntry();
+      if (entry) {
+        writeEntry({ ...entry, sessionId: sid });
+      }
+    }
+  };
+
+  const newSession = async () => {
+    if (!info || streaming) return;
+    setShowSessions(false);
+    try {
+      await createNewSession(info.plugin_id);
+    } catch {
+      setError("新建失败,请重试");
     }
   };
 
@@ -201,19 +283,50 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
 
   return (
     <div className="flex h-screen flex-col bg-slate-50">
-      <header className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-5 py-3.5">
+      <header className="relative flex items-center gap-2.5 border-b border-slate-200 bg-white px-5 py-3.5">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-base">🤖</span>
-        <div>
+        <div className="flex-1">
           <div className="text-sm font-bold text-slate-800">{info.display_name}</div>
           <div className="text-[11px] text-slate-400">{streaming ? "正在回复…" : "随时为你服务"}</div>
         </div>
+        <button
+          type="button"
+          onClick={() => void newSession()}
+          disabled={streaming}
+          className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100 disabled:opacity-40"
+        >
+          ＋ 新对话
+        </button>
+        {sessionList.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShowSessions((v) => !v)}
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-slate-50"
+            title="历史会话"
+          >
+            📜 {sessionList.length}
+          </button>
+        )}
+        {showSessions && (
+          <div className="absolute right-4 top-full z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
+            {sessionList.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => void switchSession(s.id)}
+                className={`block w-full truncate px-4 py-2.5 text-left text-xs transition hover:bg-slate-50 ${
+                  s.id === currentSessionId ? "font-semibold text-indigo-600" : "text-slate-600"
+                }`}
+              >
+                {s.id === currentSessionId ? "▸ " : ""}
+                {s.title}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6">
-        <MessageList
-          messages={messages}
-          streaming={streaming}
-          onInteract={undefined}
-        />
+        <MessageList messages={messages} streaming={streaming} onInteract={undefined} />
       </main>
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         <div className="mx-auto max-w-3xl">
