@@ -360,7 +360,7 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
             <span className="mb-4 text-4xl">🤖</span>
             <h2 className="mb-2 text-lg font-bold text-slate-800">{info.display_name}</h2>
             {info.description && (
-              <p className="mb-6 max-w-md text-center text-xs leading-relaxed text-slate-500">
+              <p className="mb-6 max-w-md text-center text-xs leading-relaxed text-slate-500 line-clamp-4">
                 {info.description}
               </p>
             )}
