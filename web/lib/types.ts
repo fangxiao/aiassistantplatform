@@ -50,6 +50,7 @@ export interface AssistantInfo {
   depends_on: string[];
   mounted_kb_ids?: string[]; // 助手运行时挂载的已发布知识库 (T12.17)
   review_status?: ReviewStatus; // 发布审批(owner/admin 可见未过审项,M20)
+  is_owner?: boolean; // 独立链接/统计等运营操作仅 owner/admin(015 §4.2),前端按此显隐按钮
   source?: string; // M35:official=平台维护(✓徽标)/ community
   last_review_reason?: string | null;
   deployed_at: string;

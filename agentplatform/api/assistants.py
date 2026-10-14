@@ -37,13 +37,18 @@ class AssistantOut(BaseModel):
     depends_on: list[str] = []
     mounted_kb_ids: list[uuid.UUID] = []
     review_status: str = "approved"  # 审批标记(owner/admin 可见未过审项,前端徽标用)
+    # 20261014:独立链接/统计等运营操作仅 owner/admin 可用(015 §4.2),前端按此
+    # 显隐按钮——此前按钮人人可见,非 owner 点击得到误导性的 404"插件不存在"
+    is_owner: bool = False
     deployed_at: datetime
     manifest: dict[str, Any]
 
 
-def _plugin_to_assistant(p: Plugin) -> AssistantOut:
+def _plugin_to_assistant(p: Plugin, user: User | None = None) -> AssistantOut:
     manifest = p.manifest if isinstance(p.manifest, dict) else {}
     display_name = manifest.get("display_name") or manifest.get("title") or infer_display_name(manifest.get("description"), p.name)
+    from agentplatform.core.plugin.loader import is_plugin_owner
+
     return AssistantOut(
         id=p.id,
         name=p.name,
@@ -55,6 +60,7 @@ def _plugin_to_assistant(p: Plugin) -> AssistantOut:
         depends_on=manifest.get("depends_on", []),
         mounted_kb_ids=[uuid.UUID(k) for k in (p.mounted_kb_ids or [])],
         review_status=getattr(p.review_status, "value", "approved"),
+        is_owner=is_plugin_owner(p, user),
         deployed_at=p.deployed_at,
         manifest=manifest,
     )
@@ -75,7 +81,7 @@ async def list_assistants(
     )
     rows = [p for p in (await session.scalars(stmt)).all() if is_plugin_visible(p, user)]
 
-    results = [_plugin_to_assistant(p) for p in rows]
+    results = [_plugin_to_assistant(p, user) for p in rows]
     if query:
         q = query.lower()
         results = [
@@ -102,4 +108,4 @@ async def get_assistant_detail(
             status_code=404,
             detail={"code": "not_found", "message": f"助手不存在或未启用: {assistant_id}"},
         )
-    return _plugin_to_assistant(plugin)
+    return _plugin_to_assistant(plugin, user)

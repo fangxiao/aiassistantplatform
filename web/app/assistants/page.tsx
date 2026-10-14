@@ -221,7 +221,7 @@ export default function AssistantsPage() {
                         ↻ 重新提交
                       </button>
                     )}
-                    {item.review_status === "approved" && (
+                    {item.review_status === "approved" && item.is_owner && (
                       <button
                         type="button"
                         onClick={() => void publishAccess(item)}
