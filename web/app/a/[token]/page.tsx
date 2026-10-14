@@ -15,6 +15,7 @@ interface AccessInfo {
   name: string;
   display_name: string;
   description: string;
+  guidance?: string[]; // M39:插件方提供的引导语
 }
 
 interface SessionMeta {
@@ -326,7 +327,30 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
         )}
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6">
-        <MessageList messages={messages} streaming={streaming} onInteract={undefined} />
+        {messages.length === 0 && !streaming && (
+          <div className="flex flex-col items-center justify-center py-16">
+            <span className="mb-4 text-4xl">🤖</span>
+            <h2 className="mb-2 text-lg font-bold text-slate-800">{info.display_name}</h2>
+            {info.description && (
+              <p className="mb-6 max-w-md text-center text-xs leading-relaxed text-slate-500">
+                {info.description}
+              </p>
+            )}
+            <div className="w-full max-w-md space-y-2">
+              {(info.guidance?.length ? info.guidance : ["有什么可以帮你的？直接开始提问吧"]).map((g, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => void send(g)}
+                  className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-xs text-slate-600 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  💬 {g}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.length > 0 && <MessageList messages={messages} streaming={streaming} onInteract={undefined} />}
       </main>
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         <div className="mx-auto max-w-3xl">

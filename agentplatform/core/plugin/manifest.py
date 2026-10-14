@@ -16,6 +16,7 @@ class ResourceDef(BaseModel):
     file: str
     code: str | None = None  # 源码内容 (支持跨机器/分布式部署时服务端持久化存储与加载)
     description: str | None = None
+    guidance: list[str] = []  # M39:白牌页引导语(插件方提供,空=平台通用引导)
     schema_: dict | None = Field(default=None, alias="schema")  # JSON 键为 schema
     # T18.3 编排保障:skill 的"交付必经步骤"声明(如 [tool:image_gen]);
     # 声明后平台在终答前校验 tool trace,缺失自动注入提示补调一次(有界)
@@ -31,6 +32,7 @@ class PluginManifest(BaseModel):
     title: str | None = None  # display_name 同义别名
     version: str
     description: str | None = None
+    guidance: list[str] = []  # M39:白牌页引导语(插件方提供,空=平台通用引导)
     author: str | None = None
     model: str | None = None
     depends_on: list[str] = []
