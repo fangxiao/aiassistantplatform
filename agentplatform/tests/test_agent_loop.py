@@ -229,3 +229,74 @@ class TestEndpointTunnel:
         ]
         assert "await_external" in [ev.type for ev in events]
         assert "done" not in [ev.type for ev in events]
+
+
+class TestTruncationNotice:
+    """20261014:末轮 finish_reason=length(max_tokens 截断)须注入可见提示。
+
+    背景:网关此前把截断伪装成 end_turn,平台误以为模型正常答完;
+    网关修复后如实回传,平台侧负责把截断显性化给用户。
+    """
+
+    async def test_length_finish_reason_appends_notice(self, session: AsyncSession) -> None:
+        fake = FakeClient([
+            [
+                _text("下面是流程耗时与关键指标的详细分"),
+                StreamEvent(type="done", message_id="m1", finish_reason="length"),
+            ],
+        ])
+        result = await run_agent(session, fake, resource_ids=[], user_message="做分析")
+        assert result.text.startswith("下面是流程耗时")
+        assert "截断" in result.text
+
+    async def test_max_tokens_finish_reason_also_triggers(self, session: AsyncSession) -> None:
+        """Anthropic 风格的 max_tokens 映射值同样判定为截断。"""
+        fake = FakeClient([
+            [_text("写到一半"), StreamEvent(type="done", message_id="m1", finish_reason="max_tokens")],
+        ])
+        result = await run_agent(session, fake, resource_ids=[], user_message="问")
+        assert "截断" in result.text
+
+    async def test_normal_stop_no_notice(self, session: AsyncSession) -> None:
+        fake = FakeClient([
+            [_text("完整回答"), StreamEvent(type="done", message_id="m1", finish_reason="stop")],
+        ])
+        result = await run_agent(session, fake, resource_ids=[], user_message="问")
+        assert result.text == "完整回答"
+
+    async def test_stream_events_expose_truncated_flag(self, session: AsyncSession) -> None:
+        fake = FakeClient([
+            [_text("截断内容"), StreamEvent(type="done", message_id="m1", finish_reason="length")],
+        ])
+        events = [ev async for ev in stream_agent(session, fake, resource_ids=[], user_message="问")]
+        done = next(ev for ev in events if ev.type == "done")
+        assert done.truncated is True
+        assert any(ev.type == "delta" and "截断" in (ev.text or "") for ev in events)
+
+
+class TestRoundEndText:
+    """20261014 工单:round_end 携带本轮文本,供 SSE 消费方做工具轮过渡语治理。
+
+    语义与 M34 一致:round_end 仅工具轮发出(末轮经 break 退出,无 round_end)。
+    """
+
+    async def test_tool_round_carries_text(self, session: AsyncSession) -> None:
+        await _register_echo(session)
+        fake = FakeClient([
+            [
+                _text("让我调用工具处理"),
+                _call("tool:echo", '{"text": "hi"}'),
+                StreamEvent(type="done", message_id="m1"),
+            ],
+            [_text("完成"), StreamEvent(type="done", message_id="m2")],
+        ])
+        events = [
+            ev
+            async for ev in stream_agent(
+                session, fake, resource_ids=["tool:echo"], user_message="hi"
+            )
+        ]
+        round_ends = [ev for ev in events if ev.type == "round_end"]
+        assert len(round_ends) == 1
+        assert round_ends[0].had_tool_calls is True
+        assert round_ends[0].text == "让我调用工具处理"

@@ -103,6 +103,9 @@ class AgentEvent:
     # M34:round_end 事件携带——该轮是否调用了工具。工具轮的 delta 是模型过渡语
     # ("我来调用X工具"),聚合交付物(run_agent)不把它混入最终文本
     had_tool_calls: bool = False
+    # 20261014:done 事件携带——末轮是否因 max_tokens 截断(网关现已如实回传
+    # finish_reason=length;此前截断伪装成正常结束,平台无从感知)
+    truncated: bool = False
 
 
 
@@ -113,6 +116,13 @@ class AgentResult:
     text: str
     tool_traces: list[ToolTrace]
     usage_tokens: int | None = None  # 打磨:全部轮次 token 合计
+
+
+# 20261014:max_tokens 截断的用户可见提示(网关修复后如实回传 finish_reason)
+_TRUNCATION_NOTICE = (
+    "\n\n> ⚠️ 本轮回复因达到最大输出长度被截断,内容可能不完整;"
+    '可回复「继续」让助手接着输出。'
+)
 
 
 async def run_agent(
@@ -281,6 +291,16 @@ async def stream_agent(
         嵌套流失败不再静默(20260928 断流事故):client 以 error 事件上报的失败
         回填为可见错误文本进结果与队列,外层模型据此自纠,而不是拿到空串无声停摆。
         """
+        # 20261014 工单 20261014-1632-999015:子调用以 tools=None 发起,skill prompt
+        # 却常引导模型调 output_block,指令冲突使模型自曝"我该调用工具"式混淆。
+        # 显式声明调用环境,平息冲突;富组件职责归主流程(工具/外层 agent)。
+        prompt = (
+            prompt
+            + "\n\n【调用环境须知】本次为无工具注入的纯文本子调用,不可调用任何工具"
+            "(包括 output_block 等富交互组件);请直接输出最终结果文本,不要输出"
+            "自我分析或调用计划。如确需富组件承载,在结果末尾以一行「建议组件: <类型>」"
+            "说明,由主流程决定下发。"
+        )
         chunks: list[str] = []
         async for e in _stream(llm_client, [{"role": "user", "content": prompt}]):
             if e.type == "delta" and e.text:
@@ -366,6 +386,8 @@ async def stream_agent(
 
     # M17 P1:写操作确认框积攒区(执行后由 block_meta 通道下发)
     pending_confirm_blocks: list[dict] = []
+    # 20261014:末轮 finish_reason("length"/"max_tokens"=截断),每轮覆盖,终答前判定
+    last_finish_reason: str | None = None
     # T18.3 编排保障:本轮已执行的 tool/skill id(终答前 required_tools 校验用)
     executed_tool_ids: set[str] = set()
     executed_skill_ids: set[str] = set()
@@ -504,8 +526,10 @@ async def stream_agent(
         async for e in _stream(llm_client, messages, tools):
             if e.type == "error":
                 raise AgentLoopError(e.error or "LLM 调用失败")
-            if e.type == "done" and e.usage:
-                round_usage += int((e.usage or {}).get("total_tokens") or 0)
+            if e.type == "done":
+                last_finish_reason = e.finish_reason
+                if e.usage:
+                    round_usage += int((e.usage or {}).get("total_tokens") or 0)
             elif e.type == "reasoning" and e.text:
                 reasoning_chunks.append(e.text)
                 yield AgentEvent(type="reasoning", text=e.text)
@@ -801,8 +825,12 @@ async def stream_agent(
         # 工具执行会开启事务(如 kb_search 的检索查询);在下一轮长流式前提交释放,
         # 避免 idle-in-transaction 超时被 PG 断连,导致流结束后的消息落库失败。
         await session.commit()
-        # M34:轮次边界——聚合方(run_agent)据此把工具轮的过渡语与终答分离
-        yield AgentEvent(type="round_end", had_tool_calls=bool(calls))
+        # M34:轮次边界——聚合方(run_agent)据此把工具轮的过渡语与终答分离;
+        # 20261014 工单 20261014-1632-999015:round_end 携带本轮完整文本,SSE 消费方
+        # (chat.py)据此把工具轮过渡语/伪思考从落库正文剔除并降级为 reasoning
+        yield AgentEvent(
+            type="round_end", had_tool_calls=bool(calls), text="".join(delta_chunks)
+        )
 
     # 4. 自动落盘兜底:如果模型直接生成了 HTML 但未显式调用 preview 工具
     preview_res = next((res for rid, res in resources.items() if "preview" in rid), None)
@@ -848,9 +876,15 @@ async def stream_agent(
             except Exception:
                 pass
 
+    # 20261014:末轮因 max_tokens 截断时,注入可见提示(所有消费方经 delta 通道继承);
+    # 思考模型思维链与正文共享额度,截断最易发生在长分析场景
+    truncated = (last_finish_reason or "") in ("length", "max_tokens")
+    if truncated:
+        yield AgentEvent(type="delta", text=_TRUNCATION_NOTICE)
     yield AgentEvent(
         type="done",
         usage={"total_tokens": round_usage} if round_usage else None,
+        truncated=truncated,
     )
 
 

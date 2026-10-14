@@ -432,6 +432,11 @@ async def _checkpointed_agent_sse(
     try:
         if draft is not None and is_resume:
             yield sse("resume_started", {"message_id": str(draft.id)})
+        # 20261014 工单 20261014-1632-999015:工具轮过渡语/伪思考治理——
+        # round_start 记录本轮 text_parts 起点,首个 tool_call 事件即判为本轮工具轮,
+        # 在检查点 flush 前把本轮已推流文本从落库正文剔除并降级为 reasoning 思考流
+        round_start = 0
+        round_tool_seen = False
         async for ev in agent_events:
             if ev.type == "reasoning" and ev.text:
                 yield sse("reasoning", {"text": ev.text})
@@ -448,8 +453,26 @@ async def _checkpointed_agent_sse(
             elif ev.type == "await_external" and ev.block:
                 blocks.append(ev.block)
                 yield sse("await_external", ev.block)
+            elif ev.type == "round_end":
+                if ev.had_tool_calls:
+                    # 兜底:极少数 tool_call 事件之后仍追加的过渡文本一并剔除
+                    straggle = "".join(text_parts[round_start:])
+                    if straggle.strip():
+                        del text_parts[round_start:]
+                        yield sse("reasoning", {"text": straggle})
+                round_start = len(text_parts)
+                round_tool_seen = False
             elif ev.type == "tool_call" and ev.tool_trace is not None:
                 t = ev.tool_trace
+                if not round_tool_seen:
+                    round_tool_seen = True
+                    round_text = "".join(text_parts[round_start:])
+                    if round_text.strip():
+                        # B′:工具轮伴随文本是模型元思考/过渡语,不落库不进正文,
+                        # 以 reasoning 下发供前端思考区展示(已推流的 delta 由前端
+                        # 在 round_end 事件处收缩,见契约)
+                        del text_parts[round_start:]
+                        yield sse("reasoning", {"text": round_text})
                 # 先 flush 后 yield:客户端恰在此事件处断开时,检查点必须已落库
                 await _flush()
                 await session.commit()
@@ -669,6 +692,9 @@ async def regenerate_last(
                     images.append((b.get("data") or {}).get("url", ""))
 
             usage_total: int | None = None
+            # 20261014 工单:同主聊天路径——工具轮过渡语不进最终落库正文
+            round_start = 0
+            round_tool_seen = False
             async for ev in agent_stream_for_session(
                 session, sid, content, images=images or None, save_input=False
             ):
@@ -680,10 +706,24 @@ async def regenerate_last(
                 elif ev.type == "block_meta" and ev.block:
                     blocks.append(ev.block)
                     yield sse("block_meta", ev.block)
+                elif ev.type == "round_end":
+                    if ev.had_tool_calls:
+                        straggle = "".join(text_parts[round_start:])
+                        if straggle.strip():
+                            del text_parts[round_start:]
+                            yield sse("reasoning", {"text": straggle})
+                    round_start = len(text_parts)
+                    round_tool_seen = False
                 elif ev.type == "done" and ev.usage:
                     usage_total = ev.usage.get("total_tokens")
                 elif ev.type == "tool_call" and ev.tool_trace is not None:
                     t = ev.tool_trace
+                    if not round_tool_seen:
+                        round_tool_seen = True
+                        round_text = "".join(text_parts[round_start:])
+                        if round_text.strip():
+                            del text_parts[round_start:]
+                            yield sse("reasoning", {"text": round_text})
                     # M40(缺陷 4):ToolTrace 无 name 属性,安全回退到 id
                     yield sse(
                         "tool_call",

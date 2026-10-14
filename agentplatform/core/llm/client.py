@@ -44,6 +44,9 @@ class StreamEvent:
     message_id: str | None = None
     error: str | None = None
     usage: dict | None = None  # {prompt_tokens, completion_tokens, total_tokens}
+    # 20261014 网关对齐:透传流末轮 finish_reason("length"=截断,此前被静默丢弃,
+    # 平台无法感知 max_tokens 截断、伪装成正常结束)
+    finish_reason: str | None = None
 
 
 class OpenAIClient:
@@ -122,6 +125,7 @@ class OpenAIClient:
                         return
 
                     message_id = ""
+                    finish_reason: str | None = None
                     usage: dict | None = None
                     tool_calls: dict[int, dict] = {}  # index -> {id, name, arguments}
                     stream_error = None
@@ -148,6 +152,8 @@ class OpenAIClient:
                         if chunk.get("usage"):
                             usage = chunk["usage"]
                         for choice in chunk.get("choices", []):
+                            if choice.get("finish_reason"):
+                                finish_reason = choice["finish_reason"]
                             delta = choice.get("delta") or {}
                             r_text = (
                                 delta.get("reasoning_content")
@@ -214,6 +220,7 @@ class OpenAIClient:
                         message_id=message_id,
                         reasoning_content=full_reasoning,
                         usage=usage,
+                        finish_reason=finish_reason,
                     )
                     return
 

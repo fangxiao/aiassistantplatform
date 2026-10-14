@@ -39,6 +39,20 @@ class TestStreamText:
         assert texts == "你好世界"
         assert any(e.type == "done" and e.message_id == "msg-1" for e in events)
         assert not any(e.type == "tool_call" for e in events)
+        # 20261014:done 事件透传末轮 finish_reason
+        done = next(e for e in events if e.type == "done")
+        assert done.finish_reason == "stop"
+
+    async def test_done_carries_length_finish_reason(self) -> None:
+        """截断场景:finish_reason=length 必须透传(此前被静默丢弃,截断伪装成正常结束)。"""
+        chunks = [
+            {"id": "msg-9", "choices": [{"index": 0, "delta": {"content": "写到一半"}, "finish_reason": None}]},
+            {"id": "msg-9", "choices": [{"index": 0, "delta": {}, "finish_reason": "length"}]},
+        ]
+        client = OpenAIClient(_endpoint(), transport=httpx.MockTransport(lambda r: _sse_response(chunks)))
+        events = [e async for e in client.stream([{"role": "user", "content": "hi"}])]
+        done = next(e for e in events if e.type == "done")
+        assert done.finish_reason == "length"
 
 
 class TestStreamToolCall:

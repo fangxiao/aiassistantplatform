@@ -195,6 +195,8 @@ async def test_generator_exit_spawns_tail_persist(
 
 @pytest.mark.asyncio
 async def test_tool_call_boundary_flush_survives_disconnect(session: AsyncSession) -> None:
+    """20261014 工单 20261014-1632-999015 更新语义:工具轮过渡语降级 reasoning、
+    不落检查点(仅剩过渡语时不建空草稿);实质内容的检查点保障由上方断连测试覆盖。"""
     s = await create_session(session, plugin_id=None, title="ckpt-tool")
     await session.commit()
 
@@ -209,13 +211,16 @@ async def test_tool_call_boundary_flush_survives_disconnect(session: AsyncSessio
 
     # 消费到 tool_call 事件即停止(模拟客户端恰在该点断开)
     agen = _checkpointed_agent_sse(session, s.id, gen())
+    seen: list[str] = []
     async for chunk in agen:
+        seen.append(chunk)
         if chunk.startswith("event: tool_call"):
             break
     await agen.aclose()
 
+    # 过渡语以 reasoning 下发(思考区可见),不再作为正文落检查点
+    assert any(
+        c.startswith("event: reasoning") and "调用前文本" in c for c in seen
+    )
     draft = await latest_draft_message(session, s.id)
-    assert draft is not None
-    # flush 先于 yield:调用前文本已落检查点,后续文本未进入
-    assert "调用前文本" in json.dumps(draft.blocks, ensure_ascii=False)
-    assert "这段不应出现" not in json.dumps(draft.blocks, ensure_ascii=False)
+    assert draft is None or "调用前文本" not in json.dumps(draft.blocks, ensure_ascii=False)

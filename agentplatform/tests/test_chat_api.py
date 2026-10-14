@@ -151,3 +151,62 @@ class TestResourceIds:
         plugin = (await session.scalars(select(Plugin))).first()
         assert plugin is not None
         assert resource_ids_from_plugin(plugin) == ["tool:echo"]
+
+
+class TestToolRoundTransitionFilter:
+    """20261014 工单 20261014-1632-999015:工具轮过渡语/伪思考不落库、降级 reasoning。"""
+
+    async def test_transition_text_not_persisted(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+    ) -> None:
+        await _register_echo(session)
+        await _deploy_plugin(session)
+        plugin = (await client.get("/api/plugins")).json()[0]
+        sid = (await client.post("/api/chat/sessions", json={"plugin_id": plugin["id"]})).json()["id"]
+
+        fake = FakeClient([
+            [
+                StreamEvent(type="delta", text="用户询问的是回显,根据我的角色定位,让我调用相关技能..."),
+                StreamEvent(type="tool_call", tool_call=ToolCall(id="c1", name="tool:echo", arguments='{"text": "hi"}')),
+                StreamEvent(type="done", message_id="m1"),
+            ],
+            [StreamEvent(type="delta", text="最终答案"), StreamEvent(type="done", message_id="m2")],
+        ])
+
+        async def _fake_make(session_: AsyncSession, model: str | None, user_id: str | None = None):
+            return fake
+
+        monkeypatch.setattr("agentplatform.core.chat.service.make_llm_client", _fake_make)
+        resp = await client.post(f"/api/chat/sessions/{sid}/messages", json={"content": "回显 hi"})
+        frames = parse_sse(resp.text)
+        events = [e for e, _ in frames]
+
+        # 过渡语以 reasoning 下发(思考区可见),不再以 delta 混入正文语义
+        reasoning_text = "".join(d.get("text", "") for e, d in frames if e == "reasoning")
+        assert "让我调用相关技能" in reasoning_text
+
+        # 落库正文只含终答,过渡语不残留
+        hist = await client.get(f"/api/chat/sessions/{sid}/messages")
+        asst = [m for m in hist.json() if m["role"] == "assistant"][-1]
+        assert "最终答案" in asst["text"]
+        assert "让我调用相关技能" not in asst["text"]
+
+    async def test_plain_round_keeps_text(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+    ) -> None:
+        """无工具轮的正文不受影响(不误伤)。"""
+        sid = (await client.post("/api/chat/sessions", json={"plugin_id": None})).json()["id"]
+        fake = FakeClient([
+            [StreamEvent(type="delta", text="让我直接回答:你好"), StreamEvent(type="done", message_id="m1")],
+        ])
+
+        async def _fake_make(session_: AsyncSession, model: str | None, user_id: str | None = None):
+            return fake
+
+        monkeypatch.setattr("agentplatform.core.chat.service.make_llm_client", _fake_make)
+        resp = await client.post(f"/api/chat/sessions/{sid}/messages", json={"content": "嗨"})
+        frames = parse_sse(resp.text)
+        assert not any(e == "reasoning" for e, _ in frames)
+        hist = await client.get(f"/api/chat/sessions/{sid}/messages")
+        asst = [m for m in hist.json() if m["role"] == "assistant"][-1]
+        assert "你好" in asst["text"]
