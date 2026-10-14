@@ -558,6 +558,21 @@ async def _checkpointed_agent_sse(
         )
 
 
+def _is_server_file_url(u: str) -> bool:
+    """服务端文件 URL 判定:相对(/api/files/raw?...)与绝对(public_api_base 前缀,
+    如 https://ai-api.example.com/api/files/raw?...)形态都接受。
+
+    20261014 修复:配置 public_api_base 后上传返回绝对签名 URL——网关/远程端
+    拉图必需;此前校验只认相对前缀,绝对 URL 被误拒报 422(粘贴图片发送失败)。
+    """
+    from urllib.parse import urlparse
+
+    try:
+        return urlparse(u).path.startswith("/api/files/raw")
+    except ValueError:
+        return False
+
+
 @router.post("/sessions/{sid}/messages")
 async def send_message(
     sid: uuid.UUID,
@@ -573,13 +588,13 @@ async def send_message(
     import binascii
 
     for doc in payload.docs:
-        if not doc.startswith("/api/files/raw"):
+        if not _is_server_file_url(doc):
             raise HTTPException(
                 status_code=422,
                 detail={"code": "validation_error", "message": "docs 仅支持服务端文档 URL"},
             )
     for img in payload.images:
-        if img.startswith("/api/files/raw"):  # 对象存储化后的服务端 URL
+        if _is_server_file_url(img):  # 服务端 URL(相对/绝对签名形态均可)
             continue
         if not img.startswith("data:image/"):
             raise HTTPException(

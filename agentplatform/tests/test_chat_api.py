@@ -210,3 +210,52 @@ class TestToolRoundTransitionFilter:
         hist = await client.get(f"/api/chat/sessions/{sid}/messages")
         asst = [m for m in hist.json() if m["role"] == "assistant"][-1]
         assert "你好" in asst["text"]
+
+
+class TestImageUrlValidation:
+    """20261014 修复:public_api_base 配置后上传返回绝对签名 URL,发送不再误拒 422。"""
+
+    async def test_absolute_signed_url_accepted(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+    ) -> None:
+        sid = (await client.post("/api/chat/sessions", json={"plugin_id": None})).json()["id"]
+        fake = FakeClient([[StreamEvent(type="delta", text="看到图了"), StreamEvent(type="done", message_id="m1")]])
+
+        async def _fake_make(session_: AsyncSession, model: str | None, user_id: str | None = None):
+            return fake
+
+        monkeypatch.setattr("agentplatform.core.chat.service.make_llm_client", _fake_make)
+        resp = await client.post(
+            f"/api/chat/sessions/{sid}/messages",
+            json={
+                "content": "这是什么",
+                "images": ["https://ai-api.ailearning.top/api/files/raw?path=%2Froot%2F.agentplatform%2Fuploads%2Fa.png&exp=9999999999&sig=abc"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+    async def test_relative_url_and_dataurl_still_accepted(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+    ) -> None:
+        sid = (await client.post("/api/chat/sessions", json={"plugin_id": None})).json()["id"]
+        fake = FakeClient([[StreamEvent(type="delta", text="ok"), StreamEvent(type="done", message_id="m1")]])
+
+        async def _fake_make(session_: AsyncSession, model: str | None, user_id: str | None = None):
+            return fake
+
+        monkeypatch.setattr("agentplatform.core.chat.service.make_llm_client", _fake_make)
+        resp = await client.post(
+            f"/api/chat/sessions/{sid}/messages",
+            json={"content": "看", "images": ["/api/files/raw?path=/tmp/a.png&sig=x", "data:image/png;base64,iVBORw0KGgo="]},
+        )
+        assert resp.status_code == 200, resp.text
+
+    async def test_non_file_url_rejected(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        sid = (await client.post("/api/chat/sessions", json={"plugin_id": None})).json()["id"]
+        resp = await client.post(
+            f"/api/chat/sessions/{sid}/messages",
+            json={"content": "看", "images": ["https://evil.example.com/steal.png"]},
+        )
+        assert resp.status_code == 422
