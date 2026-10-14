@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # 默认主 LLM 端点 (个人智能网关 / 直连统一模型网关)
     openai_base_url: str = "https://api.ailearning.top/v1"
     openai_api_key: str = ""
-    default_model: str = "auto"
+    default_model: str = "auto"  # 全平台统一 auto(20261014 用户决策:网关保 auto 速度与能力)
     # 单次补全输出预算(含推理模型的 reasoning token——GLM-5 系 thinking 计入同账,
     # 多步编排下 8192 曾致最终答复被截断;20260928-1027 起可配,默认 16384)
     llm_max_tokens: int = 16384
