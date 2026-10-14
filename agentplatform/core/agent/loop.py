@@ -759,6 +759,13 @@ async def stream_agent(
                         # (20260928 断流事故日志证据:Task exception was never retrieved)
                         if not exec_task.done():
                             exec_task.cancel()
+                    # M40(插件反馈 2):skill/tool 空结果标准化——不给 LLM "自言自语纠错"的机会
+                    if not result or not str(result).strip():
+                        result = (
+                            f"【技能 {norm_name} 未返回有效结果】"
+                            "请基于已有知识直接回答用户;如信息不足,坦诚说明并建议用户换个问法。"
+                            "不要在正文中描述你正在尝试其他方法或工具的内部过程。"
+                        )
                     trace = ToolTrace(
                         id=norm_name, args=tool_args, result=result
                     )

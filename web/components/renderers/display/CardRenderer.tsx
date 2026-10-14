@@ -3,6 +3,7 @@
 import React from "react";
 import { ContentBlock } from "../../../lib/types";
 import { BlockRenderer } from "../BlockRenderer";
+import MarkdownRenderer from "../MarkdownRenderer";
 
 interface CardProps {
   block: ContentBlock;
@@ -14,6 +15,9 @@ export function CardRenderer({ block, onInteract }: CardProps) {
   const subtitle = block.data?.subtitle ? String(block.data.subtitle) : null;
   const bodyBlocks: ContentBlock[] = block.data?.body_blocks ?? [];
   const actions: ContentBlock[] = block.data?.actions ?? [];
+  // M40(插件反馈 1):模型常传 content/text 而非 body_blocks——空壳卡兜底渲染 Markdown
+  const fallbackText: string =
+    block.data?.content ?? block.data?.text ?? "";
 
   return (
     <div className="my-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow">
@@ -24,13 +28,17 @@ export function CardRenderer({ block, onInteract }: CardProps) {
         </div>
       )}
 
-      {bodyBlocks.length > 0 && (
+      {bodyBlocks.length > 0 ? (
         <div className="space-y-2 p-4">
           {bodyBlocks.map((b, i) => (
             <BlockRenderer key={i} block={b} onInteract={onInteract} />
           ))}
         </div>
-      )}
+      ) : fallbackText ? (
+        <div className="p-4 text-sm">
+          <MarkdownRenderer block={{ type: "markdown", data: { text: String(fallbackText) } }} />
+        </div>
+      ) : null}
 
       {actions.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50/40 px-4 py-2.5">
