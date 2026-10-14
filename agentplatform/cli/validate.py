@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from agentplatform.core.plugin.manifest import (
@@ -18,8 +19,9 @@ from agentplatform.sdk.loader import load_resources
 
 
 def validate_project(root: Path) -> dict:
-    """校验插件项目,返回结构化结果 {ok, errors[], resources[]}。"""
+    """校验插件项目,返回结构化结果 {ok, errors[], warnings[], resources[]}。"""
     errors: list[str] = []
+    warnings: list[str] = []
     try:
         manifest_path = root / "plugin.yaml"
         if not manifest_path.exists():
@@ -47,6 +49,19 @@ def validate_project(root: Path) -> dict:
                     errors.append(f"{section} 资源 id 必须以 {prefix!r} 开头: {rid!r}(修法: 将 id 改为 {prefix}:{rid.split(':')[-1]})")
                 if not res.get("file"):
                     errors.append(f"{section} 资源缺 file 属性: {rid!r}(修法: 在 plugin.yaml 该资源下补 file: ./path/to/file.py)")
+
+        # 20261014:description 是助手广场/白牌页的对外展示文案,混入输出规范等
+        # prompt 指令会污染展示(20261014 白牌页文案事故)——告警不阻断,
+        # 运营指令应移至 skill prompt 或 plugin.yaml guidance
+        desc = raw.get("description") or ""
+        if isinstance(desc, str):
+            markers = [m for m in ("严禁", "必须遵守", "必须真正调用", "output_block", "## ") if m in desc]
+            if markers:
+                warnings.append(
+                    "description 含疑似 prompt 指令内容(" + "、".join(markers[:3]) + "…):"
+                    "description 会被原样展示在助手广场与白牌落地页,应保持一两句纯简介;"
+                    "输出规范等运营指令请移至 skill prompt 或 plugin.yaml 的 guidance 字段"
+                )
 
         # depends_on 格式校验(T11.10: 末尾 '?' 表示可选依赖,平台缺失时回退本地实现)
         for dep in raw.get("depends_on", []) or []:
@@ -78,11 +93,22 @@ def validate_project(root: Path) -> dict:
                             item = {k: v for k, v in m.items() if k != "impl"}
                             item["file"] = str((root / res.get("file", "")).resolve())
                             resources.append(item)
+                    # 20261014 工单 20261014-1632-999015:skill 子调用无工具注入
+                    # (tools=None 纯文本),prompt 引导调 output_block 会令模型
+                    # 指令冲突/自曝元思考——告警不阻断,组件职责归 Tool/外层 agent
+                    if section == "skills":
+                        with suppress(OSError, UnicodeDecodeError):
+                            if "output_block" in f.read_text(encoding="utf-8"):
+                                warnings.append(
+                                    f"skill {res.get('id')!r} 的 prompt 引导调用 output_block,"
+                                    "但 skill 运行时为无工具注入的纯文本子调用;富组件下发职责"
+                                    "应转移至插件 Tool 或外层 agent,请移除该引导"
+                                )
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"解析资源 {res.get('id')} 失败 ({res.get('file')}): {exc}")
 
 
-        return {"ok": not errors, "errors": errors, "resources": resources}
+        return {"ok": not errors, "errors": errors, "warnings": warnings, "resources": resources}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "errors": [f"插件校验发生未预期异常: {exc}"], "resources": []}
 

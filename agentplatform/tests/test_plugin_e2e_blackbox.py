@@ -189,3 +189,34 @@ async def test_blackbox_dev_mode_tool_execution(tmp_path: Path):
     result = await execute_tool(dummy_resource, {"a": 6, "b": 7})
     assert result == "42"
 
+
+
+def test_validate_warns_skill_prompt_output_block(tmp_path: Path):
+    """20261014 工单:skill prompt 引导 output_block 应产生告警(不阻断)。"""
+    plugin_dir = tmp_path / "skill_ob"
+    (plugin_dir / "skills").mkdir(parents=True)
+    (plugin_dir / "skills" / "answer.py").write_text(
+        'from agentplatform.sdk import Skill, skill\n\n'
+        '@skill(\n'
+        '    id="skill:ob_guided",\n'
+        '    version="1.0.0",\n'
+        '    description="引导组件的技能",\n'
+        '    schema={"type": "object", "properties": {"topic": {"type": "string"}}},\n'
+        '    prompt="请调用 output_block 以卡片展示 {{topic}}",\n'
+        ')\n'
+        'class ObGuided(Skill):\n'
+        '    pass\n',
+        encoding="utf-8",
+    )
+    (plugin_dir / "plugin.yaml").write_text(
+        'name: skill_ob\n'
+        'version: 1.0.0\n'
+        'description: 组件引导告警样本\n'
+        'skills:\n'
+        '  - id: "skill:ob_guided"\n'
+        '    file: "skills/answer.py"\n',
+        encoding="utf-8",
+    )
+    res = validate_project(plugin_dir)
+    assert res["ok"], res["errors"]  # 告警不阻断
+    assert any("output_block" in w for w in res.get("warnings", []))
