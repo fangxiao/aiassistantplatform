@@ -64,6 +64,7 @@ async def access_info(
         "name": plugin.name,
         "display_name": m.get("display_name") or m.get("title") or plugin.name,
         "description": m.get("description") or "",
+        "guidance": m.get("guidance") or [],  # M39:插件方提供的白牌页引导语
         "review_status": plugin.review_status.value,
     }
 
