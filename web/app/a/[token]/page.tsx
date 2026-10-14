@@ -235,6 +235,34 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
     }
   };
 
+  // M39:交互组件回调(input.select/confirm/form 等)——白牌页此前未接线导致组件"死"
+  const handleInteract = async (action: string, value: unknown, args?: Record<string, unknown>) => {
+    const sid = currentSessionId;
+    if (!sid) return;
+    try {
+      const resp = await fetch(`${API_BASE}/chat/sessions/${sid}/blocks/${action}/interact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ action, value, args }),
+      });
+      if (!resp.ok) return;
+      const result = await resp.json();
+      // 将返回的 blocks 追加为新消息
+      if (result?.blocks?.length) {
+        const newMsg: ChatMessage = {
+          id: `i-${Date.now()}`,
+          role: "assistant",
+          text: "",
+          blocks: result.blocks,
+          toolCalls: [],
+        };
+        setMessages((ms) => [...ms, newMsg]);
+      }
+    } catch {
+      // 交互失败静默(组件本地状态不受影响)
+    }
+  };
+
   const newSession = async () => {
     if (!info || streaming) return;
     setShowSessions(false);
@@ -350,7 +378,13 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
             </div>
           </div>
         )}
-        {messages.length > 0 && <MessageList messages={messages} streaming={streaming} onInteract={undefined} />}
+        {messages.length > 0 && (
+          <MessageList
+            messages={messages}
+            streaming={streaming}
+            onInteract={handleInteract}
+          />
+        )}
       </main>
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         <div className="mx-auto max-w-3xl">
