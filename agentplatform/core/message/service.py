@@ -220,6 +220,10 @@ async def generate_session_title(
         if sess is None or (sess.title and not sess.title.startswith("未命名")):
             return sess.title if sess else None  # 已有标题不覆盖
         client = await make_llm_client(session, None)
+        # M41:读事务在长流式 LLM 调用前提交释放——事务横跨 30s+ 流式会触发
+        # idle_in_transaction_session_timeout 被 PG 断连,session close 时 rollback
+        # 报 InterfaceError 且标题丢失(20261014 错误日志分析实证;同 M40 loop 修复模式)
+        await session.commit()
         parts: list[str] = []
         from agentplatform.core.agent.loop import _stream
 
