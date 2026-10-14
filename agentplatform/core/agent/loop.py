@@ -614,6 +614,17 @@ async def stream_agent(
             # 没有工具调用: 本轮对话流式生成完毕，直接退出
             break
 
+        # M39(20261014):LLM 偶尔生成非法 JSON 参数 → 下轮发给 LLM 被 400 拒绝;
+        # 发送前校验并替换为合法占位,防止单次模型失误炸掉整个会话
+        def _safe_args(raw: str) -> str:
+            try:
+                import json as _json
+
+                _json.loads(raw)
+                return raw
+            except Exception:
+                return '{"_error": "invalid_json_sanitized"}'
+
         assistant_msg: dict = {
             "role": "assistant",
             "content": accumulated_text or None,
@@ -621,7 +632,7 @@ async def stream_agent(
                 {
                     "id": tc.id,
                     "type": "function",
-                    "function": {"name": tc.name, "arguments": tc.arguments},
+                    "function": {"name": tc.name, "arguments": _safe_args(tc.arguments)},
                 }
                 for tc in calls
             ],
