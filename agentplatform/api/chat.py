@@ -388,6 +388,12 @@ async def _checkpointed_agent_sse(
             from agentplatform.core.agent.img_proxy import sanitize_model_images
 
             final_text = sanitize_model_images(final_text)
+        # M40(缺陷 3):终态正文剥离工具调用语法——已转组件的 output_block(...)
+        # 原型代码不再残留正文(消除"重复渲染"与"代码外露")
+        if blocks and final_text:
+            from agentplatform.core.agent.text_fallback import _strip_tool_syntax
+
+            final_text = _strip_tool_syntax(final_text)
         composed = [*base_blocks]
         if final_text.strip():
             composed.append({"type": "markdown", "data": {"text": final_text}})
@@ -678,9 +684,10 @@ async def regenerate_last(
                     usage_total = ev.usage.get("total_tokens")
                 elif ev.type == "tool_call" and ev.tool_trace is not None:
                     t = ev.tool_trace
+                    # M40(缺陷 4):ToolTrace 无 name 属性,安全回退到 id
                     yield sse(
                         "tool_call",
-                        {"id": t.id, "name": t.name, "arguments": json.dumps(t.args, ensure_ascii=False), "result": t.result},
+                        {"id": t.id, "name": getattr(t, "name", None) or t.id, "arguments": json.dumps(t.args, ensure_ascii=False), "result": t.result},
                     )
             final_text = "".join(text_parts)
             # T18.15 图片溯源清洗:编造/失效的 <img> 确定性替换占位图(最终防线)

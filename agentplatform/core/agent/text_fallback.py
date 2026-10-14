@@ -30,6 +30,36 @@ def _extract_html_fallback(text: str) -> str | None:
     return None
 
 
+def _extract_balanced_json(text: str, start: int) -> str | None:
+    """从 start(指向 '{')开始,按括号深度提取完整 JSON 串(含嵌套)。
+
+    替代非贪婪正则的截断问题:嵌套 dict 在子层第一个 } 处提前闭合(缺陷 2)。
+    """
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def _strip_tool_syntax(text: str) -> str:
     """过滤模型输出中混杂的 JSON 参数、tool_call 标记等内部调用代码。"""
     if not text:
@@ -79,10 +109,17 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
     extracted: list[ToolCall] = []
 
     # 1. 尝试匹配 `skill:xxx`({...}) 或 skill__xxx({...}) 函数调用风格文本
-    fn_matches = re.findall(
-        r"`?((?:skill|tool)(?::|__)[a-zA-Z0-9_-]+|output_block)`?\s*\(\s*(\{[\s\S]*?\})\s*\)", text
-    )
-    for raw_name, arg_str in fn_matches:
+    # M40(缺陷 2):用括号深度解析器替代非贪婪正则——嵌套 JSON 不再截断
+    fn_pattern = re.compile(r"`?((?:skill|tool)(?::|__)[a-zA-Z0-9_-]+|output_block)`?\s*\(\s*")
+    for m in fn_pattern.finditer(text):
+        raw_name = m.group(1)
+        brace_start = m.end()
+        if brace_start < len(text) and text[brace_start] == "{":
+            arg_str = _extract_balanced_json(text, brace_start)
+            if arg_str is None:
+                continue
+        else:
+            continue
         matched_id = (
             candidates.get(raw_name)
             or candidates.get(raw_name.replace(":", "__"))
@@ -90,7 +127,6 @@ def _extract_text_tool_calls(text: str, resources: dict[str, SkillTool]) -> list
         )
         if matched_id:
             try:
-                # 校验是否为合法 JSON
                 json.loads(arg_str)
                 extracted.append(
                     ToolCall(

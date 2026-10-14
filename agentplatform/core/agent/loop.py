@@ -553,9 +553,9 @@ async def stream_agent(
                 accumulated_text = accumulated_reasoning
             yield AgentEvent(type="delta", text=accumulated_text)
 
-        if not calls and not getattr(llm_client, "supports_native_tools", False):
-            # H5 分流:端点确认原生(supports_native_tools=true)才跳过文本兜底;
-            # 默认保持兜底——现网模型存在文本语法混用(20261003 回归实证)
+        # M40(缺陷 1):原生端点也执行文本兜底——模型偶发把 output_block(...)
+        # 以 markdown 文本输出(尤其长结构化推理时),原生 calls 为空则兜底提取
+        if not calls:
             calls = _extract_text_tool_calls(accumulated_text, resources)
 
         if not calls:
