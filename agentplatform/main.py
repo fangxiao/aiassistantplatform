@@ -48,6 +48,20 @@ async def lifespan(app: FastAPI):
             await seed_builtin(db)
     except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
         logger.warning("内置资源补种跳过: %s", exc)
+    # M38(RFC-01):内置拦截器按配置启用
+    from agentplatform.core.agent.interceptors import (
+        DataMaskingInterceptor,
+        clear_interceptors,
+        register_interceptor,
+    )
+
+    clear_interceptors()
+    from agentplatform.config import settings as _cfg
+
+    if _cfg.interceptor_data_masking:
+        register_interceptor(DataMaskingInterceptor())
+        logger.info('已启用数据脱敏拦截器')
+
     # M35:官方插件自动部署(plugins/ 目录,author 含 AgentPlatform/Official/官方)
     from agentplatform.core.plugin.official import deploy_official_plugins
 

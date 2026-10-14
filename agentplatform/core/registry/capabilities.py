@@ -11,6 +11,24 @@ from agentplatform.core.registry.builtin import ALL as BUILTIN_RESOURCES
 
 # 22 种富交互组件定义与示例
 CONTENT_BLOCKS_CATALOG: list[dict[str, Any]] = [
+    # M38(RFC-05):瀑布流——APM 耗时分析/调用链排障
+    {
+        "type": "waterfall",
+        "category": "display",
+        "category_name": "展示类",
+        "name": "时序瀑布流",
+        "description": "分布式调用链/流水线步骤的耗时可视化;每个 span 按时间偏移排列,支持成功/失败/运行中状态",
+        "python_snippet": '{"type": "waterfall", "data": {"title": "调用链分析", "total_duration_ms": 1950, "spans": [{"id": "s1", "name": "网关验签", "start_ms": 0, "duration_ms": 120, "status": "success"}, {"id": "s2", "name": "风控引擎", "start_ms": 120, "duration_ms": 1300, "status": "success"}]}}',
+    },
+    # M38(RFC-05):指标看板——监控大屏/经营数据卡片
+    {
+        "type": "metric_stat",
+        "category": "display",
+        "category_name": "展示类",
+        "name": "指标看板卡片",
+        "description": "关键指标展示(KPI 卡片):大数值+趋势箭头+变化率;适用于放款量/逾期率/销售额等",
+        "python_snippet": '{"type": "metric_stat", "data": {"label": "近30天放款量", "value": "12,450,000", "unit": "元", "trend": "up", "change_rate": "+15.8%", "status": "success"}}',
+    },
     # 1. 展示类 (8 种)
     {
         "type": "markdown",

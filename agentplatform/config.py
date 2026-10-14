@@ -175,6 +175,8 @@ class Settings(BaseSettings):
     notify_from: str = ""
     # E2E 测试旁路(20261009):本地/测试环境关闭注册登录限频;生产保持 False
     e2e_no_ratelimit: bool = False
+    # M38(RFC-01):启用内置数据脱敏拦截器(身份证/手机号/银行卡)
+    interceptor_data_masking: bool = False
     # 邮箱强制验证(20261010 家庭场景):登录须已验证;SMTP 未配时注册 fail-fast
     email_verification_required: bool = True
     # 注册邮箱域名白名单(逗号分隔可覆盖):保证验证邮件可靠送达

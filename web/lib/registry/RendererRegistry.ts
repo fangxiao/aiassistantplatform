@@ -12,6 +12,8 @@ import { CollapsibleRenderer } from "../../components/renderers/display/Collapsi
 import { ImageRenderer } from "../../components/renderers/display/ImageRenderer";
 import { FileRenderer } from "../../components/renderers/display/FileRenderer";
 import { MermaidRenderer } from "../../components/renderers/display/MermaidRenderer";
+import { WaterfallRenderer } from "../../components/renderers/display/WaterfallRenderer";
+import { MetricStatRenderer } from "../../components/renderers/display/MetricStatRenderer";
 
 // 交互输入类
 import {
@@ -63,6 +65,10 @@ class RendererRegistry {
     this.map.set("image", ImageRenderer);
     this.map.set("file", FileRenderer);
     this.map.set("mermaid", MermaidRenderer);
+
+    // M38(RFC-05):瀑布流 + 指标看板
+    this.map.set("waterfall", WaterfallRenderer);
+    this.map.set("metric_stat", MetricStatRenderer);
 
     // 11 种交互输入类
     this.map.set("input.text", InputTextRenderer);

@@ -308,7 +308,37 @@ async def stream_agent(
         )
         if arg_urls:
             _run_state.consumed_urls.update(u for u in arg_urls if "%" in u or "sig=" in u)
+        # M38(RFC-01):工具执行前拦截器(脱敏/审计/拒绝)
+        from agentplatform.core.agent.interceptors import (
+            InterceptorAbort,
+            InterceptorContext,
+            run_after_tool,
+            run_before_tool,
+        )
+
+        _ictx = InterceptorContext(
+            session_id=chat_session_id or "", user_id=owner_id or "",
+            plugin_name=getattr(resource, "plugin_name", "") if resource else "",
+        )
+        if rid and rkind:
+            try:
+                import json as _json
+
+                _args = _parse_args(arguments)
+                _args = await run_before_tool(rid, _args, _ictx)
+                arguments = _json.dumps(_args, ensure_ascii=False)
+            except InterceptorAbort as _abort:
+                return f"【拦截器终止】{_abort.message}"
+
         result = await _execute_inner(resource, arguments)
+
+        # M38(RFC-01):工具执行后拦截器(结果脱敏/格式化)
+        if rid and rkind:
+            try:
+                result = await run_after_tool(rid, result, _ictx)
+            except Exception:  # noqa: BLE001 后处理失败不影响结果
+                pass
+
         # M26 使用计数(设计 020 §2):tool/skill 每次执行 +1(内部静默自愈)
         if rid and rver:
             from agentplatform.core.registry.service import bump_use_count
@@ -452,6 +482,24 @@ async def stream_agent(
         reasoning_chunks: list[str] = []
         calls: list[ToolCall] = []
 
+        # M38(RFC-01):LLM 调用前拦截器(脱敏/注入 system prompt)
+        try:
+            from agentplatform.core.agent.interceptors import (
+                InterceptorAbort,
+                InterceptorContext,
+                run_before_llm,
+            )
+
+            _pre_ctx = InterceptorContext(
+                session_id=chat_session_id or "", user_id=owner_id or "",
+            )
+            messages = await run_before_llm(messages, _pre_ctx)
+        except InterceptorAbort as _abort:
+            yield AgentEvent(type="error", error=f"内容拦截: {_abort.message}")
+            return
+        except Exception:  # noqa: BLE001 拦截器失败不阻断
+            pass
+
         round_usage = 0
         async for e in _stream(llm_client, messages, tools):
             if e.type == "error":
@@ -469,6 +517,21 @@ async def stream_agent(
 
         accumulated_text = "".join(delta_chunks)
         accumulated_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
+
+        # M38(RFC-01):LLM 输出后拦截器(脱敏/审查)
+        if accumulated_text:
+            try:
+                from agentplatform.core.agent.interceptors import (
+                    InterceptorContext,
+                    run_after_llm,
+                )
+
+                _llm_ctx = InterceptorContext(
+                    session_id=chat_session_id or "", user_id=owner_id or "",
+                )
+                accumulated_text = await run_after_llm(accumulated_text, _llm_ctx)
+            except Exception:  # noqa: BLE001 拦截器失败不影响输出
+                pass
 
         # 思考模型兜底：如果模型把文章或输出写在推理/思考流中导致正文 delta 为空，自动提取实质内容作为回复
         if not accumulated_text.strip() and accumulated_reasoning:
