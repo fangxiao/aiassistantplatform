@@ -674,3 +674,38 @@ async def test_api_plugin_mounted_kbs_flow(session, client, dev_user, normal_use
     assert r.status_code == 201, r.text
     assert r.json()["id"] == pid
     assert r.json()["mounted_kb_ids"] == [str(pub.id), str(unpub.id)]
+
+
+# ---------------------------------------------------------------- 个人默认库(20261015)
+
+
+async def test_personal_default_globally_mounted(session, normal_user):
+    """个人默认库:owner 的会话全局并入 allowed;他人不可见(可见性+owner 双重隔离)。"""
+    from agentplatform.core.kb.model import KbVisibility
+
+    mine = await _make_kb(session, normal_user, slug="my_personal")
+    mine.personal_default = True
+    await session.commit()
+
+    allowed = await resolve_allowed_kb_ids(
+        session, mounted_kb_ids=[], plugin_manifest=None, session_user_id=str(normal_user.id)
+    )
+    assert mine.id in allowed
+
+    # 同一库:别的用户(personal_default 为空)拿不到
+    other = await resolve_allowed_kb_ids(
+        session, mounted_kb_ids=[], plugin_manifest=None, session_user_id=None
+    )
+    assert mine.id not in (other or [])
+
+
+async def test_personal_default_inactive_not_mounted(session, normal_user):
+    """默认库被停用后自动退出授权链。"""
+    mine = await _make_kb(session, normal_user, slug="my_personal2")
+    mine.personal_default = True
+    mine.status = "disabled"
+    await session.commit()
+    allowed = await resolve_allowed_kb_ids(
+        session, mounted_kb_ids=[], plugin_manifest=None, session_user_id=str(normal_user.id)
+    )
+    assert mine.id not in allowed

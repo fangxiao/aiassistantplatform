@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { listKbs, listSources, syncSource, type DataSourceInfo } from "../../lib/api/kb";
 import { TodoCard } from "./TodoCard";
+import { MyFilesCard } from "./MyFilesCard";
 import { MemoryCard } from "./MemoryCard";
 import { BriefingCard } from "./BriefingCard";
 import { SchedulerCard } from "./SchedulerCard";
@@ -14,11 +15,11 @@ import { getUser } from "../../lib/api/auth";
 
 /** M37:角色画像 → 工作台卡片显隐(多选并集) */
 const PERSONA_CARDS: Record<string, string[]> = {
-  student: ["sessions", "study", "scheduler", "assistants", "onboarding"],
-  parent: ["sessions", "scheduler", "todos", "assistants"],
-  developer: ["sessions", "todos", "memory", "briefing", "scheduler", "assistants", "kb", "channels"],
+  student: ["sessions", "study", "scheduler", "assistants", "files", "onboarding"],
+  parent: ["sessions", "scheduler", "todos", "assistants", "files"],
+  developer: ["sessions", "todos", "memory", "briefing", "scheduler", "assistants", "kb", "channels", "files"],
 };
-const GENERAL_CARDS = ["sessions", "todos", "assistants"];
+const GENERAL_CARDS = ["sessions", "todos", "assistants", "files"];
 
 function visibleCards(): Set<string> {
   const user = typeof window !== "undefined" ? getUser() : null;
@@ -101,6 +102,8 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
           )}
           {/* 我的待办(P1) + 助手记忆(打磨①) */}
           {cards.has("todos") && <TodoCard />}
+          {/* 20261015:我的文件(汇总模式,查看全部跳 /files) */}
+          {cards.has("files") && <MyFilesCard />}
           {cards.has("memory") && <MemoryCard />}
           {/* 每日简报(P1) */}
           {cards.has("briefing") && <BriefingCard onContinue={onContinue} onSaveToKb={onSaveToKb} />}
@@ -192,10 +195,12 @@ function QuickAction({ icon, title, desc, onClick }: { icon: string; title: stri
 export function Card({
   title,
   action,
+  moreLink,
   children,
 }: {
   title: string;
   action?: { label: string; onClick: () => void };
+  moreLink?: string; // 20261015:工作台汇总化——卡片只放最近记录,「查看全部」跳专属页
   children: React.ReactNode;
 }) {
   return (
@@ -209,6 +214,11 @@ export function Card({
         )}
       </div>
       <div className="p-3">{children}</div>
+      {moreLink && (
+        <Link href={moreLink} className="block border-t border-slate-100 px-4 py-2 text-center text-[11px] text-slate-400 transition hover:text-indigo-600">
+          查看全部 →
+        </Link>
+      )}
     </div>
   );
 }

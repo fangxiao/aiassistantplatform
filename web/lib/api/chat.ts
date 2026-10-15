@@ -105,13 +105,19 @@ export async function sendFeedbackEvent(
 }
 
 // 打磨④:对话图片上传(对象存储化)——返回服务端 URL,消息块不再存 dataURL
-export async function uploadImage(file: File): Promise<{ url: string; size: number }> {
-  return apiUpload<{ url: string; size: number }>("/files/upload", file);
+export async function uploadImage(
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<{ url: string; size: number }> {
+  return apiUpload<{ url: string; size: number }>("/files/upload", file, onProgress);
 }
 
 // 打磨⑥:单文档即问上传(pdf/md/txt,临时解析不入库)
-export async function uploadDoc(file: File): Promise<{ url: string; size: number }> {
-  return apiUpload<{ url: string; size: number }>("/files/upload", file);
+export async function uploadDoc(
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<{ url: string; size: number }> {
+  return apiUpload<{ url: string; size: number }>("/files/upload", file, onProgress);
 }
 
 // 会话分享(产品成熟度③):创建/撤销只读链接

@@ -95,19 +95,39 @@ async def resolve_allowed_kb_ids(
             kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.slug == slug))
             if kb is not None and kb.visibility == KbVisibility.public and kb.status == "active":
                 allowed.setdefault(kb.id, None)
-    # 防御性过滤:public 需 active;private 须来自挂载入口(写入时已校验可读);
-    # 组织上下文包(M27,shared)可经插件挂载进入,但仅当当前用户是包成员
+    # 20261015:用户个人默认库(personal_default)全局并入——owner 的所有会话
+    # 自动可检索自己的个人库,无需逐会话挂载(全局生效,可在知识库侧关闭)
+    if session_user_id:
+        personal = (
+            await db.scalars(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.owner_id == str(session_user_id),
+                    KnowledgeBase.personal_default.is_(True),
+                    KnowledgeBase.status == "active",
+                )
+            )
+        ).all()
+        for kb in personal:
+            allowed.setdefault(kb.id, None)
+    # 防御性过滤:public 需 active;private 须来自挂载入口(写入时已校验可读)
+    # 或为当前用户本人所有;组织上下文包(M27,shared)可经插件挂载进入,
+    # 但仅当当前用户是包成员
     valid: list[uuid.UUID] = []
     for kid in allowed:
         kb = await db.get(KnowledgeBase, kid)
         if kb is None or kb.status != "active":
             continue
-        if kb.visibility == KbVisibility.public or kid in mounted_set or (
-            kb.is_context_pack
-            and kb.visibility == KbVisibility.shared
-            and kid in (plugin_mounted_kb_ids or [])
-            and session_user_id
-            and await _is_kb_member(db, kb, session_user_id)
+        if (
+            kb.visibility == KbVisibility.public
+            or kid in mounted_set
+            or (session_user_id and str(kb.owner_id) == str(session_user_id))
+            or (
+                kb.is_context_pack
+                and kb.visibility == KbVisibility.shared
+                and kid in (plugin_mounted_kb_ids or [])
+                and session_user_id
+                and await _is_kb_member(db, kb, session_user_id)
+            )
         ):
             valid.append(kid)
     return valid

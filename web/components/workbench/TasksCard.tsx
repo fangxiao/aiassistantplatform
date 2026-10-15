@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiGet } from "../../lib/api/client";
 import { Card } from "./WorkbenchView";
 
@@ -41,9 +42,11 @@ function fmtTime(iso: string | null): string {
 
 export function TasksCard({
   onContinue,
+  full = false,
 }: {
   onContinue: (sessionId: string) => void;
   onSaveToKb: (c: string) => void;
+  full?: boolean; // 20261015:专属页全量模式;工作台汇总模式限 5 条 + 查看全部
 }) {
   const [panel, setPanel] = useState<Panel | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,11 +75,13 @@ export function TasksCard({
   }, [refresh]);
 
   return (
-    <Card title="💬 会话中心">
+    <Card title="💬 会话中心" moreLink={full ? undefined : "/sessions"}>
       {loading && <p className="py-2 text-center text-xs text-slate-400">加载中…</p>}
       {error && <p className="py-2 text-center text-xs text-rose-500">{error}</p>}
       {panel && (
         <div>
+          {/* 20261015:会话多时撑开工作台高度——限高滚动;专属页全量模式放宽 */}
+          <div className={full ? "max-h-[65vh] overflow-y-auto" : "max-h-80 overflow-y-auto"}>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400">
@@ -87,7 +92,7 @@ export function TasksCard({
               </tr>
             </thead>
             <tbody>
-              {panel.sessions.map((s) => (
+              {(full ? panel.sessions : panel.sessions.slice(0, 5)).map((s) => (
                 <tr key={s.session_id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                   <td className="px-2 py-1.5">
                     <button
@@ -122,6 +127,7 @@ export function TasksCard({
               ))}
             </tbody>
           </table>
+          </div>
           {panel.sessions.length === 0 && (
             <p className="py-3 text-center text-xs text-slate-400">
               暂无会话——去对话页发起一次对话,或创建定时任务

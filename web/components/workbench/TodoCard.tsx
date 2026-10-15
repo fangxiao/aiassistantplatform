@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 
 /** 我的待办(M14 P1.5 云端化,需求 007 U8 v0.2):
@@ -19,7 +20,7 @@ interface Todo {
   done_at: string | null;
 }
 
-export function TodoCard() {
+export function TodoCard({ full = false }: { full?: boolean }) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [draft, setDraft] = useState("");
   const [showDone, setShowDone] = useState(false);
@@ -105,7 +106,9 @@ export function TodoCard() {
 
   const open = todos.filter((t) => !t.done);
   const done = todos.filter((t) => t.done);
-  const visible = showDone ? done.slice(0, 10) : open.slice(0, 8);
+  const visible = showDone
+    ? done.slice(0, full ? 50 : 10)
+    : open.slice(0, full ? 50 : 8);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-xs">
@@ -199,6 +202,14 @@ export function TodoCard() {
           </div>
         )}
       </div>
+      {!full && (
+        <Link
+          href="/todos"
+          className="block border-t border-slate-100 px-4 py-2 text-center text-[11px] text-slate-400 transition hover:text-indigo-600"
+        >
+          查看全部 →
+        </Link>
+      )}
     </div>
   );
 }

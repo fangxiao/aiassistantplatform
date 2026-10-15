@@ -83,6 +83,9 @@ class KnowledgeBase(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")  # active / disabled
     # 组织上下文包(M27/需求 016):shared 库 + 此标记 = 上下文包;建包时预置四分区
     is_context_pack: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 20261015:个人库"随对话自动挂载"标记——owner 的所有会话经授权链自动并入;
+    # partial unique index 保证每用户至多一个默认库(全局生效,可关)
+    personal_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     doc_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

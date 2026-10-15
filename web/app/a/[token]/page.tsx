@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Composer from "../../../components/chat/Composer";
 import MessageList from "../../../components/chat/MessageList";
+import { MyFilesCard } from "../../../components/workbench/MyFilesCard";
+import { TodoCard } from "../../../components/workbench/TodoCard";
 import { API_BASE, getAuthHeader } from "../../../lib/api/client";
 import type { ChatMessage, ContentBlock, ToolCallInfo } from "../../../lib/types";
 
@@ -41,6 +43,7 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
+  const [showMine, setShowMine] = useState(false); // 20261015:访客个人空间抽屉(我的文件/待办)
   const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -140,12 +143,22 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
     createNewSession(info.plugin_id).catch(() => setError("会话创建失败"));
   };
 
-  // 4. 发送(SSE 流式)
-  const send = async (text: string) => {
+  // 4. 发送(SSE 流式);20261015 修复:此前 onSend 只取文本,images/docs 被
+  // 丢弃——用户在白牌页附图/传 Excel 后模型"看不到"(附件上传成功但请求缺参)
+  const send = async (text: string, images: string[] = [], docs: string[] = []) => {
     const sid = currentSessionId;
     if (!sid || streaming) return;
     setStreaming(true);
-    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", text, blocks: [{ type: "markdown", data: { text } }] };
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      text,
+      blocks: [
+        { type: "markdown", data: { text } },
+        ...images.map((url) => ({ type: "image" as const, data: { url } })),
+        ...docs.map((url) => ({ type: "file" as const, data: { name: decodeURIComponent(url.split("/").pop() || "document"), url } })),
+      ],
+    };
     const asstId = `a-${Date.now()}`;
     setMessages((ms) => [...ms, userMsg, { id: asstId, role: "assistant", text: "", blocks: [], toolCalls: [] }]);
     const patch = (fn: (m: ChatMessage) => ChatMessage) =>
@@ -156,7 +169,7 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
       const resp = await fetch(`${API_BASE}/chat/sessions/${sid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ content: text, images, docs }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
@@ -336,6 +349,15 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
             📜 {sessionList.length}
           </button>
         )}
+        {/* 20261015:访客个人空间——我的文件(可入库)/我的待办 */}
+        <button
+          type="button"
+          onClick={() => setShowMine(true)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-slate-50"
+          title="我的文件与待办"
+        >
+          我的
+        </button>
         {showSessions && (
           <div className="absolute right-4 top-full z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
             {sessionList.map((s) => (
@@ -386,9 +408,33 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
           />
         )}
       </main>
+      {/* 20261015:访客个人空间抽屉——白牌页保持纯聊天定位,个人能力以抽屉承载 */}
+      {showMine && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={() => setShowMine(false)}>
+          <div
+            className="h-full w-full max-w-md overflow-y-auto bg-slate-50 p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-bold text-slate-800">我的空间</span>
+              <button
+                type="button"
+                onClick={() => setShowMine(false)}
+                className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-100"
+              >
+                关闭
+              </button>
+            </div>
+            <div className="space-y-3">
+              <MyFilesCard full />
+              <TodoCard full />
+            </div>
+          </div>
+        </div>
+      )}
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         <div className="mx-auto max-w-3xl">
-          <Composer onSend={(t) => void send(t)} disabled={streaming} onStop={() => abortRef.current?.abort()} />
+          <Composer onSend={(t, imgs, docUrls) => void send(t, imgs, docUrls)} disabled={streaming} onStop={() => abortRef.current?.abort()} />
         </div>
       </div>
     </div>

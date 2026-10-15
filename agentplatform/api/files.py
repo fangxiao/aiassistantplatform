@@ -14,10 +14,17 @@ import hashlib
 import hmac
 import mimetypes
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import unquote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from pydantic import BaseModel
+from sqlalchemy import select as _select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agentplatform.core.db.session import get_session
+from agentplatform.core.kb.model import KbVisibility, KnowledgeBase
 from fastapi.responses import FileResponse
 
 from agentplatform.config import settings
@@ -205,22 +212,32 @@ async def sign_file_url(
 @router.post("/upload")
 async def upload_image(
     file: UploadFile,
+    db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict:
     """打磨④:对话图片上传——对象存储化(dataURL 不再直存消息表)。
 
     存 ~/.agentplatform/uploads/,返回白名单内可预览的 /api/files/raw URL。
     """
-    # 打磨⑥:单文档即问——除图片外允许 pdf/md/txt(对话级临时解析,不入知识库)
+    # 打磨⑥:单文档即问——除图片外允许 pdf/md/txt/docx/xlsx(对话级临时解析,不入知识库)
     allowed = file.content_type and (
         file.content_type.startswith("image/")
-        or file.content_type in ("application/pdf", "text/markdown", "text/plain")
-        or (file.filename or "").lower().endswith((".pdf", ".md", ".markdown", ".txt"))
+        or file.content_type
+        in (
+            "application/pdf",
+            "text/markdown",
+            "text/plain",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        or (file.filename or "").lower().endswith(
+            (".pdf", ".md", ".markdown", ".txt", ".docx", ".xlsx")
+        )
     )
     if not allowed:
         raise HTTPException(
             status_code=422,
-            detail={"code": "validation_error", "message": "仅支持图片或 PDF/Markdown/文本"},
+            detail={"code": "validation_error", "message": "仅支持图片或 PDF/Word/Excel/Markdown/文本"},
         )
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
@@ -240,4 +257,157 @@ async def upload_image(
     signed = sign_file_path(str(target))
     if settings.public_api_base:
         signed = settings.public_api_base.rstrip("/") + signed
+
+    # 20261015「我的文件」:上传留痕,供面板列全量附件与一键转存知识库
+    from agentplatform.core.files.model import UserFile
+
+    db.add(
+        UserFile(
+            user_id=str(user.id),
+            path=str(target),
+            name=file.filename or target.name,
+            size=len(data),
+            mime=file.content_type or "application/octet-stream",
+        )
+    )
+    await db.commit()
+
     return {"url": signed, "size": len(data)}
+
+
+class FileOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    size: int
+    mime: str
+    url: str
+    created_at: str
+
+
+@router.get("/mine", response_model=list[FileOut])
+async def my_files(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[FileOut]:
+    """我的文件:当前用户上传过的全部附件(20261015「我的文件」面板数据源)。"""
+    from sqlalchemy import select as _select
+
+    from agentplatform.core.files.model import UserFile
+
+    rows = (
+        await session.scalars(
+            _select(UserFile)
+            .where(UserFile.user_id == str(user.id))
+            .order_by(UserFile.created_at.desc())
+            .limit(200)
+        )
+    ).all()
+    out: list[FileOut] = []
+    for r in rows:
+        signed = sign_file_path(r.path)
+        if settings.public_api_base:
+            signed = settings.public_api_base.rstrip("/") + signed
+        out.append(
+            FileOut(
+                id=r.id,
+                name=r.name,
+                size=r.size,
+                mime=r.mime,
+                url=signed,
+                created_at=r.created_at.isoformat(),
+            )
+        )
+    return out
+
+
+class IngestIn(BaseModel):
+    kb_id: uuid.UUID | None = None  # None → 建/复用「我的知识库」个人默认库
+
+
+@router.post("/{file_id}/ingest")
+async def ingest_to_kb(
+    file_id: uuid.UUID,
+    payload: IngestIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """把「我的文件」转存知识库:公共库(有写权限)或个人默认库(20261015)。
+
+    直读服务端本地文件走 KB 摄取管道(parse→chunk→embed),不经二次上传。
+    """
+    from pathlib import Path as _Path
+
+    from fastapi import HTTPException as _HTTPException
+
+    from agentplatform.core.files.model import UserFile
+    from agentplatform.core.kb import pipeline as kb_pipeline
+    from agentplatform.core.kb import service as kb_service
+
+    uf = await session.get(UserFile, file_id)
+    if uf is None or uf.user_id != str(user.id):
+        raise _HTTPException(status_code=404, detail={"code": "not_found", "message": "文件不存在"})
+
+    if payload.kb_id is not None:
+        kb = await kb_service.get_kb(session, payload.kb_id)
+        if kb is None or not await kb_service.can_write(session, kb, user):
+            raise _HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "知识库不存在或无写权限"}
+            )
+    else:
+        # 个人默认库:取/建「我的知识库」(private, owner=当前用户, personal_default)
+        kb = (
+            await session.scalars(
+                _select(KnowledgeBase).where(
+                    KnowledgeBase.owner_id == str(user.id),
+                    KnowledgeBase.personal_default.is_(True),
+                )
+            )
+        ).first()
+        if kb is None:
+            kb = KnowledgeBase(
+                name="我的知识库",
+                slug=f"kb-mine-{uuid.uuid4().hex[:8]}",
+                visibility=KbVisibility.private,
+                owner_id=str(user.id),
+                description="我的个人知识库(随对话自动挂载,可关闭)",
+                personal_default=True,
+            )
+            session.add(kb)
+            await session.flush()
+
+    src = _Path(uf.path)
+    if not src.exists():
+        raise _HTTPException(
+            status_code=410, detail={"code": "gone", "message": "文件已过期,请重新上传"}
+        )
+    # 文件名兜底:回填的历史记录可能缺扩展名(name='raw' 等)——依次回落
+    # 存储路径后缀、mime 映射,保证 KB 类型校验(按扩展名)能通过
+    filename = uf.name
+    if "." not in filename:
+        filename = src.name
+    if "." not in filename:
+        ext_by_mime = {
+            "application/pdf": ".pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+            "text/markdown": ".md",
+            "text/plain": ".txt",
+        }
+        filename = f"{src.stem or 'file'}{ext_by_mime.get(uf.mime, '')}"
+    try:
+        doc = await kb_service.add_document(
+            session, kb, user,
+            filename=filename,
+            mime=uf.mime,
+            content=src.read_bytes(),
+        )
+    except kb_service.KbError as exc:
+        raise _HTTPException(status_code=400, detail={"code": "kb_error", "message": str(exc)}) from exc
+    await session.commit()
+    kb_pipeline.enqueue_document(doc.id)
+    return {
+        "doc_id": str(doc.id),
+        "kb_id": str(kb.id),
+        "kb_name": kb.name,
+        "personal_default": bool(kb.personal_default),
+    }

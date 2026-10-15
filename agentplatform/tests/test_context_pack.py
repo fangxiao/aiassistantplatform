@@ -11,6 +11,7 @@ from sqlalchemy import select
 from agentplatform.core.auth.model import User, UserRole
 from agentplatform.core.auth.service import create_user
 from agentplatform.core.kb.model import KnowledgeBase, KbVisibility
+from agentplatform.core.kb.pipeline import parse_document
 from agentplatform.core.plugin.model import Plugin
 
 
@@ -171,3 +172,53 @@ async def test_runtime_filter_member_vs_outsider(session):
     assert pack.id not in allowed_outsider
     assert pack.id not in allowed_anon  # 无用户上下文不放进 shared
     assert pack.visibility == KbVisibility.shared
+
+
+class TestParseDocumentOffice:
+    """20261015:对话附件/知识库支持 Word(.docx)与 Excel(.xlsx)。"""
+
+    def test_docx_paragraphs_and_table(self, tmp_path):
+        import docx as _docx
+
+        p = tmp_path / "t.docx"
+        d = _docx.Document()
+        d.add_paragraph("第一段:还款计划说明")
+        d.add_paragraph("")
+        table = d.add_table(rows=2, cols=2)
+        table.rows[0].cells[0].text = "期数"
+        table.rows[0].cells[1].text = "金额"
+        table.rows[1].cells[0].text = "1"
+        table.rows[1].cells[1].text = "1000"
+        d.save(str(p))
+        text = parse_document(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", p
+        )
+        assert "第一段:还款计划说明" in text
+        assert "期数\t金额" in text
+        assert "1\t1000" in text
+
+    def test_xlsx_rows(self, tmp_path):
+        from openpyxl import Workbook
+
+        p = tmp_path / "t.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "测算"
+        ws.append(["月份", "利息"])
+        ws.append(["1", 25.0])
+        ws.append([None, None])  # 空行跳过
+        wb.save(str(p))
+        text = parse_document(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", p
+        )
+        assert "【工作表 测算】" in text
+        assert "月份\t利息" in text
+        assert "1\t25" in text  # openpyxl 读回数值 25.0 → int 25,按存储形态直出
+
+    def test_unsupported_mime_raises(self, tmp_path):
+        import pytest as _pytest
+
+        p = tmp_path / "t.bin"
+        p.write_bytes(b"\x00\x01")
+        with _pytest.raises(ValueError):
+            parse_document("application/octet-stream", p)

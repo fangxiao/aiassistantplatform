@@ -20,6 +20,7 @@ if config.config_file_name is not None:
 from agentplatform.config import settings
 from agentplatform.core.auth.model import User  # noqa: F401
 from agentplatform.core.db.base import Base
+from agentplatform.core.files.model import UserFile  # noqa: F401
 from agentplatform.core.interact.model import InteractEvent  # noqa: F401
 from agentplatform.core.kb.model import KbChunk, KbDocument, KnowledgeBase  # noqa: F401
 from agentplatform.core.llm.model import LlmEndpoint  # noqa: F401

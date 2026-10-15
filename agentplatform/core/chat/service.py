@@ -218,6 +218,8 @@ async def _load_doc_context(docs: list[str] | None) -> str:
             suffix = local.suffix.lower()
             mime = (
                 "application/pdf" if suffix == ".pdf"
+                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if suffix == ".docx"
+                else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if suffix == ".xlsx"
                 else "text/markdown" if suffix in (".md", ".markdown")
                 else "text/plain"
             )

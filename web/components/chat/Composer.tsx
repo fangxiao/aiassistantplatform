@@ -20,14 +20,32 @@ export default function Composer({
   const [value, setValue] = useState("");
   // 打磨④:对象存储化——选图即上传,发送用服务端 URL(消息表不再存 dataURL)
   const [images, setImages] = useState<{ preview: string; url: string | null }[]>([]);
-  // 打磨⑥:单文档即问(pdf/md/txt,不入知识库)
+  // 打磨⑥:单文档即问(pdf/md/txt/docx/xlsx,不入知识库)
   const [docs, setDocs] = useState<{ name: string; url: string | null }[]>([]);
   const [isComposing, setIsComposing] = useState(false);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
+  // 20261015:附件被忽略(超限/类型不符/上传失败)必须可见,不再静默丢弃
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = React.useRef<number | null>(null);
+  // 20261015:文档上传真实进度(文件名 → 0-100),大 Excel 不再"没响应"
+  const [docProgress, setDocProgress] = useState<Record<string, number>>({});
+
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
+  };
 
   const addImages = (files: FileList | File[]) => {
     for (const f of Array.from(files)) {
-      if (!f.type.startsWith("image/") || f.size > MAX_IMAGE_BYTES) continue;
+      if (!f.type.startsWith("image/")) {
+        showNotice(`「${f.name || "剪贴板内容"}」不是图片,已忽略`);
+        continue;
+      }
+      if (f.size > MAX_IMAGE_BYTES) {
+        showNotice(`「${f.name}」超过 5MB 上限,已忽略`);
+        continue;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         const preview = typeof reader.result === "string" ? reader.result : "";
@@ -41,7 +59,7 @@ export default function Composer({
                 cur2.map((x) => (x.preview === preview ? { ...x, url: r.url } : x))
               )
             )
-            .catch(() => undefined);
+            .catch(() => showNotice(`「${f.name}」上传失败,发送时将以内嵌方式携带`));
           return [...cur, { preview, url: null }];
         });
       };
@@ -49,8 +67,16 @@ export default function Composer({
     }
   };
 
+  // 20261015:文档上传在途中禁止发送——docs.url 未就绪会被过滤丢弃,
+  // 模型"看不到文件"(竞态事故实测);图片有 dataURL 兜底不受影响
+  const hasPendingDoc = Object.keys(docProgress).length > 0;
+
   const submit = () => {
     const t = value.trim();
+    if (hasPendingDoc) {
+      showNotice("附件还在上传中,请等进度条完成后再发送");
+      return;
+    }
     if ((!t && images.length === 0 && docs.length === 0) || disabled) return;
     onSend(
       t,
@@ -64,9 +90,20 @@ export default function Composer({
 
   const addDoc = (file: File) => {
     if (docs.length >= 2) return;
-    uploadDoc(file)
-      .then((r) => setDocs((cur) => (cur.length >= 2 ? cur : [...cur, { name: file.name, url: r.url }])))
-      .catch(() => undefined);
+    if (file.size > MAX_IMAGE_BYTES) {
+      showNotice(`「${file.name}」超过 5MB 上限,已忽略`);
+      return;
+    }
+    setDocProgress((p) => ({ ...p, [file.name]: 0 }));
+    uploadDoc(file, (pct) => setDocProgress((prev) => ({ ...prev, [file.name]: pct })))
+      .then((r) => {
+        setDocProgress(({ [file.name]: _drop, ...rest }) => rest);
+        setDocs((cur) => (cur.length >= 2 ? cur : [...cur, { name: file.name, url: r.url }]));
+      })
+      .catch(() => {
+        setDocProgress(({ [file.name]: _drop, ...rest }) => rest);
+        showNotice(`「${file.name}」上传失败,请重试`);
+      });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -121,6 +158,28 @@ export default function Composer({
           ))}
         </div>
       )}
+      {Object.keys(docProgress).length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {Object.entries(docProgress).map(([name, pct]) => (
+            <div key={name} className="rounded-lg border border-indigo-200 bg-indigo-50/50 px-3 py-1.5">
+              <span className="text-[11px] text-slate-600">
+                📄 {name} <span className="ml-1 font-mono text-[10px] text-indigo-500">{pct}%</span>
+              </span>
+              <div className="mt-1 h-1 w-28 rounded bg-slate-200">
+                <div
+                  className="h-1 rounded bg-indigo-500 transition-all duration-150"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {notice && (
+        <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700">
+          ⚠️ {notice}
+        </div>
+      )}
       <div className="flex gap-2 items-end">
       <button
         type="button"
@@ -134,7 +193,7 @@ export default function Composer({
       <input
         ref={fileRef}
         type="file"
-        accept="image/*,.pdf,.md,.markdown,.txt"
+        accept="image/*,.pdf,.md,.markdown,.txt,.docx,.xlsx"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -171,7 +230,13 @@ export default function Composer({
         onClick={disabled && onStop ? onStop : submit}
         disabled={disabled && !onStop}
       >
-        {disabled && onStop ? "⏹ 停止" : disabled ? "生成中…" : "发送 ↑"}
+        {disabled && onStop
+          ? "⏹ 停止"
+          : disabled
+            ? "生成中…"
+            : hasPendingDoc
+              ? "上传中…"
+              : "发送 ↑"}
       </button>
       </div>
     </div>

@@ -96,12 +96,19 @@ export async function loginViaToken(page: Page) {
     saveState({ ...s, token: body.token });
   }
   const cur = state();
+  // M37 角色画像:PersonaSelect 弹窗以 localStorage user.personas 判空,
+  // 空则遮罩全页挡死后续操作(20261015 e2e 实测)——写入对象必须带 personas,
+  // 与服务端 PATCH 保持一致
+  await page.request.patch("http://localhost:8000/api/auth/me/personas", {
+    headers: { Authorization: `Bearer ${cur.token}` },
+    data: { personas: ["developer"] },
+  });
   await page.addInitScript(
     ([t, u]) => {
       localStorage.setItem("agentplatform_token", t!);
       localStorage.setItem("agentplatform_user", u!);
     },
-    [cur.token, JSON.stringify({ email: cur.email, role: "user" })],
+    [cur.token, JSON.stringify({ email: cur.email, role: "user", personas: ["developer"] })],
   );
   await page.goto("/");
   // 视图无关的登录成功标志(视图可能注入为 chat)

@@ -98,7 +98,7 @@ async def _worker() -> None:
 
 
 def parse_document(mime: str, path: Path) -> str:
-    """提取纯文本;pdf 走 pypdf(与 tool:pdf_parse 同源),md/txt 直读,html 去标签。"""
+    """提取纯文本;pdf 走 pypdf(与 tool:pdf_parse 同源),docx/xlsx 走官方库,md/txt 直读,html 去标签。"""
     if mime == "application/pdf":
         try:
             from pypdf import PdfReader  # type: ignore[import-not-found]
@@ -106,11 +106,56 @@ def parse_document(mime: str, path: Path) -> str:
             raise RuntimeError("pdf 解析需要 pypdf 依赖") from exc
         reader = PdfReader(str(path))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return _docx_to_text(path)
+    if mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return _xlsx_to_text(path)
     if mime in ("text/markdown", "text/plain"):
         return path.read_text(encoding="utf-8", errors="replace")
     if mime == "text/html":
         return _html_to_text(path.read_text(encoding="utf-8", errors="replace"))
     raise ValueError(f"不支持的 mime: {mime}")
+
+
+def _docx_to_text(path: Path) -> str:
+    """Word .docx 正文提取:段落按行拼接,表格单元格以制表符连接(20261015)。"""
+    try:
+        import docx  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("docx 解析需要 python-docx 依赖") from exc
+
+    d = docx.Document(str(path))
+    parts: list[str] = [p.text for p in d.paragraphs if p.text.strip()]
+    for table in d.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells]
+            if any(cells):
+                parts.append("\t".join(cells))
+    return "\n".join(parts)
+
+
+def _xlsx_to_text(path: Path) -> str:
+    """Excel .xlsx 提取:每 sheet 输出标题行,数据行以制表符连接(20261015)。
+
+    经 BytesIO 传入——KB 管道把内容存为无扩展名的 doc-id 文件,openpyxl
+    按文件名后缀校验会误拒;文件对象无此校验。"""
+    try:
+        from openpyxl import load_workbook  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("xlsx 解析需要 openpyxl 依赖") from exc
+
+    import io
+
+    wb = load_workbook(io.BytesIO(path.read_bytes()), read_only=True, data_only=True)
+    parts: list[str] = []
+    for ws in wb.worksheets:
+        parts.append(f"【工作表 {ws.title}】")
+        for row in ws.iter_rows(values_only=True):
+            cells = ["" if v is None else str(v) for v in row]
+            if any(c.strip() for c in cells):
+                parts.append("\t".join(cells).rstrip())
+    wb.close()
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------- html 去标签

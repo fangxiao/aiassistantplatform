@@ -62,6 +62,7 @@ class KbOut(BaseModel):
     can_write: bool = False  # 服务端计算(设计 008 §11.2),前端渲染收藏目标
     can_manage: bool = False  # 服务端计算(§12.2),数据源/成员等管理入口渲染用
     is_context_pack: bool = False  # M27:组织上下文包 🏢 徽标渲染
+    personal_default: bool = False  # 20261015:个人默认库(随对话自动挂载)
 
 
 class KbDocOut(BaseModel):
@@ -712,3 +713,41 @@ async def list_source_runs(
 async def sync_run_out_list(db: AsyncSession, source_id: uuid.UUID, limit: int) -> list[SyncRunOut]:
     runs = await connector_service.list_runs(db, source_id, limit)
     return [SyncRunOut.model_validate(r) for r in runs]
+
+
+# ---------------------------------------------------------------- 个人默认库(20261015)
+
+
+class PersonalDefaultIn(BaseModel):
+    on: bool
+
+
+@router.post("/kbs/{kb_id}/personal-default")
+async def set_personal_default(
+    kb_id: uuid.UUID,
+    payload: PersonalDefaultIn,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """设置/取消「随对话自动挂载」(仅 owner;每用户至多一个默认库,索引兜底)。
+
+    开启时先清掉本人其他 personal_default,再置目标库——保证全局唯一。
+    """
+    kb = await db.get(KnowledgeBase, kb_id)
+    if kb is None or str(kb.owner_id) != str(user.id):
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "知识库不存在"})
+    if payload.on:
+        others = (
+            await db.scalars(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.owner_id == str(user.id),
+                    KnowledgeBase.personal_default.is_(True),
+                    KnowledgeBase.id != kb.id,
+                )
+            )
+        ).all()
+        for o in others:
+            o.personal_default = False
+    kb.personal_default = payload.on
+    await db.commit()
+    return {"kb_id": str(kb.id), "personal_default": kb.personal_default}

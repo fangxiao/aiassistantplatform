@@ -24,7 +24,13 @@ from agentplatform.core.kb.model import (
 )
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")  # 注册表 id 组成部分,与 tool:<name> 同风格
-ALLOWED_MIME = {"md": "text/markdown", "txt": "text/plain", "pdf": "application/pdf"}
+ALLOWED_MIME = {
+    "md": "text/markdown",
+    "txt": "text/plain",
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 # 文本直存(设计 008 §11):from-text 接口的合法 mime,html 由 pipeline 去标签
 ALLOWED_TEXT_MIME = {"text/markdown", "text/plain", "text/html"}
 

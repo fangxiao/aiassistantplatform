@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api/client";
 
 /** 任务变更事件(M30):定时任务增删改/手动运行后广播,任务中心即时刷新 */
@@ -64,7 +65,13 @@ const STATUS_META: Record<string, { label: string; dot: string }> = {
   failed: { label: "失败", dot: "bg-rose-500" },
 };
 
-export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) => void }) {
+export function SchedulerCard({
+  onContinue,
+  full = false,
+}: {
+  onContinue: (sessionId: string) => void;
+  full?: boolean; // 20261015:专属页全量模式;工作台汇总模式限 5 条 + 查看全部
+}) {
   const [tasks, setTasks] = useState<SchedTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -185,7 +192,7 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
         <Placeholder text="暂无定时任务;创建晨报任务,每天早上自动收到简报" />
       ) : (
         <div className="divide-y divide-slate-100">
-          {tasks.map((t) => {
+          {(full ? tasks : tasks.slice(0, 5)).map((t) => {
             const kind = KIND_META[t.kind] ?? { icon: "🧩", label: t.kind };
             const st = STATUS_META[t.last_status] ?? STATUS_META.never;
             return (
@@ -328,6 +335,14 @@ export function SchedulerCard({ onContinue }: { onContinue: (sessionId: string) 
             await refresh();
           }}
         />
+      )}
+      {!full && (
+        <Link
+          href="/scheduler"
+          className="block border-t border-slate-100 px-4 py-2 text-center text-[11px] text-slate-400 transition hover:text-indigo-600"
+        >
+          查看全部 →
+        </Link>
       )}
     </div>
   );

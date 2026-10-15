@@ -175,14 +175,47 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return (await resp.json()) as T;
 }
 
-// multipart 文件上传(kb 文档上传等);不设置 Content-Type,由浏览器补 boundary
-export async function apiUpload<T>(path: string, file: File): Promise<T> {
-  const form = new FormData();
-  form.append("file", file);
-  const resp = await requestWithRefresh(path, { method: "POST", body: form });
-  if (resp.status === 401) throw new Error(`HTTP 401: 登录已过期，请重新登录`);
-  if (!resp.ok) throw await errText(resp.status, resp);
-  return (await resp.json()) as T;
+// multipart 文件上传(kb 文档上传等);不设置 Content-Type,由浏览器补 boundary。
+// 20261015:fetch 不支持上传进度,改用 XHR——onProgress 汇报 0-100 真实进度;
+// 401 静默 refresh 一次并重放(与 requestWithRefresh 同语义)
+export async function apiUpload<T>(
+  path: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<T> {
+  const send = () =>
+    new Promise<{ status: number; text: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}${path}`);
+      for (const [k, v] of Object.entries(getAuthHeader())) xhr.setRequestHeader(k, v);
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+        };
+      }
+      xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+      xhr.onerror = () => reject(new Error("网络错误"));
+      const form = new FormData();
+      form.append("file", file);
+      xhr.send(form);
+    });
+
+  let resp = await send();
+  if (resp.status === 401) {
+    if (await refreshSession()) resp = await send();
+  }
+  if (resp.status === 401) {
+    handleUnauthorized();
+    throw new Error(`HTTP 401: 登录已过期，请重新登录`);
+  }
+  if (resp.status < 200 || resp.status >= 300) {
+    throw await toApiError(resp.status, resp.text);
+  }
+  try {
+    return JSON.parse(resp.text || "{}") as T;
+  } catch {
+    return {} as T;
+  }
 }
 
 
