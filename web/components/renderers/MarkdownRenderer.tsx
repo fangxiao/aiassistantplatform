@@ -1,11 +1,17 @@
 // 极简 markdown 渲染器(无第三方依赖;输出转义 HTML 防 XSS)
 // 支持:标题 / 代码块 / 行内代码 / 加粗 / 斜体 / 列表 / 段落 / 链接
+// 20261014:数学公式 KaTeX 渲染——$$...$$ 块级(可跨行)、$...$ 与 \(...\) 行内
+// (错题/理科场景模型大量输出 LaTeX,此前原样展示源码;katex 输出默认不信任
+// 任意 HTML,XSS 安全)
 
 "use client";
 
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import type { ReactNode } from "react";
 import type { ContentBlock } from "../../lib/types";
 import { BlockRenderer } from "./BlockRenderer";
+import { MermaidBlock } from "./MermaidBlock";
 
 type InteractFn = (action: string, value: any, args?: Record<string, any>) => void;
 
@@ -49,10 +55,34 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// 行内格式: `code`、**bold**、*italic*、[text](url)
+// 数学公式渲染:失败时降级为转义原文(throwOnError=false 已兜底,此为双保险)
+function renderMath(tex: string, display: boolean, key: number): ReactNode {
+  try {
+    const html = katex.renderToString(tex, { throwOnError: false, displayMode: display });
+    if (display) {
+      return (
+        <div
+          key={key}
+          className="my-2 overflow-x-auto text-center"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+    }
+    return <span key={key} dangerouslySetInnerHTML={{ __html: html }} />;
+  } catch {
+    return <span key={key}>{escapeHtml(tex)}</span>;
+  }
+}
+
+// 块级公式起始判定:$$ 或 \( \)
+function isBlockMathStart(line: string): boolean {
+  return /^\s*\$\$/.test(line) || /^\s*\\\[/.test(line);
+}
+
+// 行内格式: `code`、**bold**、*italic*、[text](url)、$math$、\(math\)
 function inline(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g;
+  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))|(\$[^$\n]+\$)|(\\\([\s\S]+?\\\))/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let key = 0;
@@ -65,6 +95,9 @@ function inline(text: string): ReactNode[] {
           {escapeHtml(full.slice(1, -1))}
         </code>,
       );
+    } else if (full.startsWith("$") || full.startsWith("\\(")) {
+      const tex = full.startsWith("$") ? full.slice(1, -1) : full.slice(2, -2);
+      nodes.push(renderMath(tex, false, key++));
     } else if (full.startsWith("**")) {
       nodes.push(<strong key={key++}>{full.slice(2, -2)}</strong>);
     } else if (full.startsWith("*")) {
@@ -187,6 +220,7 @@ export default function MarkdownRenderer({
 
     // 代码块
     if (/^```/.test(line.trim())) {
+      const lang = line.trim().slice(3).trim().toLowerCase();
       const buf: string[] = [];
       i++;
       while (i < lines.length && !/^```/.test(lines[i].trim())) {
@@ -194,6 +228,11 @@ export default function MarkdownRenderer({
         i++;
       }
       i++; // 跳过结束 ```
+      // 20261015 工单 1539-e50fd0:mermaid 代码块 → 矢量图渲染(失败降级源码)
+      if (lang === "mermaid" && buf.join("\n").trim()) {
+        out.push(<MermaidBlock key={key++} code={buf.join("\n")} />);
+        continue;
+      }
       // 伪调用兜底:代码块内容是 input.form({...}) 时渲染为真实表单
       const pseudoSrc = buf.join("\n");
       if (!/^```/.test(pseudoSrc)) {
@@ -234,6 +273,42 @@ export default function MarkdownRenderer({
         </pre>,
       );
       i++;
+      continue;
+    }
+    // 数学公式块:$$...$$(可跨行、可同行闭合)与 \[...\],KaTeX display 渲染
+    if (isBlockMathStart(line)) {
+      const startIdx = i; // 未闭合回退用:从块起始行原样重排
+      const delim = line.trim().startsWith("$$") ? "$$" : "\\]";
+      const parts: string[] = [];
+      let cur = line.trim().slice(delim.length);
+      const closeIdx = cur.lastIndexOf(delim);
+      if (closeIdx >= 0) {
+        // 同行闭合:$$x$$ / \[x\]
+        parts.push(cur.slice(0, closeIdx));
+        i++;
+      } else {
+        parts.push(cur);
+        i++;
+        let closed = false;
+        while (i < lines.length) {
+          const idx = lines[i].lastIndexOf(delim);
+          if (idx >= 0) {
+            parts.push(lines[i].slice(0, idx));
+            i++;
+            closed = true;
+            break;
+          }
+          parts.push(lines[i]);
+          i++;
+        }
+        if (!closed) {
+          // 未闭合:从块起始行原样输出,不吞内容
+          out.push(<p key={key++}>{inline(lines.slice(startIdx).join("\n"))}</p>);
+          i = lines.length;
+          continue;
+        }
+      }
+      out.push(renderMath(parts.join("\n"), true, key++));
       continue;
     }
     // 标题
