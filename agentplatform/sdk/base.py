@@ -55,6 +55,9 @@ class Context:
     # M34:执行者身份(平台注入;插件工具经 ctx 拿到"是谁在问",用于按用户隔离数据)
     user_id: str | None = None
     plugin_name: str | None = None
+    # 20261014:本轮用户消息携带的图片 URL 列表(平台注入,与 build_messages 同生命周期;
+    # 错题带图录入等场景——工具可把题图 URL 存进业务数据供后续对比)
+    images: list[str] = field(default_factory=list)
 
     @property
     def data_dir(self) -> Path:

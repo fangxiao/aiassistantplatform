@@ -141,6 +141,7 @@ async def run_agent(
     system_prompt: str | None = None,
     include_output_block: bool = True,
     allow_reasoning_fallback: bool = True,
+    images: list[str] | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
@@ -166,6 +167,7 @@ async def run_agent(
         system_prompt=system_prompt,
         include_output_block=include_output_block,
         allow_reasoning_fallback=allow_reasoning_fallback,
+        images=images,
     ):
         if ev.type == "delta" and ev.text:
             round_buf.append(ev.text)
@@ -489,10 +491,12 @@ async def stream_agent(
                 return result
             if resource.kind == SkillToolKind.tool:
                 # M34:注入执行者身份(会话用户/会话 id)——插件工具经 ctx 做按用户的数据隔离
+                # 20261014:透传本轮图片 URL(错题带图录入等场景)
                 tool_ctx = Context(
                     session_id=chat_session_id,
                     user_id=owner_id,
                     plugin_name=getattr(resource, "plugin_name", None),
+                    images=list(images or []),
                 )
                 return await execute_tool(resource, args, ctx=tool_ctx)
             return await execute_skill(resource, args, skill_call)

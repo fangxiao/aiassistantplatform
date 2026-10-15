@@ -3,6 +3,8 @@
 llm_client 用脚本化 FakeClient 完全 mock,不发起真实 LLM 请求。
 """
 
+import json
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -300,3 +302,37 @@ class TestRoundEndText:
         assert len(round_ends) == 1
         assert round_ends[0].had_tool_calls is True
         assert round_ends[0].text == "让我调用工具处理"
+
+
+class TestToolContextImages:
+    """20261014:工具 ctx 透传本轮图片 URL(错题带图录入等场景)。"""
+
+    async def test_tool_ctx_carries_images(self, session: AsyncSession) -> None:
+        await register(
+            session,
+            resource_id="tool:ctx_capture",
+            kind=K.tool,
+            name="ctx_capture",
+            version="1.0.0",
+            source=S.builtin,
+            schema_={"parameters": {"type": "object", "properties": {}}},
+            impl_path="agentplatform.tests.fixtures.ctx_capture",
+            description="回显 ctx",
+        )
+        await session.commit()
+        fake = FakeClient([
+            [
+                _call("tool:ctx_capture", "{}"),
+                StreamEvent(type="done", message_id="m1", finish_reason="tool_calls"),
+            ],
+            [_text("已附题图"), StreamEvent(type="done", message_id="m2")],
+        ])
+        result = await run_agent(
+            session,
+            fake,
+            resource_ids=["tool:ctx_capture"],
+            user_message="录入这道题",
+            images=["https://ai-api.example.com/api/files/raw?path=/x.png&sig=y"],
+        )
+        ctx_echo = json.loads(result.tool_traces[0].result)
+        assert ctx_echo["images"] == ["https://ai-api.example.com/api/files/raw?path=/x.png&sig=y"]

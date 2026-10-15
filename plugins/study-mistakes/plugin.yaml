@@ -1,6 +1,6 @@
 name: study-mistakes
 display_name: "错题本助手"
-version: 0.2.0
+version: 0.2.1
 description: "错题录入、按记忆曲线(艾宾浩斯)每日复习、学情汇总。数据经平台插件存储原语按用户隔离;复习节奏 1/2/4/7/15 天,答对进阶、答错回炉。"
 author: AgentPlatform Official
 model: auto

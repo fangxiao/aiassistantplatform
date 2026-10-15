@@ -62,6 +62,10 @@ def _result(payload: dict) -> str:
             "wrong_answer": {"type": "string", "description": "学生的错解(可选)"},
             "correct_answer": {"type": "string", "description": "正确答案(可选)"},
             "cause": {"type": "string", "description": "错因(可选)"},
+            "image": {
+                "type": "string",
+                "description": "错题原图 URL(可选;缺省自动附上本轮对话最近一张图片,多图时可显式指定)",
+            },
             "mistake_id": {"type": "string", "description": "错题 id(grade/delete 必填,list/due 返回中获取)"},
             "correct": {"type": "boolean", "description": "grade 时:本次是否答对"},
             "as_of": {"type": "string", "description": "due 的截止日期(ISO,缺省=今天)"},
@@ -99,6 +103,13 @@ async def _add(db, ctx, fields: dict) -> str:
     question = str(fields.get("question") or "").strip()
     if not subject or not question:
         return _result({"ok": False, "error": "add 需要 subject(学科) 与 question(题面) 两个必填字段"})
+    # 20261014:带图录入——模型显式传 image 优先;缺省自动附本轮对话最近一张图
+    # (错题题图,持久存于服务端 uploads,供复习时原图对比)
+    image = str(fields.get("image") or "").strip()
+    if not image:
+        ctx_images = list(getattr(ctx, "images", None) or [])
+        if ctx_images:
+            image = ctx_images[-1]
     data = {
         "subject": subject,
         "topic": str(fields.get("topic") or "").strip(),
@@ -106,6 +117,7 @@ async def _add(db, ctx, fields: dict) -> str:
         "wrong_answer": str(fields.get("wrong_answer") or "").strip(),
         "correct_answer": str(fields.get("correct_answer") or "").strip(),
         "cause": str(fields.get("cause") or "").strip(),
+        "image": image,
         "stage": 1,
         "next_review_at": _next_review(1),
         "created_at": _now().isoformat(),
@@ -120,7 +132,12 @@ async def _add(db, ctx, fields: dict) -> str:
             "ok": True,
             "action": "add",
             "mistake_id": res["doc_id"],
-            "message": f"已录入错题本(第1轮),下次复习:{data['next_review_at'][:10]}",
+            "image": image,
+            "message": (
+                f"已录入错题本(第1轮,已附题图),下次复习:{data['next_review_at'][:10]}"
+                if image
+                else f"已录入错题本(第1轮),下次复习:{data['next_review_at'][:10]}"
+            ),
         }
     )
 
