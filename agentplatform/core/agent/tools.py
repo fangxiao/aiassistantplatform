@@ -22,7 +22,7 @@ OUTPUT_BLOCK_TOOL = {
                 },
                 "data": {
                     "type": "object",
-                    "description": "组件数据结构",
+                    "description": "组件数据结构——直接传对象,严禁序列化成 JSON 字符串(如 {\"code\": \"...\"} 而非 \"{\\\"code\\\": \\\"...\\\"}\")",
                 },
                 "meta": {
                     "type": "object",

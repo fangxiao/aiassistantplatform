@@ -336,3 +336,55 @@ class TestToolContextImages:
         )
         ctx_echo = json.loads(result.tool_traces[0].result)
         assert ctx_echo["images"] == ["https://ai-api.example.com/api/files/raw?path=/x.png&sig=y"]
+
+
+class TestOutputBlockDataNormalization:
+    """20261015:弱模型把 output_block 的 data 序列化成 JSON 字符串 → 组件空白。
+    服务端下发 block_meta 前必须归一化为对象。"""
+
+    async def test_string_data_normalized_to_object(self, session: AsyncSession) -> None:
+        fake = FakeClient([
+            [
+                StreamEvent(
+                    type="tool_call",
+                    tool_call=ToolCall(
+                        id="c1",
+                        name="output_block",
+                        arguments='{"type": "mermaid", "data": "{\\"code\\": \\"gantt\\\\n title 耗时\\"}"}',
+                    ),
+                ),
+                StreamEvent(type="done", message_id="m1", finish_reason="tool_calls"),
+            ],
+            [_text("见图"), StreamEvent(type="done", message_id="m2")],
+        ])
+        blocks = [
+            ev.block
+            async for ev in stream_agent(session, fake, resource_ids=[], user_message="画图")
+            if ev.type == "block_meta"
+        ]
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "mermaid"
+        assert isinstance(blocks[0]["data"], dict), f"data 应归一化为对象,实际 {type(blocks[0]['data'])}"
+        assert blocks[0]["data"]["code"].startswith("gantt")
+
+    async def test_object_data_untouched(self, session: AsyncSession) -> None:
+        fake = FakeClient([
+            [
+                StreamEvent(
+                    type="tool_call",
+                    tool_call=ToolCall(
+                        id="c1",
+                        name="output_block",
+                        arguments='{"type": "table", "data": {"columns": ["a"], "rows": [["1"]]}}',
+                    ),
+                ),
+                StreamEvent(type="done", message_id="m1", finish_reason="tool_calls"),
+            ],
+            [_text("见 表"), StreamEvent(type="done", message_id="m2")],
+        ])
+        blocks = [
+            ev.block
+            async for ev in stream_agent(session, fake, resource_ids=[], user_message="表")
+            if ev.type == "block_meta"
+        ]
+        assert blocks[0]["data"] == {"columns": ["a"], "rows": [["1"]]}

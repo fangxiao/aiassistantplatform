@@ -672,6 +672,13 @@ async def stream_agent(
         for tc in calls:
             if tc.name == "output_block":
                 block_data = _parse_args(tc.arguments)
+                # 20261015:弱模型常把 data 序列化成 JSON 字符串(而非对象)下发,
+                # 前端 block.data?.xxx 全取空 → 组件渲染空白("组件没渲染"高发根因)
+                if isinstance(block_data.get("data"), str):
+                    try:
+                        block_data["data"] = _parse_args(block_data["data"])
+                    except Exception:  # noqa: BLE001  非 JSON 字符串保持原样
+                        pass
                 trace = ToolTrace(
                     id="output_block",
                     args=block_data,
