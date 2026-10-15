@@ -22,6 +22,7 @@ function loadMermaid() {
 export function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [zoomed, setZoomed] = useState(false); // 20261015:点击放大查看
   const counter = useRef(0);
 
   useEffect(() => {
@@ -64,9 +65,25 @@ export function MermaidBlock({ code }: { code: string }) {
   }
 
   return (
-    <div
-      className="my-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-3"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    <>
+      <div
+        className="mermaid-box my-2 cursor-zoom-in overflow-x-auto rounded-lg border border-slate-200 bg-white p-3 transition hover:border-indigo-300"
+        onClick={() => setZoomed(true)}
+        title="点击放大查看"
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+      {zoomed && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-auto bg-black/70 p-6"
+          onClick={() => setZoomed(false)}
+        >
+          <div
+            className="mermaid-lightbox max-h-[88vh] w-fit max-w-[92vw] cursor-zoom-out rounded-xl bg-white p-6 shadow-2xl [&_svg]:!max-h-[80vh] [&_svg]:!max-w-none"
+            onClick={(e) => e.stopPropagation()}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
+      )}
+    </>
   );
 }

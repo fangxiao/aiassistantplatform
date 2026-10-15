@@ -5,7 +5,7 @@
  * - 非 mermaid 代码块不受影响
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import MarkdownRenderer from "./MarkdownRenderer";
 
 const block = (text: string) => ({ type: "markdown", data: { text } }) as any;
@@ -44,5 +44,19 @@ describe("MarkdownRenderer mermaid", () => {
     );
     expect(container.querySelector("pre")).toBeTruthy();
     expect(container.querySelector("svg")).toBeNull();
+  });
+});
+
+
+describe("MermaidBlock 点击放大(20261015)", () => {
+  it("点击图表出现全屏放大层,点击遮罩关闭", async () => {
+    const { container } = render(
+      <MarkdownRenderer block={block("```mermaid\n" + mermaidSource + "\n```")} />,
+    );
+    await waitFor(() => expect(container.querySelector("svg")).toBeTruthy());
+    fireEvent.click(container.querySelector(".mermaid-box")!);
+    expect(container.querySelector(".mermaid-lightbox")).toBeTruthy();
+    fireEvent.click(container.querySelector(".mermaid-lightbox")!.parentElement!);
+    expect(container.querySelector(".mermaid-lightbox")).toBeNull();
   });
 });
