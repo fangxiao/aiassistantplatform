@@ -78,10 +78,22 @@ export function MermaidBlock({ code }: { code: string }) {
           onClick={() => setZoomed(false)}
         >
           <div
-            className="mermaid-lightbox max-h-[88vh] w-fit max-w-[92vw] cursor-zoom-out rounded-xl bg-white p-6 shadow-2xl [&_svg]:!max-h-[80vh] [&_svg]:!max-w-none"
+            className="mermaid-lightbox relative max-h-[90vh] w-full max-w-6xl cursor-zoom-out overflow-auto rounded-xl bg-white p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+          >
+            <button
+              type="button"
+              onClick={() => setZoomed(false)}
+              className="absolute right-3 top-3 z-10 p-1 text-lg leading-none text-slate-400 transition hover:text-slate-700"
+              title="关闭"
+            >
+              ✕
+            </button>
+            <div
+              className="flex h-full w-full items-center justify-center [&_svg]:!h-auto [&_svg]:!max-h-[80vh] [&_svg]:!w-full"
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          </div>
         </div>
       )}
     </>
