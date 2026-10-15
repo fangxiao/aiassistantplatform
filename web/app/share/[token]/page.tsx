@@ -9,8 +9,14 @@ interface SharedMsg {
   blocks: any[];
 }
 
+// 方案 A 桥接(20261015):分享访客可跳转助手白牌页,轻注册拥有自己的工作台
+interface AssistantEntry {
+  name: string;
+  access_token: string;
+}
+
 export default function SharedConversation() {
-  const [data, setData] = useState<{ title: string; created_at: string; messages: SharedMsg[] } | null>(null);
+  const [data, setData] = useState<{ title: string; created_at: string; messages: SharedMsg[]; assistant?: AssistantEntry | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,6 +66,18 @@ export default function SharedConversation() {
                 </div>
               ))}
             </div>
+            {data.assistant && (
+              <div className="mt-8 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white p-6 text-center">
+                <div className="text-sm font-bold text-slate-800">觉得 {data.assistant.name} 有用?</div>
+                <p className="mt-1 text-xs text-slate-500">用你自己的账号和它继续对话,还能传文件、记待办、安排定时任务</p>
+                <a
+                  href={`/a/${data.assistant.access_token}`}
+                  className="mt-3 inline-block rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                >
+                  🚀 用这个助手开始我自己的对话
+                </a>
+              </div>
+            )}
           </>
         )}
         {!data && !error && <div className="py-16 text-center text-sm text-slate-400">加载分享内容...</div>}

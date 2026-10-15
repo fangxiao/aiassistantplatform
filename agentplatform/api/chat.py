@@ -969,8 +969,33 @@ async def view_shared(
         if m.role.value == "assistant" and not txt.strip():
             continue
         msgs.append({"role": m.role.value, "text": txt, "blocks": m.blocks or []})
+    # 方案 A 桥接(20261015):分享访客可一键跳转该助手的白牌页,轻注册后
+    # 拥有自己的账号与工作台。仅过审且启用的助手;无独立访问令牌则现生成
+    # (access_token 本就是"发给任何人打开"的落地语义,分享持有者已被
+    # 分享者授权进入漏斗,风险面不变)
+    assistant = None
+    if row.plugin_id:
+        from agentplatform.core.plugin.model import Plugin, PluginReviewStatus
+
+        plugin = await session.get(Plugin, row.plugin_id)
+        if (
+            plugin is not None
+            and str(plugin.status) == "PluginStatus.active"
+            and plugin.review_status == PluginReviewStatus.approved
+        ):
+            if not plugin.access_token:
+                import secrets as _secrets
+
+                plugin.access_token = _secrets.token_urlsafe(12)
+                await session.commit()
+            m = plugin.manifest or {}
+            assistant = {
+                "name": m.get("display_name") or m.get("title") or plugin.name,
+                "access_token": plugin.access_token,
+            }
     return {
         "title": row.title or "未命名会话",
         "created_at": row.created_at.isoformat(),
         "messages": msgs,
+        "assistant": assistant,
     }
