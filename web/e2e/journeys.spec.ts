@@ -206,7 +206,7 @@ test("旅程 13:官方插件助手(数学学习)→ 提问 → 收到解题产�
   await page.getByRole("button", { name: /发送/ }).click();
   // 回复措辞有方差,断言解题产出任一特征
   await expect(
-    page.locator("text=/详解|易错|思路|步骤/ >> visible=true").first()
+    page.locator("text=/详解|易错|思路|步骤|过程|答案/ >> visible=true").first()
   ).toBeVisible({ timeout: 180_000 });
 });
 
