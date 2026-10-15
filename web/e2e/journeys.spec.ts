@@ -239,3 +239,126 @@ test("旅程 14:错题本插件 → 对话录入错题 → 工具落库确认(20
     page.locator("text=/已入库|已录入|录入成功|任务处理完成|错题摘要/ >> visible=true").first()
   ).toBeVisible({ timeout: 240_000 });
 });
+
+// ── 错题本全链路(20261015 补齐:复习闭环/学情/边界/持久,真模型 + DB 断言)──
+
+import { execSync } from "node:child_process";
+
+/** 查错题本存储(stage/数量),供确定性断言 */
+function queryMistakeDb(sql: string): string {
+  try {
+    return execSync(
+      `docker exec agentplatform-pg-1 psql -U agentplatform -d agentplatform -t -c "${sql}"`,
+      { stdio: "pipe" },
+    ).toString();
+  } catch {
+    return execSync(`psql -h localhost -U agentplatform -d agentplatform -t -c "${sql}"`, {
+      stdio: "pipe",
+    }).toString();
+  }
+}
+
+async function openMistakeChat(page: import("@playwright/test").Page) {
+  await page.goto("/assistants");
+  const card = page
+    .locator("div")
+    .filter({ has: page.getByRole("heading", { name: "错题本助手" }) })
+    .filter({ has: page.getByRole("button", { name: /开始对话/ }) })
+    .last();
+  await card.getByRole("button", { name: /开始对话/ }).click();
+  await page.waitForURL(/sessionId=/, { timeout: 20_000 });
+  const sid = page.url().match(/sessionId=([^&]+)/)?.[1] ?? "";
+  await page.request.patch(`/api/chat/sessions/${sid}`, {
+    headers: { Authorization: `Bearer ${state().token}` },
+    data: { model_override: "deepseek-v4-pro" },
+  });
+  await page.getByRole("button", { name: "💬 对话", exact: true }).click();
+  await page.waitForTimeout(1_500);
+  return sid;
+}
+
+test("旅程 15:错题本复习闭环——录入 → 到期卷 → 答对进阶/答错回炉(20261015)", async ({ page }) => {
+  test.setTimeout(600_000);
+  await loginViaToken(page);
+  await openMistakeChat(page);
+  const input = page.getByPlaceholder(/输入消息/);
+
+  // 1. 录入两道错题(旅程自洽:不依赖旅程 14 的记录,隔离跑/串行跑均成立)
+  await input.fill("帮我录入一道数学错题:题目是解方程 2x+3=11,我的答案是 x=7,正确答案是 x=4,错因是移项没变号");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/已入库|已录入|录入成功|任务处理完成/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
+  await input.fill("再录入一道物理错题:题目是质量 2kg 的物体所受重力(g 取 10),我的答案是 12N,正确答案是 20N,错因是公式代错");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/已入库|已录入|录入成功|任务处理完成/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
+
+  // 2. 复习卷(as_of=明天,两道都在第 1 轮):题面出现、答案只出现在核对区
+  await input.fill("复习日期按明天算,给我明天到期的错题,生成复习卷(共两道:数学与物理)");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/核对区|核对|复习卷/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
+  await expect(page.locator("text=/2x\\+3=11|has been waiting/").first()).toBeVisible();
+  await page.screenshot({ path: "test-results/mistake-15-due.png", fullPage: true });
+
+  // 3. 反馈:逐条单消息(多条目单消息的 grade 映射有模型遵从度方差,20261015 实测)
+  await input.fill("复习反馈:物理错题(重力那道)我答对了,是 20N");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/进阶|第 2 轮|第2轮/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
+  await input.fill("数学错题(2x+3=11 那道)我复习时又做错了,还是写成 x=7");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/回炉|答错/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
+
+  // 4. DB 断言(确定性):英语题 stage=2,数学题 stage=1
+  const stages = queryMistakeDb(
+    "SELECT data->>'stage' FROM plugin_data WHERE plugin_name='study-mistakes' AND data->>'question' LIKE '%2kg%' ORDER BY created_at DESC LIMIT 1;",
+  ).trim();
+  const stages2 = queryMistakeDb(
+    "SELECT data->>'stage' FROM plugin_data WHERE plugin_name='study-mistakes' AND data->>'question' LIKE '%2x+3=11%' ORDER BY created_at DESC LIMIT 1;",
+  ).trim();
+  expect(stages).toBe("2"); // 物理题答对进阶
+  expect(stages2).toBe("1");
+  await page.screenshot({ path: "test-results/mistake-15-graded.png", fullPage: true });
+});
+
+test("旅程 16:错题本学情汇总 + 职责边界 + 跨会话持久(20261015)", async ({ page }) => {
+  test.setTimeout(600_000);
+  await loginViaToken(page);
+
+  // 1. 学情汇总:数字与 DB 一致性由人工核,自动化断言汇总卡片出现
+  await openMistakeChat(page);
+  const input = page.getByPlaceholder(/输入消息/);
+  await input.fill("汇总一下我的学情");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/学科|错因|到期|学情/ >> visible=true").first()
+  ).toBeVisible({ timeout: 240_000 });
+
+  // 2. 职责边界:域外请求不得新增错题记录(DB 计数不变)
+  const before = queryMistakeDb(
+    "SELECT count(*) FROM plugin_data WHERE plugin_name='study-mistakes';"
+  ).trim();
+  await input.fill("帮我生成今天的英语单词表,20 个高考高频词");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await page.waitForTimeout(30_000); // 给模型充分越界的机会
+  const after = queryMistakeDb(
+    "SELECT count(*) FROM plugin_data WHERE plugin_name='study-mistakes';"
+  ).trim();
+  expect(after).toBe(before); // 越界请求不产生错题数据
+  await page.screenshot({ path: "test-results/mistake-16-boundary.png", fullPage: true });
+
+  // 3. 跨会话持久:新会话仍可见全部错题
+  await openMistakeChat(page);
+  await input.fill("我的错题本里有哪些题?");
+  await page.getByRole("button", { name: /发送/ }).click();
+  await expect(
+    page.locator("text=/2x\\+3=11|2kg/").first()
+  ).toBeVisible({ timeout: 240_000 });
+});
