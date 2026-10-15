@@ -138,15 +138,24 @@ describe("MessageItem 连续同类工具折叠聚合(20261015 工单 1538-1e28fe
     expect(screen.queryAllByText(/信息搜索完成/).length).toBe(0);
   });
 
-  it("点击展开可见全部明细行", () => {
+  it("点击展开可见全部明细行,且带检索关键词入参摘要", () => {
+    const calls = Array.from({ length: 3 }, (_, i) => ({
+      id: `c${i}`,
+      name: "tool:kb_search",
+      args: { query: `消金场景规范 第${i + 1}篇` },
+      result: '{"ok": true}',
+    }));
     render(
       <MessageItem
-        message={{ id: "a2", role: "assistant", text: "结论", toolCalls: searchCalls(3) } as any}
+        message={{ id: "a2", role: "assistant", text: "结论", toolCalls: calls } as any}
         onSaveToKb={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByText(/信息搜索.{0,3}3 次已完成/));
     expect(screen.queryAllByText(/信息搜索完成/).length).toBe(3);
+    // 20261015 工单 1706-27e1c1:展开后可见每次调用的入参摘要
+    expect(screen.getByText(/关键词: 消金场景规范 第1篇/)).toBeTruthy();
+    expect(screen.getByText(/关键词: 消金场景规范 第3篇/)).toBeTruthy();
   });
 
   it("≤2 次同类调用保持平铺(不折叠)", () => {

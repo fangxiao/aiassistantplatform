@@ -352,18 +352,33 @@ function groupConsecutiveTools(
   return groups;
 }
 
+function toolArgsSummary(tc: ToolCallInfo): string {
+  // 20261015 工单 1706-27e1c1:展开态展示入参摘要——检索类显示关键词,
+  // 其余截取 JSON 前 80 字,便于判断是否在盲目重复调用
+  const args = tc.args;
+  if (!args || typeof args !== "object") return "";
+  const a = args as Record<string, unknown>;
+  if (typeof a.query === "string" && a.query.trim()) return `关键词: ${a.query}`;
+  if (typeof a.question === "string" && a.question.trim()) return `问题: ${a.question}`;
+  if (typeof a.text === "string" && a.text.trim()) return `输入: ${a.text}`;
+  const json = JSON.stringify(args);
+  return json === "{}" ? "" : json.slice(0, 80);
+}
+
 function ToolRow({
   tc,
   index,
   isStreaming,
   isLast,
   totalLen,
+  showArgs = false,
 }: {
   tc: ToolCallInfo;
   index: number;
   isStreaming: boolean;
   isLast: boolean;
   totalLen: number;
+  showArgs?: boolean; // 折叠组展开态传入:展示入参摘要
 }) {
   const isDone = isRowDone(tc, index, isStreaming, isLast, totalLen);
   const hasFailed = rowFailed(tc, isDone);
@@ -385,9 +400,17 @@ function ToolRow({
       <span className={`text-base ${isDone ? "" : "animate-spin"}`}>
         {isDone ? (hasFailed ? "❌" : "✅") : icon}
       </span>
-      <div className="flex flex-col">
+      <div className="flex min-w-0 flex-col">
         <span className="font-medium">{!isDone ? `正在${name}...` : hasFailed ? `${name}失败` : `${name}完成`}</span>
         {stepResult && <span className="mt-0.5 text-[11px] opacity-75">{stepResult}</span>}
+        {showArgs && (() => {
+          const summary = toolArgsSummary(tc);
+          return summary ? (
+            <span className="mt-0.5 truncate font-mono text-[10px] text-slate-500" title={summary}>
+              ⌗ {summary}
+            </span>
+          ) : null;
+        })()}
       </div>
     </div>
   );
@@ -441,7 +464,7 @@ function ToolGroupRow({
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5">
           {items.map(([tc, i]) => (
-            <ToolRow key={i} tc={tc} index={i} isStreaming={isStreaming} isLast={isLast} totalLen={totalLen} />
+            <ToolRow key={i} tc={tc} index={i} isStreaming={isStreaming} isLast={isLast} totalLen={totalLen} showArgs />
           ))}
         </div>
       )}
