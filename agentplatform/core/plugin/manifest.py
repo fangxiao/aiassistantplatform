@@ -24,6 +24,19 @@ class ResourceDef(BaseModel):
 
 
 
+class RecommendedSchedule(BaseModel):
+    """插件推荐的定时订阅(20261015 方案 A 轻量版)。
+
+    纯展示元数据:前端据此渲染「订阅」按钮,点击**物化为用户自己的定时任务**
+    (调度所有权不变,不改声明式调度架构)。"""
+    label: str  # 按钮与任务名,如「每日 token 情报」
+    prompt: str  # 物化任务的执行指令
+    schedule_type: str = "daily"  # daily / interval / weekly
+    daily_at: str | None = None  # "09:00"(schedule_type=daily)
+    weekly_day: int | None = None  # 1=周一(schedule_type=weekly)
+    interval_minutes: int | None = None  # schedule_type=interval
+
+
 class PluginManifest(BaseModel):
     """插件清单(对应 plugin.yaml)。"""
 
@@ -36,6 +49,8 @@ class PluginManifest(BaseModel):
     author: str | None = None
     model: str | None = None
     depends_on: list[str] = []
+    # 20261015 方案 A 轻量版:推荐订阅(前端渲染订阅按钮 → 物化用户级任务)
+    recommended_schedule: RecommendedSchedule | None = None
     # T18.3 插件级必经步骤:该插件任一 skill/tool 被执行即纳入终答校验
     # (覆盖"模型不经 skill 直接产出"的形态——writewx 二轮验收发现)
     required_tools: list[str] = []

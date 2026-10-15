@@ -18,7 +18,7 @@ class TestCapabilitiesCatalog:
         manifest = get_capabilities_manifest()
         assert manifest["platform"] == "AgentPlatform"
         assert len(manifest["builtin_skills"]) == 3
-        assert len(manifest["builtin_tools"]) == 13
+        assert len(manifest["builtin_tools"]) == 14  # 20261015 +notify_user
         assert len(manifest["content_blocks"]) >= 23
         assert len(CONTENT_BLOCKS_CATALOG) >= 23
 

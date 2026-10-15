@@ -33,6 +33,8 @@ from agentplatform.core.agent.image_gen import run as image_gen_run
 from agentplatform.core.agent.messages import build_messages, build_system_prompt
 from agentplatform.core.agent.text_fallback import _extract_html_fallback
 from agentplatform.core.agent.tools import build_tools
+from agentplatform.core.agent.notify_tool import NOTIFY_TOOL_ID
+from agentplatform.core.agent.notify_tool import run as notify_run
 from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
 from agentplatform.core.agent.web_search import run as web_search_run
 from agentplatform.core.kb.search_tool import KB_SEARCH_TOOL_ID, run_kb_search
@@ -434,6 +436,9 @@ async def stream_agent(
             if resource.id == WEB_SEARCH_TOOL_ID:
                 # 联网搜索:无 DB 依赖,纯网络调用(M15 P1)
                 return await web_search_run(args)
+            if resource.id == NOTIFY_TOOL_ID:
+                # 主动触达(20261015 方案 B):推送用户已配置通知通道
+                return await notify_run(args, user_id=owner_id)
             if resource.id == IMAGE_GEN_TOOL_ID:
                 # 文生图:无 DB 依赖,产物落盘 uploads 经 files 通道回 URL(M18)
                 return await image_gen_run(args)

@@ -147,6 +147,7 @@ async def agent_stream_for_session(
         resource_ids = [*resource_ids, KB_SEARCH_TOOL_ID]
     # 个人待办工具无条件注入(M14 AI 联动):平台级个人能力,不要求助手声明依赖
     from agentplatform.core.agent.http_action import HTTP_ACTION_TOOL_ID
+    from agentplatform.core.agent.notify_tool import NOTIFY_TOOL_ID
     from agentplatform.core.agent.web_search import WEB_SEARCH_TOOL_ID
     from agentplatform.core.memory.tool import MEMORY_TOOL_ID
     from agentplatform.core.workbench.todo_tool import WORKBENCH_TODO_TOOL_ID
@@ -157,6 +158,9 @@ async def agent_stream_for_session(
         resource_ids = [*resource_ids, MEMORY_TOOL_ID]
     if WEB_SEARCH_TOOL_ID not in resource_ids:
         resource_ids = [*resource_ids, WEB_SEARCH_TOOL_ID]
+    # 主动触达(20261015 方案 B):无条件注入,插件/用户均可调用推送通知
+    if NOTIFY_TOOL_ID not in resource_ids:
+        resource_ids = [*resource_ids, NOTIFY_TOOL_ID]
     if HTTP_ACTION_TOOL_ID not in resource_ids:
         resource_ids = [*resource_ids, HTTP_ACTION_TOOL_ID]
 

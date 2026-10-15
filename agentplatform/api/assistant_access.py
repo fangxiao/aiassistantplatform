@@ -65,6 +65,8 @@ async def access_info(
         "display_name": m.get("display_name") or m.get("title") or plugin.name,
         "description": m.get("description") or "",
         "guidance": m.get("guidance") or [],  # M39:插件方提供的白牌页引导语
+        # 20261015 方案 A 轻量版:推荐订阅(前端渲染「订阅」按钮 → 物化用户级任务)
+        "recommended_schedule": m.get("recommended_schedule"),
         "review_status": plugin.review_status.value,
     }
 
