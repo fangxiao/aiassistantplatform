@@ -55,3 +55,7 @@ web/e2e/.state.json
 web/test-results/
 web/playwright-report/
 .playwright-mcp/
+
+# 本地产物
+tsconfig.tsbuildinfo
+agentplatform.db
