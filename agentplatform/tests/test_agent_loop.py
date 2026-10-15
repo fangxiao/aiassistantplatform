@@ -388,3 +388,28 @@ class TestOutputBlockDataNormalization:
             if ev.type == "block_meta"
         ]
         assert blocks[0]["data"] == {"columns": ["a"], "rows": [["1"]]}
+
+
+class TestToolLimitExhaustion:
+    """20261015 工单 1901-3c0577:连续工具轮耗尽 MAX_ITERATIONS 且无终答轮,
+    须注入可见兜底提示(此前过渡语被剥离后正文为空 → SSE 空答复/NoneType 崩溃)。"""
+
+    async def test_exhaustion_injects_notice(self, session: AsyncSession) -> None:
+        await _register_echo(session)
+        # 两轮全部只调工具、无终答(max_iterations=2 耗尽)
+        rounds = [
+            [_call("tool:echo", '{"text": "a"}'), StreamEvent(type="done", message_id=f"m{i}", finish_reason="tool_calls")]
+            for i in range(2)
+        ]
+        fake = FakeClient(rounds)
+        result = await run_agent(session, fake, resource_ids=["tool:echo"], user_message="查资料", max_iterations=2)
+        assert "缩小问题范围" in result.text  # 兜底提示进入交付文本
+
+    async def test_final_answer_round_no_notice(self, session: AsyncSession) -> None:
+        await _register_echo(session)
+        fake = FakeClient([
+            [_call("tool:echo", '{"text": "a"}'), StreamEvent(type="done", message_id="m1", finish_reason="tool_calls")],
+            [_text("这是最终结论"), StreamEvent(type="done", message_id="m2")],
+        ])
+        result = await run_agent(session, fake, resource_ids=["tool:echo"], user_message="查资料")
+        assert result.text == "这是最终结论"  # 正常路径不受影响

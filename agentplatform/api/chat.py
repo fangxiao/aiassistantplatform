@@ -499,7 +499,12 @@ async def _checkpointed_agent_sse(
             _asyncio.get_running_loop().create_task(
                 _generate_title_logged(sid, title_source)
             )
-        done_payload = {"message_id": str(draft.id), "tokens": usage_total}
+        # 20261015 工单 1901-3c0577 防御:极端情况下(模型全程零产出)可能无草稿,
+        # 不得让 NoneType 解引用打崩 SSE
+        done_payload = {
+            "message_id": str(draft.id) if draft is not None else None,
+            "tokens": usage_total,
+        }
         if is_resume:
             done_payload["resume_of"] = str(draft.id)
         yield sse("done", done_payload)

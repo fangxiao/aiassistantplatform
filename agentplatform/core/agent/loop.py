@@ -126,6 +126,12 @@ _TRUNCATION_NOTICE = (
     '可回复「继续」让助手接着输出。'
 )
 
+# 20261015 工单 1901-3c0577:连续工具轮耗尽上限且无终答轮的用户可见兜底
+_TOOL_LIMIT_NOTICE = (
+    "\n\n> ⚠️ 已完成多轮资料检索,但未能在本轮内生成最终结论;"
+    "请尝试缩小问题范围或指定具体环节,我将基于已检索内容继续深入。"
+)
+
 
 async def run_agent(
     session: AsyncSession,
@@ -508,6 +514,7 @@ async def stream_agent(
         except Exception as exc:  # noqa: BLE001  执行失败回填给 LLM
             return f"执行错误: {exc}"
 
+    final_answer_seen = False  # 20261015:是否出现过终答轮(无工具调用的轮)
     for _ in range(max_iterations):
         delta_chunks: list[str] = []
         reasoning_chunks: list[str] = []
@@ -645,6 +652,7 @@ async def stream_agent(
                     )
                     continue
             # 没有工具调用: 本轮对话流式生成完毕，直接退出
+            final_answer_seen = True
             break
 
         # M39(20261014):LLM 偶尔生成非法 JSON 参数 → 下轮发给 LLM 被 400 拒绝;
@@ -847,6 +855,12 @@ async def stream_agent(
         yield AgentEvent(
             type="round_end", had_tool_calls=bool(calls), text="".join(delta_chunks)
         )
+
+    # 20261015 工单 1901-3c0577:连续工具轮耗尽上限且无终答轮——注入可见兜底。
+    # 此前所有轮文本均为工具过渡语,SSE 消费方剥离后正文为空 → 无草稿,
+    # done 引用 draft.id 抛 NoneType 打崩 SSE(会话空答复);定时路径产出空串。
+    if not final_answer_seen:
+        yield AgentEvent(type="delta", text=_TOOL_LIMIT_NOTICE)
 
     # 4. 自动落盘兜底:如果模型直接生成了 HTML 但未显式调用 preview 工具
     preview_res = next((res for rid, res in resources.items() if "preview" in rid), None)
