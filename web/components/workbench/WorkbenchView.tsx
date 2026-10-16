@@ -75,6 +75,9 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
             {new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}
             ·这里汇总你的助手、会话与知识库动态
           </p>
+          <p className="mt-1 text-xs font-medium text-indigo-600">
+            🧪 双环境验证线:如果你在本地看到我,而 agent.ailearning.top 上没有,说明「本地测 → 云端更」流程正常
+          </p>
         </div>
 
         {/* M37:按角色画像过滤卡片(多选并集) */}
