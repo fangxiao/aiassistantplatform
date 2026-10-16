@@ -413,3 +413,21 @@ class TestToolLimitExhaustion:
         ])
         result = await run_agent(session, fake, resource_ids=["tool:echo"], user_message="查资料")
         assert result.text == "这是最终结论"  # 正常路径不受影响
+
+
+class TestEmptyRoundGuard:
+    """20261017 旅程 12 实证:模型偶发完全空响应,此前照常落库空消息。
+    空轮原样重问一轮;连续两次才报错(走既有错误通道)。"""
+
+    async def test_empty_round_retried_then_answer(self, session: AsyncSession) -> None:
+        fake = FakeClient([
+            [],  # 完全空响应
+            [_text("这是正式回答"), StreamEvent(type="done", message_id="m2")],
+        ])
+        result = await run_agent(session, fake, resource_ids=[], user_message="问")
+        assert result.text == "这是正式回答"
+
+    async def test_two_empty_rounds_raise(self, session: AsyncSession) -> None:
+        fake = FakeClient([[], []])
+        with pytest.raises(AgentLoopError, match="连续返回空响应"):
+            await run_agent(session, fake, resource_ids=[], user_message="问", max_iterations=2)

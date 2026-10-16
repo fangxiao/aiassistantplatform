@@ -523,6 +523,7 @@ async def stream_agent(
             return f"执行错误: {exc}"
 
     final_answer_seen = False  # 20261015:是否出现过终答轮(无工具调用的轮)
+    empty_rounds = 0  # 20261017:连续空响应计数
     for _ in range(max_iterations):
         delta_chunks: list[str] = []
         reasoning_chunks: list[str] = []
@@ -605,6 +606,14 @@ async def stream_agent(
         # 以 markdown 文本输出(尤其长结构化推理时),原生 calls 为空则兜底提取
         if not calls:
             calls = _extract_text_tool_calls(accumulated_text, resources)
+
+        # 20261017 旅程 12 实证:模型偶发完全空响应(无正文/思考/工具调用),
+        # 此前照常落库空消息。原样重问一轮;连续两次空响应才报错(走既有错误通道)。
+        if not accumulated_text.strip() and not accumulated_reasoning and not calls:
+            empty_rounds += 1
+            if empty_rounds >= 2:
+                raise AgentLoopError("模型连续返回空响应(无正文/思考/工具调用)")
+            continue  # 空轮未入 messages,重试干净
 
         if not calls:
             # T18.3 编排保障:已执行 skill 的 required_tools 终答前校验;两类违规同款有界补调(一次):
