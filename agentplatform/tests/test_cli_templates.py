@@ -6,6 +6,7 @@ import pytest
 
 from agentplatform.cli.main import _init_from_template
 from agentplatform.cli.test_cases import run_tests
+from agentplatform.cli.main import _build_manifest
 from agentplatform.cli.validate import validate_project
 from agentplatform.cli_templates import TEMPLATES
 
@@ -48,3 +49,19 @@ def test_build_manifest_keeps_display_name(tmp_path):
     )
     m = _build_manifest(tmp_path, [])
     assert m["display_name"] == "演示助手"
+
+
+def test_build_manifest_passthrough_guidance_and_schedule(tmp_path):
+    """20261017:guidance/recommended_schedule 必须透传——此前每次部署被丢弃,
+    白牌页引导与订阅按钮全生态静默失效。"""
+    (tmp_path / "plugin.yaml").write_text(
+        "name: demo\nversion: 0.1.0\ndescription: d\n"
+        'guidance:\n  - "第一句"\n  - "第二句"\n'
+        "recommended_schedule:\n  label: 每日回顾\n  prompt: 出复习卷\n"
+        "  schedule_type: daily\n  daily_at: \"19:30\"\n",
+        encoding="utf-8",
+    )
+    m = _build_manifest(tmp_path, [])
+    assert m["guidance"] == ["第一句", "第二句"]
+    assert m["recommended_schedule"]["label"] == "每日回顾"
+    assert m["recommended_schedule"]["daily_at"] == "19:30"

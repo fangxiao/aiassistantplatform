@@ -90,12 +90,22 @@ export function Navbar() {
     }
   };
 
+  // 20261017:导航按角色收敛——普通用户(学生/家长)只看对话与广场;
+  // 知识库/开发者中心/系统诊断为 developer/admin 能力
+  const isPowerUser =
+    user?.role === "admin" ||
+    user?.role === "developer" ||
+    (user?.personas ?? []).includes("developer");
   const navLinks = [
     { href: "/", label: "💬 对话工作台" },
     { href: "/assistants", label: "🧩 助手广场" },
-    { href: "/kb", label: "📚 知识库" },
-    { href: "/developer", label: "🛠️ 开发者中心" },
-    { href: "/status", label: "🩺 系统诊断" },
+    ...(isPowerUser
+      ? [
+          { href: "/kb", label: "📚 知识库" },
+          { href: "/developer", label: "🛠️ 开发者中心" },
+          { href: "/status", label: "🩺 系统诊断" },
+        ]
+      : []),
     ...(user?.role === "admin" ? [{ href: "/admin", label: "⚙️ 管理后台" }] : []),
   ];
 
@@ -186,15 +196,17 @@ export function Navbar() {
           {authed && user ? (
             <div className="flex items-center gap-2">
               <NotificationBell />
-              <button
-                type="button"
-                onClick={() => setShowTokenModal(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition shadow-2xs"
-                title="查看与复制 BrowserAgent 插件连接 Token"
-              >
-                <span>🔌</span>
-                <span>插件连接</span>
-              </button>
+              {isPowerUser && (
+                <button
+                  type="button"
+                  onClick={() => setShowTokenModal(true)}
+                  className="hidden sm:flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition shadow-2xs"
+                  title="查看与复制 BrowserAgent 插件连接 Token"
+                >
+                  <span>🔌</span>
+                  <span>插件连接</span>
+                </button>
+              )}
 
               <div className="hidden sm:flex flex-col text-right text-xs">
                 <span className="font-medium text-slate-800">{user.email}</span>

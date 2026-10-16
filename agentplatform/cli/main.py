@@ -631,6 +631,10 @@ def _build_manifest(root: Path, resources: list[dict]) -> dict:
         "model": raw.get("model"),
         "depends_on": raw.get("depends_on", []),
         "required_tools": [str(x) for x in (raw.get("required_tools") or [])],
+        # 20261017 工单级修复:guidance/recommended_schedule 此前每次部署被丢弃,
+        # 白牌页引导与订阅按钮全生态静默失效(M39 起即如此)
+        "guidance": [str(x) for x in (raw.get("guidance") or [])],
+        "recommended_schedule": raw.get("recommended_schedule"),
         "skills": by_kind["skill"],
         "tools": by_kind["tool"],
     }

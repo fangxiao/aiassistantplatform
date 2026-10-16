@@ -105,7 +105,7 @@ export function TasksCard({
                     </button>
                   </td>
                   <td className="px-1 py-1.5">
-                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                    <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-medium ${
                       s.source === "scheduled"
                         ? "border border-indigo-200 bg-indigo-50 text-indigo-600"
                         : "border border-slate-200 bg-slate-50 text-slate-500"

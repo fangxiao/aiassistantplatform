@@ -82,11 +82,15 @@ export function WorkbenchView({ assistants, sessions, onNewSession, onContinue, 
           const cards = visibleCards();
           return (
             <>
-        {/* 快捷操作 */}
+        {/* 快捷操作;20261017:知识库类入口仅 power user 可见(与导航收敛一致) */}
         <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <QuickAction icon="💬" title="新会话" desc="选一个助手开始" onClick={() => onNewSession()} />
-          <QuickAction icon="📖" title="问知识库" desc="检索调试 / 管理库" onClick={onOpenKb} />
-          <QuickAction icon="⬆️" title="上传文档" desc="进知识库页选择库" onClick={onOpenKb} />
+          {cards.has("kb") && (
+            <>
+              <QuickAction icon="📖" title="问知识库" desc="检索调试 / 管理库" onClick={onOpenKb} />
+              <QuickAction icon="⬆️" title="上传文档" desc="进知识库页选择库" onClick={onOpenKb} />
+            </>
+          )}
         </div>
 
         {/* 空状态三步引导(T14.8):新用户首次进入时替代"空卡片"观感 */}

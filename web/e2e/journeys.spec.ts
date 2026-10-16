@@ -362,3 +362,56 @@ test("旅程 16:错题本学情汇总 + 职责边界 + 跨会话持久(20261015)
     page.locator("text=/2x\\+3=11|2kg/").first()
   ).toBeVisible({ timeout: 240_000 });
 });
+
+// ── 学生自助闭环(20261017 批次 1:推荐订阅 / 我的订阅 / 导航收敛)──
+
+test("旅程 17:错题本白牌页订阅 → 时间可选 → 我的订阅可见 → 可删除(20261017)", async ({ page }) => {
+  test.setTimeout(300_000);
+  await loginViaToken(page);
+  await page.goto("/a/k2Rz64nIjhb5SPq6");
+  await expect(page.getByText("错题本助手").first()).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: /🔔 订阅/ }).click();
+  await page.locator('input[type="time"]').fill("20:15");
+  await page.getByRole("button", { name: /确认订阅/ }).click();
+  await expect(page.getByText(/已订阅/).first()).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "我的", exact: true }).click();
+  await expect(page.getByText("每日错题回顾").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/20:15/).first()).toBeVisible();
+  await page.getByRole("button", { name: "删除" }).first().click();
+  await expect(page.getByText(/暂无订阅/).first()).toBeVisible({ timeout: 15_000 });
+});
+
+test("旅程 18:导航按角色收敛——普通用户无开发者入口,developer 全量(20261017)", async ({ page }) => {
+  await loginViaToken(page); // personas=developer
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: /开发者中心/ }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("link", { name: /知识库/ }).first()).toBeVisible();
+
+  // 普通学生:服务端 personas 改 student + 独立新页面(干净 init)
+  const s = state();
+  await page.request.patch("http://localhost:8000/api/auth/me/personas", {
+    headers: { Authorization: `Bearer ${s.token}` },
+    data: { personas: ["student"] },
+  });
+  const p2 = await page.context().newPage();
+  await p2.addInitScript(
+    ([t, u]) => {
+      localStorage.setItem("agentplatform_token", t!);
+      localStorage.setItem("agentplatform_user", u!);
+    },
+    [s.token, JSON.stringify({ email: s.email, role: "user", personas: ["student"] })],
+  );
+  await p2.goto("/");
+  await expect(p2.getByText("会话中心").first()).toBeVisible({ timeout: 20_000 });
+  await p2.waitForLoadState("networkidle"); // 等角色实时校准(/auth/me)完成
+  const nav = p2.getByRole("banner");
+  await expect(nav.getByRole("link", { name: /开发者中心/ })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: /知识库/ })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: /对话工作台/ }).first()).toBeVisible();
+  await p2.close();
+  // 还原服务端 personas(developer,供后续旅程)
+  await page.request.patch("http://localhost:8000/api/auth/me/personas", {
+    headers: { Authorization: `Bearer ${s.token}` },
+    data: { personas: ["developer"] },
+  });
+});

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Composer from "../../../components/chat/Composer";
 import MessageList from "../../../components/chat/MessageList";
 import { MyFilesCard } from "../../../components/workbench/MyFilesCard";
+import { MySubscriptionsCard } from "../../../components/workbench/MySubscriptionsCard";
 import { TodoCard } from "../../../components/workbench/TodoCard";
 import { API_BASE, getAuthHeader } from "../../../lib/api/client";
 import type { ChatMessage, ContentBlock, ToolCallInfo } from "../../../lib/types";
@@ -54,7 +55,9 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
   const [streaming, setStreaming] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [showMine, setShowMine] = useState(false); // 20261015:访客个人空间抽屉(我的文件/待办)
-  const [subscribed, setSubscribed] = useState<string | null>(null); // 订阅成功提示(方案 A 轻量版)
+  const [showSubscribe, setShowSubscribe] = useState(false); // 20261017:订阅弹窗(时间可选,默认 19:30)
+  const [subTime, setSubTime] = useState("19:30");
+  const [subMsg, setSubMsg] = useState<string | null>(null);
   const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -155,9 +158,9 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
   };
 
   // 3.5 推荐订阅(20261015 方案 A 轻量版):物化为用户自己的定时任务
-  const subscribe = async () => {
+  const subscribe = async (dailyAt: string) => {
     const rs = info?.recommended_schedule;
-    if (!rs || !currentSessionId && !localStorage.getItem("agentplatform_token")) return;
+    if (!rs || !localStorage.getItem("agentplatform_token")) return;
     try {
       const resp = await fetch(`${API_BASE}/scheduler/tasks`, {
         method: "POST",
@@ -167,16 +170,17 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
           kind: "custom",
           prompt: rs.prompt,
           schedule_type: rs.schedule_type,
-          daily_at: rs.daily_at ?? undefined,
+          daily_at: rs.schedule_type === "daily" ? dailyAt : rs.daily_at ?? undefined,
           weekly_day: rs.weekly_day ?? undefined,
           interval_minutes: rs.interval_minutes ?? undefined,
           plugin_id: info?.plugin_id,
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setSubscribed(`✅ 已订阅「${rs.label}」,到点自动运行并推送`);
+      setSubMsg(`✅ 已订阅「${rs.label}」,每天 ${dailyAt} 到点自动运行`);
+      setShowSubscribe(false);
     } catch {
-      setSubscribed("❌ 订阅失败,请稍后再试");
+      setSubMsg("❌ 订阅失败,请稍后再试");
     }
   };
 
@@ -395,19 +399,19 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
         >
           我的
         </button>
-        {info?.recommended_schedule && !subscribed && (
+        {info?.recommended_schedule && !showSubscribe && (
           <button
             type="button"
-            onClick={() => void subscribe()}
+            onClick={() => { setSubMsg(null); setShowSubscribe(true); }}
             className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100"
             title={`定时运行「${info.recommended_schedule.label}」`}
           >
             🔔 订阅
           </button>
         )}
-        {subscribed && (
+        {subMsg && (
           <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] text-emerald-700">
-            {subscribed}
+            {subMsg}
           </span>
         )}
         {showSessions && (
@@ -460,6 +464,37 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
           />
         )}
       </main>
+      {/* 20261017:订阅弹窗——推荐节奏 + 时间可选(默认 19:30) */}
+      {showSubscribe && info?.recommended_schedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSubscribe(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-slate-800">🔔 订阅{info.recommended_schedule.label}</h3>
+            <p className="mt-1 text-[11px] text-slate-400">到点自动出复习卷,可随时在「我的」中停用</p>
+            <label className="mt-4 block text-[11px] font-semibold text-slate-600">
+              每天运行时间
+              <input
+                type="time"
+                value={subTime}
+                onChange={(e) => setSubTime(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500"
+              />
+            </label>
+            {subMsg && <p className="mt-2 text-[11px] text-rose-500">{subMsg}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowSubscribe(false)} className="rounded-lg border border-slate-200 px-4 py-1.5 text-xs text-slate-600">
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void subscribe(subTime)}
+                className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+              >
+                确认订阅
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 20261015:访客个人空间抽屉——白牌页保持纯聊天定位,个人能力以抽屉承载 */}
       {showMine && (
         <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={() => setShowMine(false)}>
@@ -478,6 +513,8 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
               </button>
             </div>
             <div className="space-y-3">
+              {/* 20261017:我的订阅(该助手下当前用户的定时任务,可启停/删除) */}
+              <MySubscriptionsCard pluginId={info?.plugin_id ?? ""} />
               <MyFilesCard full />
               <TodoCard full />
             </div>
