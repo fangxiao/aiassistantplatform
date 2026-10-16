@@ -7,6 +7,15 @@ plugin_data 表(jsonb)。
 
 过滤/排序均在 data->>field 的文本层做(ISO 日期字符串的字典序即时间序),
 单用户量级足够;更复杂的查询是插件自己该在文档结构里规避的事。
+
+插件侧使用须知(20261016 savetoken spike 实测,工单 1623-68129f):
+- 算子:eq/ne/gt/gte/lt/lte/in/not_in(in/not_in 的值须为非空序列)
+- order_by 按 data->>field 的**文本比较**:日期字段须存 ISO 字符串
+- desc **默认 True**(最新在前);查"最早到期"须显式传 desc=False
+- limit 静默截断至 ≤500:超出会被截而不报错,大量数据请分页/分批
+- put_doc 返回含 created: bool,可做幂等判定;doc_id 可自定义且有唯一约束
+  (用业务键作 doc_id 天然去重)
+- Context 不含 db:非 FastAPI 场景用 core.db.engine.SessionLocal() 自取会话
 """
 
 import uuid
@@ -19,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentplatform.core.storage.model import PluginData
 
 # 允许的过滤算子(文本比较)
-_OPS = {"eq", "ne", "gt", "gte", "lt", "lte"}
+_OPS = {"eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"}  # 20261016 工单 1623-68129f:补 in/not_in(多状态筛选, Savetoken spike 实测缺失)
 
 
 def _text_col(field: str):
@@ -33,14 +42,21 @@ def _apply_filters(stmt, filters: list[tuple[str, str, object]] | None):
             raise ValueError(f"不支持的过滤算子: {op}")
         col = _text_col(field)
         v = str(value)
-        stmt = {
-            "eq": stmt.where(col == v),
-            "ne": stmt.where(col != v),
-            "gt": stmt.where(col > v),
-            "gte": stmt.where(col >= v),
-            "lt": stmt.where(col < v),
-            "lte": stmt.where(col <= v),
-        }[op]
+        if op in ("in", "not_in"):
+            # 20261016 工单 1623-68129f:值须为序列(各元素按文本比较)
+            if not isinstance(value, (list, tuple, set)) or not value:
+                raise ValueError(f"{op} 的值必须为非空序列,收到: {value!r}")
+            vals = [str(x) for x in value]
+            stmt = stmt.where(col.in_(vals) if op == "in" else col.not_in(vals))
+        else:
+            stmt = {
+                "eq": stmt.where(col == v),
+                "ne": stmt.where(col != v),
+                "gt": stmt.where(col > v),
+                "gte": stmt.where(col >= v),
+                "lt": stmt.where(col < v),
+                "lte": stmt.where(col <= v),
+            }[op]
     return stmt
 
 
