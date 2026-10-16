@@ -184,6 +184,8 @@ async def agent_stream_for_session(
     effective_message = (
         f"{doc_context}\n\n---\n\n用户问题: {user_message}" if doc_context else user_message
     )
+    # LLM 载荷内联图片(网关零外拉);ctx/落库仍用原 URL
+    llm_images = [_inline_image(u) for u in (images or [])]
     async for ev in stream_agent(
         session,
         client,
@@ -196,12 +198,39 @@ async def agent_stream_for_session(
         allowed_kb_ids=allowed_kb_ids,
         memories=memories,
         images=images,
+        inline_images=llm_images,
         chat_session_id=str(session_id),
     ):
         yield ev
 
 
 _MAX_DOC_CONTEXT_CHARS = 30000  # 即问文档截断;更大请引导用户入知识库
+
+
+def _inline_image(url: str) -> str:
+    """服务端文件图片 → base64 data URL(20261016 网关 401 根治)。
+
+    此前带图对话把签名 URL 交给网关外拉:文件在哪个环境就只在哪个环境存在
+    (本地测试的图云端没有),跨环境必 401。内联后网关零外拉,本地/云端对称。
+    data:URL 与非平台 URL 原样透传;读不到文件时原样返回(不阻塞对话)。
+    """
+    import base64
+    import mimetypes
+    from pathlib import Path as _Path
+    from urllib.parse import parse_qs, urlparse
+
+    try:
+        parsed = urlparse(url)
+        if not parsed.path.startswith("/api/files/raw"):
+            return url
+        local = _Path(parse_qs(parsed.query).get("path", [""])[0])
+        if not local.exists() or not local.is_file():
+            return url
+        mime = mimetypes.guess_type(str(local))[0] or "image/png"
+        b64 = base64.b64encode(local.read_bytes()).decode()
+        return f"data:{mime};base64,{b64}"
+    except Exception:  # noqa: BLE001  任何异常原样透传,不阻塞
+        return url  # 即问文档截断;更大请引导用户入知识库
 
 
 async def _load_doc_context(docs: list[str] | None) -> str:

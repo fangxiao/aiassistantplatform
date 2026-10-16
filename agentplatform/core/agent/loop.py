@@ -150,6 +150,9 @@ async def run_agent(
     include_output_block: bool = True,
     allow_reasoning_fallback: bool = True,
     images: list[str] | None = None,
+    # 20261016:LLM 载荷专用图片(base64 内联形态);与 images(URL,供工具 ctx)
+    # 分离——错题带图存 URL,视觉载荷传 data URL,两者形态不同必须分流
+    inline_images: list[str] | None = None,
 ) -> AgentResult:
     """聚合版调度循环(非流式,兼容旧调用)。"""
     text_parts: list[str] = []
@@ -176,6 +179,7 @@ async def run_agent(
         include_output_block=include_output_block,
         allow_reasoning_fallback=allow_reasoning_fallback,
         images=images,
+        inline_images=inline_images,
     ):
         if ev.type == "delta" and ev.text:
             round_buf.append(ev.text)
@@ -240,6 +244,7 @@ async def stream_agent(
     allowed_kb_ids: list[uuid.UUID] | None = None,
     memories: list[str] | None = None,
     images: list[str] | None = None,
+    inline_images: list[str] | None = None,
     display_name: str | None = None,
     chat_session_id: str | None = None,
     system_prompt: str | None = None,
@@ -290,7 +295,10 @@ async def stream_agent(
             list(resources.values()), plugin_desc=plugin_desc, memories=memories,
             display_name=display_name,
         )
-    messages = build_messages(system, history, user_message, images=images)
+    messages = build_messages(
+        system, history, user_message,
+        images=inline_images if inline_images is not None else images,
+    )
 
     import asyncio
     skill_delta_queue: asyncio.Queue[str | None] = asyncio.Queue()
