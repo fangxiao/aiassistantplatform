@@ -89,8 +89,15 @@ async def lifespan(app: FastAPI):
     connector_scheduler.start()
     # M15:定时任务(agent run)调度器(设计 011 §3)
     from agentplatform.core.scheduler import scheduler as task_scheduler
+    from agentplatform.config import settings as _s
 
-    task_scheduler.start()
+    if not _s.scheduler_enabled:
+        import logging as _log
+        _log.getLogger(__name__).info("调度器已按配置关闭(SCHEDULER_ENABLED=false),跳过启动")
+        task_scheduler = None
+
+    if task_scheduler is not None:
+        task_scheduler.start()
     # M22:飞书通道(配置凭证才启动,WebSocket 长连接)
     from agentplatform.core.channel import feishu as feishu_channel
 

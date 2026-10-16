@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # 单次补全输出预算(含推理模型的 reasoning token——GLM-5 系 thinking 计入同账,
     # 多步编排下 8192 曾致最终答复被截断;20260928-1027 起可配,默认 16384)
     llm_max_tokens: int = 16384
+    # 20261017:调度器开关——本地开发机必须关闭,否则与云端生产调度器
+    # 双执行同一批用户任务(重复运行/重复推送/竞态写状态,20261017 凌晨实证)
+    scheduler_enabled: bool = True
     available_models: str = '["auto"]'
     multimodal_model: str = "auto"
 
