@@ -188,12 +188,18 @@ async def _grade(db, ctx, fields: dict) -> str:
     )
     await db.commit()
     verdict = "✅ 答对,进阶" if correct else "🔁 答错,回炉"
+    # 20261015:留存钩子——答对后建议变式练习(答错回炉自身已是复习,不加)
+    hook = (
+        "。要不要来一道同考点的变式题练练手?说「来一道」即可"
+        if correct
+        else ""
+    )
     return _result(
         {
             "ok": True,
             "action": "grade",
             "mistake_id": mistake_id,
-            "message": f"{verdict}:第{stage}轮,下次复习:{doc['next_review_at'][:10]}",
+            "message": f"{verdict}:第{stage}轮,下次复习:{doc['next_review_at'][:10]}{hook}",
             "stage": stage,
         }
     )

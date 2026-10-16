@@ -1,9 +1,14 @@
 name: study-mistakes
 display_name: "错题本助手"
-version: 0.2.1
-description: "错题录入、按记忆曲线(艾宾浩斯)每日复习、学情汇总。数据经平台插件存储原语按用户隔离;复习节奏 1/2/4/7/15 天,答对进阶、答错回炉。"
+version: 0.2.2
+description: "不用抄的错题本——拍一下,错题自己进去;到点了,复习自动找你。艾宾浩斯记忆曲线排期(1/2/4/7/15 天),答对进阶、答错回炉,学情错因看得见。坚持这件事,外包给系统。"
 author: AgentPlatform Official
 model: auto
+guidance:
+  - "📷 拍一道你最近做错的题,我来录入(不用抄,10 秒搞定)"
+  - "今天有哪些到期错题?给我出复习卷"
+  - "分析一下我的错因,哪类题最容易错"
+  - "汇总一下我的学情"
 depends_on: []
 skills: []
 tools:
