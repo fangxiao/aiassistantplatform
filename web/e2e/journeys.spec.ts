@@ -157,6 +157,7 @@ test("旅程 11:每周任务(周报)创建 → 显示每周周一(20261010 对�
 });
 
 test("旅程 12:官方插件助手(英语学习)→ 提问 → 收到技能产出(20261011 M2)", async ({ page }) => {
+  test.setTimeout(300_000); // auto 池路由到慢模型时 180s 不够(20261017 实测,同旅程 14)
   await loginViaToken(page);
   await page.goto("/assistants");
   const card = page
