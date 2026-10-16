@@ -12,12 +12,22 @@ import { TodoCard } from "../../../components/workbench/TodoCard";
 import { API_BASE, getAuthHeader } from "../../../lib/api/client";
 import type { ChatMessage, ContentBlock, ToolCallInfo } from "../../../lib/types";
 
+interface RecommendedSchedule {
+  label: string;
+  prompt: string;
+  schedule_type: string;
+  daily_at?: string | null;
+  weekly_day?: number | null;
+  interval_minutes?: number | null;
+}
+
 interface AccessInfo {
   plugin_id: string;
   name: string;
   display_name: string;
   description: string;
   guidance?: string[]; // M39:插件方提供的引导语
+  recommended_schedule?: RecommendedSchedule | null; // 20261015 方案 A 轻量版
 }
 
 interface SessionMeta {
@@ -44,6 +54,7 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
   const [streaming, setStreaming] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [showMine, setShowMine] = useState(false); // 20261015:访客个人空间抽屉(我的文件/待办)
+  const [subscribed, setSubscribed] = useState<string | null>(null); // 订阅成功提示(方案 A 轻量版)
   const [sessionList, setSessionList] = useState<SessionMeta[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -141,6 +152,32 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
     localStorage.setItem("agentplatform_user", JSON.stringify(d.user));
     setNeedJoin(false);
     createNewSession(info.plugin_id).catch(() => setError("会话创建失败"));
+  };
+
+  // 3.5 推荐订阅(20261015 方案 A 轻量版):物化为用户自己的定时任务
+  const subscribe = async () => {
+    const rs = info?.recommended_schedule;
+    if (!rs || !currentSessionId && !localStorage.getItem("agentplatform_token")) return;
+    try {
+      const resp = await fetch(`${API_BASE}/scheduler/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({
+          name: rs.label,
+          kind: "custom",
+          prompt: rs.prompt,
+          schedule_type: rs.schedule_type,
+          daily_at: rs.daily_at ?? undefined,
+          weekly_day: rs.weekly_day ?? undefined,
+          interval_minutes: rs.interval_minutes ?? undefined,
+          plugin_id: info?.plugin_id,
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      setSubscribed(`✅ 已订阅「${rs.label}」,到点自动运行并推送`);
+    } catch {
+      setSubscribed("❌ 订阅失败,请稍后再试");
+    }
   };
 
   // 4. 发送(SSE 流式);20261015 修复:此前 onSend 只取文本,images/docs 被
@@ -358,6 +395,21 @@ export default function AssistantAccessPage({ params }: { params: { token: strin
         >
           我的
         </button>
+        {info?.recommended_schedule && !subscribed && (
+          <button
+            type="button"
+            onClick={() => void subscribe()}
+            className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100"
+            title={`定时运行「${info.recommended_schedule.label}」`}
+          >
+            🔔 订阅
+          </button>
+        )}
+        {subscribed && (
+          <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] text-emerald-700">
+            {subscribed}
+          </span>
+        )}
         {showSessions && (
           <div className="absolute right-4 top-full z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
             {sessionList.map((s) => (
