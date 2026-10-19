@@ -83,20 +83,23 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001  DB 未就绪不阻塞启动(迁移后重启即恢复)
         logger.warning("管理员 bootstrap 跳过: %s", exc)
     await kb_pipeline.start_worker()
-    # M13:连接器轮询调度器(启动即扫一轮,重启恢复;设计 009 §6)
-    from agentplatform.core.kb.connectors import scheduler as connector_scheduler
+    # 20261019:两个调度器(任务/KB 连接器)统一受 SCHEDULER_ENABLED 控制——
+    # 本地开发机关闭,避免与云端生产调度器双执行(凌晨实证)
+    from agentplatform.config import settings as _settings
+    import logging as _log
 
-    connector_scheduler.start()
-    # M15:定时任务(agent run)调度器(设计 011 §3)
-    from agentplatform.core.scheduler import scheduler as task_scheduler
-    from agentplatform.config import settings as _s
+    if not _settings.scheduler_enabled:
+        _log.getLogger(__name__).info(
+            "调度器已按配置关闭(SCHEDULER_ENABLED=false):任务与 KB 连接器均不启动"
+        )
+    else:
+        # M13:连接器轮询调度器(启动即扫一轮,重启恢复;设计 009 §6)
+        from agentplatform.core.kb.connectors import scheduler as connector_scheduler
 
-    if not _s.scheduler_enabled:
-        import logging as _log
-        _log.getLogger(__name__).info("调度器已按配置关闭(SCHEDULER_ENABLED=false),跳过启动")
-        task_scheduler = None
+        connector_scheduler.start()
+        # M15:定时任务(agent run)调度器(设计 011 §3)
+        from agentplatform.core.scheduler import scheduler as task_scheduler
 
-    if task_scheduler is not None:
         task_scheduler.start()
     # M22:飞书通道(配置凭证才启动,WebSocket 长连接)
     from agentplatform.core.channel import feishu as feishu_channel
