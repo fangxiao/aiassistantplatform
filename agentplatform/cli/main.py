@@ -1137,7 +1137,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print("✗ Base URL 必填,退出")
         return 1
     api_key = ask("API Key")
-    default_model = ask("默认模型名", "glm-5.3-flash")
+    default_model = ask("默认模型名", "auto")  # 20261019:glm-5.3-flash 网关已下线,统一 auto
     multimodal = ask("多模态模型名(可空)")
     with_search = ask("启用免费联网搜索(需出公网)y/N", "n").lower().startswith("y")
 
