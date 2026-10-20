@@ -59,3 +59,6 @@ web/playwright-report/
 # 本地产物
 tsconfig.tsbuildinfo
 agentplatform.db
+
+# playwright 根级运行产物(web/ 子目录已有同类规则)
+/test-results/

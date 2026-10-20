@@ -155,3 +155,25 @@ export async function createScheduledTask(page: Page, name: string, prompt: stri
   await clickStable(page, "创建任务");
   await expect(page.getByText(name).first()).toBeVisible({ timeout: 15_000 });
 }
+
+/** 测试后清理 E2E 定时任务:遗留任务会被调度器长期空烧网关
+ * (20261019 实证:云端积了 103 个历史 E2E 任务,每日 16:00 齐发 76+ 次 LLM 调用)。
+ * e2e 只跑本地,故固定打 localhost:8000;非 2xx 静默跳过,不掩盖测试本身结果。 */
+export async function cleanupE2eScheduledTasks(page: Page) {
+  const token = state().token;
+  if (!token) return;
+  const base = "http://localhost:8000/api/scheduler";
+  const auth = { headers: { Authorization: `Bearer ${token}` } };
+  try {
+    const resp = await page.request.get(`${base}/tasks`, auth);
+    if (!resp.ok()) return;
+    const tasks = (await resp.json()) as { id: string; name: string }[];
+    for (const t of tasks) {
+      if (t.name.startsWith("E2E")) {
+        await page.request.delete(`${base}/tasks/${t.id}`, auth);
+      }
+    }
+  } catch {
+    /* 清理失败不影响测试结论 */
+  }
+}

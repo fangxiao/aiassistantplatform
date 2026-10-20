@@ -4,6 +4,7 @@ import {
   clickStable,
   createWeeklyTask,
   createScheduledTask,
+  cleanupE2eScheduledTasks,
   loginViaToken,
   registerAndLogin,
   runLatestTask,
@@ -16,6 +17,12 @@ import {
  */
 
 test.describe.configure({ mode: "serial" });
+
+// 防复发:每个旅程结束后删除 E2E 前缀的定时任务,
+// 避免遗留任务被调度器长期空烧网关(20261019 云端 103 个遗留任务实证)
+test.afterEach(async ({ page }) => {
+  await cleanupE2eScheduledTasks(page);
+});
 
 test("旅程 1:邀请码注册 → 登录 → 工作台", async ({ page }) => {
   await registerAndLogin(page);
