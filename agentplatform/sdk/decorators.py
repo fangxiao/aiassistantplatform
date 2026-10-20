@@ -74,14 +74,19 @@ def tool(
     return decorate
 
 
-def as_tool_callable(obj: Any) -> Callable[[dict], str]:
-    """把 @tool 装饰的对象统一为 run(args)->str 调用。"""
+def as_tool_callable(obj: Any) -> Callable[..., Any]:
+    """把 @tool 装饰的对象统一为可调用;返回值交由执行器归一化(await/str)。
+
+    此处不得提前 str() 包装:async 工具返回 coroutine,提前 str() 会把它变成
+    "<coroutine object ...>",执行器的 __await__ 检查永远命不中,真实逻辑不执行
+    (20261016 savetoken 工单 20261016-2303-3e006b 实证)。
+    """
     if isinstance(obj, type) and issubclass(obj, Tool):
         return lambda args: obj().run(args)
     if isinstance(obj, type):
-        return lambda args: cast(str, obj().run(args))
+        return lambda args: obj().run(args)
     if callable(obj):
-        return lambda args: str(obj(**args)) if args else str(obj())
+        return lambda args: obj(**args) if args else obj()
     raise TypeError(f"无法作为 tool 调用: {obj!r}")
 
 

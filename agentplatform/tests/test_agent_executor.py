@@ -44,6 +44,16 @@ class TestExecuteTool:
         with pytest.raises(AgentExecError, match="run"):
             await execute_tool(_row("tool:summarize", BUILTIN_SUMMARIZE), {})  # skill 模块无 run
 
+    async def test_registry_path_supports_async_tool(self) -> None:
+        # savetoken 工单(20261016-2303-3e006b)回归:as_tool_callable 不得提前
+        # str() 吞掉 coroutine,否则 async 工具在模块注册表路径返回
+        # "<coroutine object ...>" 而非真实结果。
+        result = await execute_tool(
+            _row("tool:async_echo", "agentplatform.tests.fixtures.impl_tool_async"),
+            {"text": "hi"},
+        )
+        assert result == "echo:hi"
+
 
 class TestExecuteSkill:
     async def test_prompt_template_then_llm_call(self) -> None:
